@@ -194,6 +194,11 @@ int usb_core_run(int sock, usb_device_t *dev)
         return -1;
     }
     LOG_INFO("Peer hello: \"%.63s\"", (char *)payload);
+    if (len >= sizeof(usbredir_hello_header)) {
+        uint32_t peer_caps;
+        memcpy(&peer_caps, payload + 64, sizeof(peer_caps));
+        LOG_DEBUG("peer capabilities[0]=0x%08x", peer_caps);
+    }
     if (send_hello(sock) < 0)
         return -1;
 

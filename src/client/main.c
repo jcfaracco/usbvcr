@@ -29,6 +29,7 @@ static usb_device_t *create_device(const char *name)
 static void usage(const char *prog)
 {
     LOG_ERR("Usage: %s [opts] [host [port [device]]]", prog);
+    LOG_ERR("  --debug           verbose per-packet logging");
     LOG_ERR("  --fuzz            enable descriptor/endpoint mutation");
     LOG_ERR("  --seed N          fixed PRNG seed (implies --fuzz; for repro)");
     LOG_ERR("  --record FILE     log every sent frame to FILE");
@@ -52,7 +53,9 @@ int main(int argc, char *argv[])
     int npos = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--fuzz") == 0) {
+        if (strcmp(argv[i], "--debug") == 0) {
+            current_log_level = LOG_LEVEL_DEBUG;
+        } else if (strcmp(argv[i], "--fuzz") == 0) {
             do_fuzz = 1;
         } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
             seed = strtoull(argv[++i], NULL, 0);

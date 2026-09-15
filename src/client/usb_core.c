@@ -50,14 +50,16 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
     ei.type[ep0_out] = ei.type[ep0_in] = 0;   /* control */
     ei.max_packet_size[ep0_out] = ei.max_packet_size[ep0_in] = dd[7];
 
-    /* Serialize ep_info to the length the *negotiated* caps imply: the peer
-     * only reads the trailing arrays for caps both sides advertise. Sending
-     * more (e.g. max_streams the peer lacks) desyncs its parser. */
+    /* Serialize ep_info to the length the *negotiated* caps imply. The peer
+     * reads the trailing arrays only for caps both sides advertise:
+     *   max_packet_size  <- cap_ep_info_max_packet_size
+     *   max_streams      <- cap_bulk_streams   (NOT a separate cap)
+     * Sending the wrong length desyncs its parser. */
     size_t eilen = offsetof(usbredir_ep_info_header, max_packet_size);
     if (caps & (1u << USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE))
         eilen = offsetof(usbredir_ep_info_header, max_streams);
-    if (caps & (1u << USB_REDIR_CAP_EP_INFO_MAX_STREAMS))
-        eilen = sizeof(usbredir_ep_info_header);
+    if (caps & (1u << USB_REDIR_CAP_BULK_STREAMS))
+        eilen = sizeof(usbredir_ep_info_header);   /* includes max_streams */
 
     LOG_DEBUG("announce: negotiated caps=0x%08x ep_info=%zu bytes", caps, eilen);
 

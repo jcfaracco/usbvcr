@@ -44,7 +44,7 @@ enum {
  * of these change wire struct sizes, so what we advertise MUST match the
  * layouts we actually send below. */
 enum {
-    USB_REDIR_CAP_BULK_STREAMS            = 0,
+    USB_REDIR_CAP_BULK_STREAMS            = 0,  /* also gates ep_info.max_streams */
     USB_REDIR_CAP_CONNECT_DEVICE_VERSION  = 1,  /* device_connect.device_version_bcd */
     USB_REDIR_CAP_FILTER                  = 2,
     USB_REDIR_CAP_DEVICE_DISCONNECT_ACK   = 3,
@@ -52,7 +52,6 @@ enum {
     USB_REDIR_CAP_64BITS_IDS              = 5,
     USB_REDIR_CAP_32BITS_BULK_LENGTH      = 6,
     USB_REDIR_CAP_BULK_RECEIVING          = 7,
-    USB_REDIR_CAP_EP_INFO_MAX_STREAMS     = 8,  /* ep_info.max_streams */
 };
 
 /* Capabilities we support. The effective set is the intersection with the

@@ -11,6 +11,11 @@
  * (length-prefixed) for later replay. Pass NULL to disable. */
 void transport_set_record(FILE *fp);
 
+/* Select the on-wire packet-header width. When enabled the header carries a
+ * 64-bit id (16 bytes) instead of a 32-bit id (12 bytes). Must be turned on
+ * only after the hello exchange, if cap_64bits_ids was negotiated. */
+void transport_set_id64(int enable);
+
 /* Resolve host:port and open a TCP connection. Returns fd, or -1 on error. */
 int connect_to_server(const char *host, const char *port);
 
@@ -19,8 +24,9 @@ int connect_to_server(const char *host, const char *port);
  * -1 on error/EOF. */
 int recv_all(int sock, uint8_t *buf, size_t len);
 
-/* Send one usbredir frame: 12-byte header + payload. Returns 0, or -1. */
-int usb_redir_send(int sock, uint32_t type, int32_t id,
+/* Send one usbredir frame: header (12 or 16 bytes) + payload. Returns 0,
+ * or -1. */
+int usb_redir_send(int sock, uint32_t type, int64_t id,
                    const void *payload, size_t len);
 
 /* Receive one usbredir frame. Fills `hdr`, copies the payload into `buf`

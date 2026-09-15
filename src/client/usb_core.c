@@ -96,7 +96,7 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
  * Control transfers                                                   *
  * ------------------------------------------------------------------ */
 
-static int reply_control(int sock, int32_t id,
+static int reply_control(int sock, int64_t id,
                          const usbredir_control_packet_header *setup,
                          uint8_t status, const uint8_t *data, uint16_t n)
 {
@@ -112,7 +112,7 @@ static int reply_control(int sock, int32_t id,
     return usb_redir_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n);
 }
 
-static void handle_control(int sock, usb_device_t *dev, int32_t id,
+static void handle_control(int sock, usb_device_t *dev, int64_t id,
                            const uint8_t *payload, size_t len)
 {
     if (len < sizeof(usbredir_control_packet_header)) {
@@ -218,6 +218,11 @@ int usb_core_run(int sock, usb_device_t *dev)
 
     if (send_hello(sock) < 0)
         return -1;
+
+    /* From here on the header id width follows the negotiated cap. The hello
+     * above went out with the 12-byte header (sent before negotiation), which
+     * matches what the peer expects for that first packet. */
+    transport_set_id64(caps & (1u << USB_REDIR_CAP_64BITS_IDS));
 
     /* 2. Announce the emulated device using the negotiated capabilities. */
     if (announce_device(sock, dev, caps) < 0)

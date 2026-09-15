@@ -100,22 +100,47 @@ void transport_set_record(FILE *fp)
     g_record_fp = fp;
 }
 
-int usb_redir_send(int sock, uint32_t type, int32_t id,
+/* On-wire header id width. 0 = 32-bit id (12-byte header), 1 = 64-bit id
+ * (16-byte header). Toggled by transport_set_id64 only after the hello
+ * exchange, and only if cap_64bits_ids was negotiated. The hello itself is
+ * always framed with the 12-byte header (sent pre-negotiation). */
+static int g_id64;
+
+void transport_set_id64(int enable)
+{
+    g_id64 = enable ? 1 : 0;
+}
+
+static size_t hdr_wire_size(void)
+{
+    return g_id64 ? 16 : 12;
+}
+
+int usb_redir_send(int sock, uint32_t type, int64_t id,
                    const void *payload, size_t len)
 {
-    usbredir_header hdr = { type, (uint32_t)len, id };
     uint8_t frame[USB_REDIR_BUF_SIZE];
+    size_t hs = hdr_wire_size();
 
-    if (sizeof(hdr) + len > sizeof(frame)) {
+    if (hs + len > sizeof(frame)) {
         LOG_ERR("send: payload too large (%zu bytes)", len);
         return -1;
     }
 
-    memcpy(frame, &hdr, sizeof(hdr));
+    /* Serialize the header field by field: type(4) length(4) id(4 or 8). */
+    uint32_t t = type, l = (uint32_t)len;
+    memcpy(frame + 0, &t, 4);
+    memcpy(frame + 4, &l, 4);
+    if (g_id64) {
+        memcpy(frame + 8, &id, 8);
+    } else {
+        int32_t id32 = (int32_t)id;
+        memcpy(frame + 8, &id32, 4);
+    }
     if (payload && len)
-        memcpy(frame + sizeof(hdr), payload, len);
+        memcpy(frame + hs, payload, len);
 
-    size_t frame_len = sizeof(hdr) + len;
+    size_t frame_len = hs + len;
 
     if (g_record_fp) {
         uint32_t rec = (uint32_t)frame_len;
@@ -134,13 +159,26 @@ int usb_redir_send(int sock, uint32_t type, int32_t id,
 int usb_redir_recv(int sock, usbredir_header *hdr,
                    uint8_t *buf, size_t cap, size_t *payload_len)
 {
-    uint8_t hbuf[sizeof(*hdr)];
-    int r = recv_all(sock, hbuf, sizeof(hbuf));
+    uint8_t hbuf[16];
+    size_t hs = hdr_wire_size();
+
+    int r = recv_all(sock, hbuf, hs);
     if (r == 0)
         return 1;   /* idle timeout, no frame */
     if (r < 0)
         return -1;
-    memcpy(hdr, hbuf, sizeof(*hdr));
+
+    memcpy(&hdr->type, hbuf + 0, 4);
+    memcpy(&hdr->length, hbuf + 4, 4);
+    if (g_id64) {
+        int64_t id;
+        memcpy(&id, hbuf + 8, 8);
+        hdr->id = id;
+    } else {
+        int32_t id;
+        memcpy(&id, hbuf + 8, 4);
+        hdr->id = id;   /* sign-extend into the 64-bit field */
+    }
 
     if (hdr->length > cap) {
         LOG_ERR("recv: payload %u exceeds buffer %zu", hdr->length, cap);

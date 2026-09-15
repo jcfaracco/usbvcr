@@ -12,14 +12,15 @@
 
 #define USB_REDIR_BUF_SIZE 4096
 
-/* Every usbredir packet starts with this 12-byte header. */
-#pragma pack(push, 1)
+/* In-memory packet header. The `id` is widened to 64 bits so it can hold a
+ * 64-bit wire id; the transport layer serializes it as 4 or 8 bytes on the
+ * wire depending on whether cap_64bits_ids was negotiated (12- vs 16-byte
+ * header). This struct is NOT memcpy'd to the wire. */
 typedef struct {
     uint32_t type;
     uint32_t length;
-    int32_t  id;
+    int64_t  id;
 } usbredir_header;
-#pragma pack(pop)
 
 /* usbredir packet types (subset we use). */
 enum {
@@ -57,18 +58,18 @@ enum {
 /* Capabilities we support. The effective set is the intersection with the
  * peer's, and it decides the wire length of ep_info/device_connect.
  *
- * qemu-xhci refuses a redir host missing the caps it needs, so we
- * advertise everything the peer offers EXCEPT 64bits_ids, which would
- * widen the packet header past our fixed 12 bytes. The caps that add
- * trailing fields we do serialize (max_packet_size) or are only relevant
- * to transfers we do not do yet (bulk streams / bulk receiving), so this
- * is safe for control + interrupt enumeration. */
+ * qemu-xhci puts the device on a SuperSpeed port and requires the host to
+ * advertise ep_info_max_packet_size, 32bits_bulk_length and 64bits_ids
+ * (see usbredir_do_attach). 64bits_ids widens the post-hello header to 16
+ * bytes, which the transport layer handles. bulk_streams gates the
+ * ep_info max_streams array (which we serialize, zeroed). */
 #define USB_REDIR_OUR_CAPS \
     ((1u << USB_REDIR_CAP_BULK_STREAMS)            | \
      (1u << USB_REDIR_CAP_CONNECT_DEVICE_VERSION)  | \
      (1u << USB_REDIR_CAP_FILTER)                  | \
      (1u << USB_REDIR_CAP_DEVICE_DISCONNECT_ACK)   | \
      (1u << USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE) | \
+     (1u << USB_REDIR_CAP_64BITS_IDS)              | \
      (1u << USB_REDIR_CAP_32BITS_BULK_LENGTH)      | \
      (1u << USB_REDIR_CAP_BULK_RECEIVING))
 

@@ -14,11 +14,18 @@
 
 static int send_hello(int sock)
 {
-    uint8_t hello[68];
-    memset(hello, 0, sizeof(hello));
-    strncpy((char *)hello, HELLO_VERSION, 63);
-    hello[64] = 0xdf;  /* capabilities bitmap (placeholder) */
-    return usb_redir_send(sock, RT_HELLO, 0, hello, sizeof(hello));
+    usbredir_hello_header h;
+    memset(&h, 0, sizeof(h));
+    strncpy(h.version, HELLO_VERSION, sizeof(h.version) - 1);
+
+    /* Only advertise caps whose extra fields we actually serialize, so our
+     * ep_info/device_connect lengths match what the peer expects. */
+    h.capabilities[0] =
+        (1u << USB_REDIR_CAP_CONNECT_DEVICE_VERSION)  |
+        (1u << USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE) |
+        (1u << USB_REDIR_CAP_EP_INFO_MAX_STREAMS);
+
+    return usb_redir_send(sock, RT_HELLO, 0, &h, sizeof(h));
 }
 
 /* Derive interface_info + ep_info from the device's config descriptor and

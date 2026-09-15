@@ -40,6 +40,21 @@ enum {
     RT_INTERRUPT_PACKET         = 103,
 };
 
+/* usbredir capability bits (indices into hello capabilities[]). Several
+ * of these change wire struct sizes, so what we advertise MUST match the
+ * layouts we actually send below. */
+enum {
+    USB_REDIR_CAP_BULK_STREAMS            = 0,
+    USB_REDIR_CAP_CONNECT_DEVICE_VERSION  = 1,  /* device_connect.device_version_bcd */
+    USB_REDIR_CAP_FILTER                  = 2,
+    USB_REDIR_CAP_DEVICE_DISCONNECT_ACK   = 3,
+    USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE = 4,  /* ep_info.max_packet_size */
+    USB_REDIR_CAP_64BITS_IDS              = 5,
+    USB_REDIR_CAP_32BITS_BULK_LENGTH      = 6,
+    USB_REDIR_CAP_BULK_RECEIVING          = 7,
+    USB_REDIR_CAP_EP_INFO_MAX_STREAMS     = 8,  /* ep_info.max_streams */
+};
+
 /* Link speeds. */
 #define USB_REDIR_SPEED_LOW     0
 #define USB_REDIR_SPEED_FULL    1
@@ -67,6 +82,12 @@ enum {
 #define USB_TYPE_MASK     0x60
 
 #pragma pack(push, 1)
+
+/* RT_HELLO payload: version string followed by capability words. */
+typedef struct {
+    char     version[64];
+    uint32_t capabilities[1];
+} usbredir_hello_header;
 
 /* RT_INTERFACE_INFO payload. Arrays indexed by interface number. */
 typedef struct {

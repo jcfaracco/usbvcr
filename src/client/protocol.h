@@ -56,11 +56,16 @@ enum {
 };
 
 /* Capabilities we support. The effective set is the intersection with the
- * peer's, which decides the wire length of ep_info/device_connect. We do
- * not implement USB3 streams, so max_streams is deliberately absent. */
+ * peer's, which decides the wire length of ep_info/device_connect.
+ *
+ * qemu-xhci refuses a redir host that lacks ep_info_max_packet_size or
+ * 32bits_bulk_length, so both are required. 64bits_ids is deliberately
+ * omitted: it would widen the packet header past our fixed 12 bytes. We
+ * do not implement USB3 streams, so max_streams is absent too. */
 #define USB_REDIR_OUR_CAPS \
-    ((1u << USB_REDIR_CAP_CONNECT_DEVICE_VERSION) | \
-     (1u << USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE))
+    ((1u << USB_REDIR_CAP_CONNECT_DEVICE_VERSION)  | \
+     (1u << USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE) | \
+     (1u << USB_REDIR_CAP_32BITS_BULK_LENGTH))
 
 /* Link speeds. */
 #define USB_REDIR_SPEED_LOW     0

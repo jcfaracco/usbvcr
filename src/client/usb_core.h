@@ -1,6 +1,9 @@
 #ifndef USBREDIR_CLIENT_USB_CORE_H
 #define USBREDIR_CLIENT_USB_CORE_H
 
+#include <stdint.h>
+#include <stddef.h>
+
 /* ------------------------------------------------------------------ *
  * USB‑redir protocol definitions (from the usbredir spec)            *
  * ------------------------------------------------------------------ */

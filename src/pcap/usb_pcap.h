@@ -1,7 +1,10 @@
 #ifndef USBREDIR_PCAP_USB_PCAP_H
 #define USBREDIR_PCAP_USB_PCAP_H
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
 // Target Device IDs to filter for (Modify these)
 #define TARGET_VENDOR_ID  0x1b1c

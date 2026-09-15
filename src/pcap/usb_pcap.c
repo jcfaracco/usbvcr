@@ -1,10 +1,22 @@
+#define _GNU_SOURCE
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <pcap.h>
+
 #include "usb_pcap.h"
 
 // TODO: Target Device IDs to filter for (Modify these)
 #define TARGET_VENDOR_ID  0x1b1c
 #define TARGET_PRODUCT_ID 0x0c1a
 
-void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
+// TODO: State variables to map the matching device address dynamically
+int target_bus_id = -1;
+int target_device_address = -1;
+
+void packet_handler(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
     if (pkthdr->caplen < sizeof(struct usbmon_packet_header)) return;
 
     struct usbmon_packet_header *usb_hdr = (struct usbmon_packet_header *)packet;

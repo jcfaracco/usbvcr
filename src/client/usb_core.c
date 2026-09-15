@@ -1,3 +1,9 @@
+#include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include "usb_core.h"
 
 /* The hello payload: 64‑byte version string + 4‑byte capabilities */

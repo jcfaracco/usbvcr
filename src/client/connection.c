@@ -1,3 +1,12 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+
 #include "connection.h"
 
 /* ------------------------------------------------------------------ *

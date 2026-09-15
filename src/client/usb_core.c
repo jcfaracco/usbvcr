@@ -125,3 +125,43 @@ size_t build_hello_packet(uint8_t *out)
 
     return sizeof(hdr) + HELLO_PAYLOAD_SIZE;
 }
+
+size_t build_interface_info_pkt(uint8_t *out) {
+    usbredir_interface_info_header info = {0};
+    info.interface_count = 1;
+    info.interface_class[0] = 3;
+
+    usbredir_header hdr = {4, sizeof(info), 0};
+    memcpy(out, &hdr, sizeof(hdr));
+    memcpy(out + sizeof(hdr), &info, sizeof(info));
+    return sizeof(hdr) + sizeof(info);
+}
+
+size_t build_ep_info_pkt(uint8_t *out) {
+    usbredir_ep_info_header ep = {0};
+    for (int i = 0; i < 32; i++) {
+        ep.type[i] = 0;
+        ep.interval[i] = 0;
+        ep.interface[i] = 0;
+        ep.max_packet_size[i] = 0;
+        ep.max_streams[i] = 0;
+    }
+    ep.max_packet_size[0] = 0x40;
+
+    usbredir_header hdr = {5, sizeof(ep), 0};
+    memcpy(out, &hdr, sizeof(hdr));
+    memcpy(out + sizeof(hdr), &ep, sizeof(ep));
+    return sizeof(hdr) + sizeof(ep);
+}
+
+size_t build_connect_pkt(uint8_t *out) {
+    usbredir_device_connect_header conn = {
+        USB_REDIR_SPEED_HIGH, 0, 0, 0,
+        0x1130, 0x3101, 0x0002
+    };
+
+    usbredir_header hdr = {1, sizeof(conn), 0};
+    memcpy(out, &hdr, sizeof(hdr));
+    memcpy(out + sizeof(hdr), &conn, sizeof(conn));
+    return sizeof(hdr) + sizeof(conn);
+}

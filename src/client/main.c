@@ -50,15 +50,38 @@ int main(int argc, char *argv[])
     /* 3. Send our hello */
     uint8_t pkt[256];
     size_t pkt_len = build_hello_packet(pkt);
-    LOG_OUT("Sending our hello (%zu bytes) ...", pkt_len);
+    LOG_OUT("Sending our hello packet (%zu bytes) ...", pkt_len);
     if (send(sock, pkt, pkt_len, 0) < 0) {
         perror("send");
         close(sock);
         return EXIT_FAILURE;
     }
     LOG_INFO("Hello sent!");
-
     LOG_INFO("    *** Hello, USB-redir world! ***");
+
+    pkt_len = build_interface_info_pkt(pkt);
+    LOG_OUT("Sending our interface info packet (%zu bytes) ...", pkt_len);
+    if (send(sock, pkt, pkt_len, 0) < 0) {
+        perror("send");
+        close(sock);
+        return EXIT_FAILURE;
+    }
+
+    pkt_len = build_ep_info_pkt(pkt);
+    LOG_OUT("Sending our EP info packet (%zu bytes) ...", pkt_len);
+    if (send(sock, pkt, pkt_len, 0) < 0) {
+        perror("send");
+        close(sock);
+        return EXIT_FAILURE;
+    }
+
+    pkt_len = build_connect_pkt(pkt);
+    LOG_OUT("Sending our connect packet (%zu bytes) ...", pkt_len);
+    if (send(sock, pkt, pkt_len, 0) < 0) {
+        perror("send");
+        close(sock);
+        return EXIT_FAILURE;
+    }
 
     /* 4. Done */
     close(sock);

@@ -10,4 +10,7 @@ project(
   ],
 )
 
+# Expose POSIX APIs (getaddrinfo, struct timeval, send, close, ...) under -std=c11.
+add_project_arguments('-D_DEFAULT_SOURCE', language : 'c')
+
 subdir('src')

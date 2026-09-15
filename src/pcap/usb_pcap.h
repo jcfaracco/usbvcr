@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <pcap.h>
 
 // Target Device IDs to filter for (Modify these)
 #define TARGET_VENDOR_ID  0x1b1c
@@ -28,5 +29,9 @@ typedef struct usbmon_packet_header {
     // ... union of setup data or iso descriptors follows (usually 32 bytes)
     uint8_t  sub_header[32];
 } usbmon_packet_header_t;
+
+/* libpcap callback: inspect one usbmon frame and filter by target VID/PID. */
+void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr,
+                    const u_char *packet);
 
 #endif

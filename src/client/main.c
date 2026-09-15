@@ -3,7 +3,11 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <unistd.h>
+
+#include "connection.h"
+#include "usb_core.h"
 
 /* ------------------------------------------------------------------ *
  * main                                                                *

@@ -1,22 +1,12 @@
-#define _GNU_SOURCE
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <pcap.h>
-
 #include "usb_pcap.h"
-
-// TODO: Target Device IDs to filter for (Modify these)
-#define TARGET_VENDOR_ID  0x1b1c
-#define TARGET_PRODUCT_ID 0x0c1a
 
 // TODO: State variables to map the matching device address dynamically
 int target_bus_id = -1;
 int target_device_address = -1;
 
-void packet_handler(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
+void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr,
+                    const u_char *packet) {
+    (void)user_data;
     if (pkthdr->caplen < sizeof(struct usbmon_packet_header)) return;
 
     struct usbmon_packet_header *usb_hdr = (struct usbmon_packet_header *)packet;
@@ -56,4 +46,25 @@ void packet_handler(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
             // Your custom logic or packet dumping goes here!
         }
     }
+}
+
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <capture.pcap>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = pcap_open_offline(argv[1], errbuf);
+    if (!handle) {
+        fprintf(stderr, "pcap_open_offline: %s\n", errbuf);
+        return EXIT_FAILURE;
+    }
+
+    if (pcap_datalink(handle) != DLT_USB_LINUX_MMAPPED)
+        fprintf(stderr, "[!] Warning: capture is not DLT_USB_LINUX_MMAPPED\n");
+
+    pcap_loop(handle, 0, packet_handler, NULL);
+    pcap_close(handle);
+    return EXIT_SUCCESS;
 }

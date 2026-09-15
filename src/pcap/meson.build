@@ -5,10 +5,15 @@ if not pcap_dep.found()
   pcap_dep = cc.find_library('pcap', required : false)
 endif
 
-executable(
-  'usb_pcap_filter',
-  files('usb_pcap.c'),
-  include_directories : include_directories('.'),
-  dependencies : pcap_dep,
-  install : true,
-)
+# Only build the filter when libpcap headers/lib are present.
+if pcap_dep.found()
+  executable(
+    'usb_pcap_filter',
+    files('usb_pcap.c'),
+    include_directories : include_directories('.'),
+    dependencies : pcap_dep,
+    install : true,
+  )
+else
+  message('libpcap not found; skipping usb_pcap_filter target')
+endif

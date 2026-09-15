@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <unistd.h>
 
 #include "connection.h"
 
@@ -13,7 +14,7 @@
  * Socket helpers                                                      *
  * ------------------------------------------------------------------ */
 
-static int connect_to_server(const char *host, const char *port)
+int connect_to_server(const char *host, const char *port)
 {
     struct addrinfo hints, *res;
     int sock, ret;
@@ -51,7 +52,7 @@ static int connect_to_server(const char *host, const char *port)
 }
 
 /* Receive exactly `len` bytes (blocking) */
-static int recv_all(int sock, uint8_t *buf, size_t len)
+int recv_all(int sock, uint8_t *buf, size_t len)
 {
     size_t total = 0;
     while (total < len) {

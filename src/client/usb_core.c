@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include "usb_core.h"
+#include "connection.h"
 
 /* The hello payload: 64‑byte version string + 4‑byte capabilities */
 #define HELLO_VERSION "usb_redir_hello 0.1"
@@ -48,8 +49,12 @@ static const char *packet_type_name(uint32_t type)
 
 
 /* Receive and print one usbredir packet header + optional payload */
-static int print_packet(uint8_t hdr_buf[12])
+int receive_and_print_packet(int sock)
 {
+    uint8_t hdr_buf[12];
+    if (recv_all(sock, hdr_buf, sizeof(hdr_buf)) <= 0)
+        return -1;
+
     /* Parse little‑endian fields */
     uint32_t type = hdr_buf[0] | (hdr_buf[1] << 8) | (hdr_buf[2] << 16) | (hdr_buf[3] << 24);
     uint32_t len  = hdr_buf[4] | (hdr_buf[5] << 8) | (hdr_buf[6] << 16) | (hdr_buf[7] << 24);
@@ -93,7 +98,7 @@ static int print_packet(uint8_t hdr_buf[12])
  * ------------------------------------------------------------------ */
 
 /* Build our hello packet into `out`. Returns total size. */
-static size_t build_hello_packet(uint8_t *out)
+size_t build_hello_packet(uint8_t *out)
 {
     uint8_t payload[HELLO_PAYLOAD_SIZE];
     memset(payload, 0, sizeof(payload));

@@ -27,6 +27,11 @@ enum {
     RT_EP_INFO            = 5,
 };
 
-static size_t build_hello_packet(uint8_t *out);
+/* Receive one usbredir packet (header + payload) from `sock` and print it.
+ * Returns the packet type, or -1 on error. */
+int receive_and_print_packet(int sock);
+
+/* Build our hello packet into `out`. Returns total size in bytes. */
+size_t build_hello_packet(uint8_t *out);
 
 #endif

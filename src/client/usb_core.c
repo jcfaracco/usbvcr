@@ -6,6 +6,7 @@
 
 #include "usb_core.h"
 #include "connection.h"
+#include "log.h"
 
 /* The hello payload: 64‑byte version string + 4‑byte capabilities */
 #define HELLO_VERSION "usb_redir_hello 0.1"
@@ -60,13 +61,14 @@ int receive_and_print_packet(int sock)
     uint32_t len  = hdr_buf[4] | (hdr_buf[5] << 8) | (hdr_buf[6] << 16) | (hdr_buf[7] << 24);
     uint32_t id   = hdr_buf[8] | (hdr_buf[9] << 8) | (hdr_buf[10] << 16) | (hdr_buf[11] << 24);
 
-    printf("[<] Received packet: type=%s (%u), length=%u, id=0x%x\n",
+    LOG_IN("Received packet: type=%s (%u), length=%u, id=0x%x",
            packet_type_name(type), type, len, id);
 
-    printf("    Raw header: ");
+    char hex[12 * 3 + 1];
+    int off = 0;
     for (int i = 0; i < 12; i++)
-        printf("%02x ", hdr_buf[i]);
-    printf("\n");
+        off += snprintf(hex + off, sizeof(hex) - off, "%02x ", hdr_buf[i]);
+    LOG_IN("    Raw header: %s", hex);
 
     /* Consume the payload (print first 64 bytes if it's a hello) */
     if (len > 0) {
@@ -75,7 +77,7 @@ int receive_and_print_packet(int sock)
             memset(version, 0, sizeof(version));
             if (recv_all(sock, version, 64) <= 0)
                 return -1;
-            printf("    Server version: \"%s\"\n", version);
+            LOG_INFO("    Server version: \"%s\"", version);
 
             /* Discard the rest of the hello payload (capabilities, etc.) */
             if (len > 64) {

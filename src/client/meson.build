@@ -2,6 +2,7 @@ client_sources = files(
   'main.c',
   'connection.c',
   'usb_core.c',
+  'log.c',
 )
 
 # Pure POSIX sockets client — no external library dependencies.

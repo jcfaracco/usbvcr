@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "connection.h"
+#include "log.h"
 
 /* ------------------------------------------------------------------ *
  * Socket helpers                                                      *
@@ -25,7 +26,7 @@ int connect_to_server(const char *host, const char *port)
 
     ret = getaddrinfo(host, port, &hints, &res);
     if (ret != 0) {
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(ret));
+        LOG_ERR("getaddrinfo: %s", gai_strerror(ret));
         return -1;
     }
 
@@ -63,7 +64,7 @@ int recv_all(int sock, uint8_t *buf, size_t len)
 
         ssize_t n = recv(sock, target, chunk_size, 0);
         if (n == 0) {
-            fprintf(stderr, "Connection closed by peer.\n");
+            LOG_ERR("Connection closed by peer.");
             return -1;
         } else if (n < 0) {
             perror("recv");

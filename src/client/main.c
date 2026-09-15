@@ -8,6 +8,7 @@
 
 #include "connection.h"
 #include "usb_core.h"
+#include "log.h"
 
 /* ------------------------------------------------------------------ *
  * main                                                                *
@@ -23,42 +24,41 @@ int main(int argc, char *argv[])
         host = argv[1];
         port = argv[2];
     } else if (argc != 1) {
-        fprintf(stderr, "Usage: %s [host port]\n"
-                        "Default: localhost 1337\n", argv[0]);
+        LOG_ERR("Usage: %s [host port] (default: localhost 1337)", argv[0]);
         return EXIT_FAILURE;
     }
 
     /* 1. Connect */
-    printf("[*] Connecting to %s:%s ...\n", host, port);
+    LOG_DEBUG("Connecting to %s:%s ...", host, port);
     int sock = connect_to_server(host, port);
     if (sock < 0) {
-        fprintf(stderr, "[!] Connection failed\n");
+        LOG_WARN("Connection failed");
         return EXIT_FAILURE;
     }
-    printf("[+] Connected!\n\n");
+    LOG_INFO("Connected!");
 
     /* 2. Receive the server's hello */
-    printf("[*] Waiting for server hello ...\n");
+    LOG_DEBUG("Waiting for server hello ...");
     int type = receive_and_print_packet(sock);
     if (type != RT_HELLO) {
-        fprintf(stderr, "[!] Expected hello (type 0), got type %d\n", type);
+        LOG_WARN("Expected hello (type 0), got type %d", type);
         close(sock);
         return EXIT_FAILURE;
     }
-    printf("[+] Server hello received!\n\n");
+    LOG_INFO("Server hello received!");
 
     /* 3. Send our hello */
     uint8_t pkt[256];
     size_t pkt_len = build_hello_packet(pkt);
-    printf("[>] Sending our hello (%zu bytes) ...\n", pkt_len);
+    LOG_OUT("Sending our hello (%zu bytes) ...", pkt_len);
     if (send(sock, pkt, pkt_len, 0) < 0) {
         perror("send");
         close(sock);
         return EXIT_FAILURE;
     }
-    printf("[+] Hello sent!\n\n");
+    LOG_INFO("Hello sent!");
 
-    printf("    *** Hello, USB-redir world! ***\n\n");
+    LOG_INFO("    *** Hello, USB-redir world! ***");
 
     /* 4. Done */
     close(sock);

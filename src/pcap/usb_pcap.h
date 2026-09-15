@@ -1,5 +1,5 @@
-#ifndef __USB_PCAP_H__
-#define __USB_PCAP_H__
+#ifndef USBREDIR_PCAP_USB_PCAP_H
+#define USBREDIR_PCAP_USB_PCAP_H
 
 #include <stdint.h>
 
@@ -23,7 +23,7 @@ typedef struct usbmon_packet_header {
     uint32_t length;
     uint32_t data_length;
     // ... union of setup data or iso descriptors follows (usually 32 bytes)
-    uint8_t  sub_header[32]; 
+    uint8_t  sub_header[32];
 } usbmon_packet_header_t;
 
 #endif

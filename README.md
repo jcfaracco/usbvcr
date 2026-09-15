@@ -7,9 +7,20 @@ This repository contains a minimal C program that connects to a QEMU SPICE serve
 ## 1. Directory layout
 ```
 usbredir/
-├─ usb_redir_hello.c   # Minimal SPICE client source
-├─ Makefile            # Build script
-└─ README.md           # This document
+├─ meson.build             # Top-level build definition
+├─ README.md               # This document
+└─ src/
+   ├─ meson.build
+   ├─ client/              # SPICE USB-redir "hello" client
+   │  ├─ meson.build
+   │  ├─ main.c
+   │  ├─ connection.c / connection.h
+   │  ├─ usb_core.c / usb_core.h
+   │  └─ log.h
+   └─ pcap/                # Standalone usbmon pcap filter
+      ├─ meson.build
+      ├─ usb_pcap.c
+      └─ usb_pcap.h
 ```
 
 ## 2. Prerequisites (Fedora)
@@ -25,12 +36,14 @@ sudo dnf install -y \
 * `libspice-client-glib-devel` gives the SPICE client library.
 * `libusbredir-devel` supplies the USB‑redir parser (used for optional debug logging).
 
-## 3. Build
+## 3. Build (Meson)
 ```bash
-cd /home/jcfaracco/Desktop/virt/usb_mentorship/usbredir
-make clean && make
+meson setup build
+meson compile -C build
 ```
-The command produces the executable `usb_redir_hello`.
+This produces two executables under `build/src/`:
+* `client/usb_redir_hello` – the SPICE USB-redir client.
+* `pcap/usb_pcap_filter` – the standalone usbmon pcap filter.
 
 ## 4. Run a QEMU VM with a USB‑redir channel
 ```bash

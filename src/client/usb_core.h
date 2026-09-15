@@ -1,5 +1,5 @@
-#ifndef __USB_CORE_H_
-#define __USB_CORE_H_
+#ifndef USBREDIR_CLIENT_USB_CORE_H
+#define USBREDIR_CLIENT_USB_CORE_H
 
 /* ------------------------------------------------------------------ *
  * USB‑redir protocol definitions (from the usbredir spec)            *

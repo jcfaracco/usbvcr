@@ -23,7 +23,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
             if (vendor_id == TARGET_VENDOR_ID && product_id == TARGET_PRODUCT_ID) {
                 target_bus_id = usb_hdr->bus_id;
                 target_device_address = usb_hdr->device_address;
-                printf("[MATCH] Found Target Device! Bus: %d, Addr: %d\n", 
+                printf("[MATCH] Found Target Device! Bus: %d, Addr: %d\n",
                        target_bus_id, target_device_address);
             }
         }
@@ -32,15 +32,15 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
     // 2. FILTER PHASE: Match packets originating from or going to our tracked device address
     if (target_bus_id != -1 && target_device_address != -1) {
         if (usb_hdr->bus_id == target_bus_id && usb_hdr->device_address == target_device_address) {
-            
+
             // Successfully filtered packet! Let's print details:
             printf("Filtered Packet - Bus: %u Addr: %u | EP: 0x%02X | Type: %c | Len: %u bytes\n",
-                   usb_hdr->bus_id, 
-                   usb_hdr->device_address, 
-                   usb_hdr->endpoint_number, 
-                   usb_hdr->type, 
+                   usb_hdr->bus_id,
+                   usb_hdr->device_address,
+                   usb_hdr->endpoint_number,
+                   usb_hdr->type,
                    usb_hdr->data_length);
-                   
+
             // Your custom logic or packet dumping goes here!
         }
     }

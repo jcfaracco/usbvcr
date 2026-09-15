@@ -1,5 +1,5 @@
-#ifndef __DEFS_H__
-#define __DEFS_H__
+#ifndef USBREDIR_CLIENT_LOG_H
+#define USBREDIR_CLIENT_LOG_H
 
 #include <stdio.h>
 

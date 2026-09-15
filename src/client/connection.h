@@ -1,5 +1,5 @@
-#ifndef _CONNECTION_H_
-#define _CONNECTION_H_
+#ifndef USBREDIR_CLIENT_CONNECTION_H
+#define USBREDIR_CLIENT_CONNECTION_H
 
 static int connect_to_server(const char *host, const char *port);
 

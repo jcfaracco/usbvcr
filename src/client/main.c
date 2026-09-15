@@ -48,7 +48,7 @@ int main(int argc, char *argv[])
     LOG_INFO("Server hello received!");
 
     /* 3. Send our hello */
-    uint8_t pkt[256];
+    uint8_t pkt[USB_REDIR_BUF_SIZE];
     size_t pkt_len = build_hello_packet(pkt);
     LOG_OUT("Sending our hello packet (%zu bytes) ...", pkt_len);
     if (send(sock, pkt, pkt_len, 0) < 0) {

@@ -46,6 +46,15 @@ static int announce_device(int sock, usb_device_t *dev)
     if (desc_parse_config(cd, cdlen, &ii, &ei) < 0)
         return -1;
 
+    /* ep0 (control) is implicit: it has no endpoint descriptor in the
+     * config, so fill its ep_info from the device descriptor's
+     * bMaxPacketSize0 (byte 7). Without a nonzero max packet size the peer
+     * cannot run control transfers and enumeration stalls. */
+    uint8_t ep0_out = usbredir_ep_index(0x00);
+    uint8_t ep0_in  = usbredir_ep_index(0x80);
+    ei.type[ep0_out] = ei.type[ep0_in] = 0;   /* control */
+    ei.max_packet_size[ep0_out] = ei.max_packet_size[ep0_in] = dd[7];
+
     if (usb_redir_send(sock, RT_INTERFACE_INFO, 0, &ii, sizeof(ii)) < 0 ||
         usb_redir_send(sock, RT_EP_INFO, 0, &ei, sizeof(ei)) < 0)
         return -1;
@@ -53,7 +62,9 @@ static int announce_device(int sock, usb_device_t *dev)
     /* Device descriptor: class @4/5/6, idVendor @8, idProduct @10, bcd @12. */
     usbredir_device_connect_header c;
     memset(&c, 0, sizeof(c));
-    c.speed              = USB_REDIR_SPEED_HIGH;  /* TODO: expose via backend */
+    /* bMaxPacketSize0==8 is a full-speed value; announcing HIGH would be
+     * inconsistent. TODO: expose speed via the backend. */
+    c.speed              = USB_REDIR_SPEED_FULL;
     c.device_class       = dd[4];
     c.device_subclass    = dd[5];
     c.device_protocol    = dd[6];

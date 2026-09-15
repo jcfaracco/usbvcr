@@ -18,19 +18,14 @@ static int send_hello(int sock)
     memset(&h, 0, sizeof(h));
     strncpy(h.version, HELLO_VERSION, sizeof(h.version) - 1);
 
-    /* Only advertise caps whose extra fields we actually serialize, so our
-     * ep_info/device_connect lengths match what the peer expects. */
-    h.capabilities[0] =
-        (1u << USB_REDIR_CAP_CONNECT_DEVICE_VERSION)  |
-        (1u << USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE) |
-        (1u << USB_REDIR_CAP_EP_INFO_MAX_STREAMS);
+    h.capabilities[0] = USB_REDIR_OUR_CAPS;
 
     return usb_redir_send(sock, RT_HELLO, 0, &h, sizeof(h));
 }
 
 /* Derive interface_info + ep_info from the device's config descriptor and
  * announce the device to the peer. */
-static int announce_device(int sock, usb_device_t *dev)
+static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
 {
     const uint8_t *dd, *cd;
     uint16_t ddlen, cdlen;
@@ -55,8 +50,19 @@ static int announce_device(int sock, usb_device_t *dev)
     ei.type[ep0_out] = ei.type[ep0_in] = 0;   /* control */
     ei.max_packet_size[ep0_out] = ei.max_packet_size[ep0_in] = dd[7];
 
+    /* Serialize ep_info to the length the *negotiated* caps imply: the peer
+     * only reads the trailing arrays for caps both sides advertise. Sending
+     * more (e.g. max_streams the peer lacks) desyncs its parser. */
+    size_t eilen = offsetof(usbredir_ep_info_header, max_packet_size);
+    if (caps & (1u << USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE))
+        eilen = offsetof(usbredir_ep_info_header, max_streams);
+    if (caps & (1u << USB_REDIR_CAP_EP_INFO_MAX_STREAMS))
+        eilen = sizeof(usbredir_ep_info_header);
+
+    LOG_DEBUG("announce: negotiated caps=0x%08x ep_info=%zu bytes", caps, eilen);
+
     if (usb_redir_send(sock, RT_INTERFACE_INFO, 0, &ii, sizeof(ii)) < 0 ||
-        usb_redir_send(sock, RT_EP_INFO, 0, &ei, sizeof(ei)) < 0)
+        usb_redir_send(sock, RT_EP_INFO, 0, &ei, eilen) < 0)
         return -1;
 
     /* Device descriptor: class @4/5/6, idVendor @8, idProduct @10, bcd @12. */
@@ -75,7 +81,13 @@ static int announce_device(int sock, usb_device_t *dev)
     LOG_INFO("Announcing device %04x:%04x, %u interface(s)",
              c.vendor_id, c.product_id, ii.interface_count);
 
-    return usb_redir_send(sock, RT_DEVICE_CONNECT, 0, &c, sizeof(c));
+    /* device_version_bcd is only present when connect_device_version is
+     * negotiated; otherwise the peer expects the shorter header. */
+    size_t clen = offsetof(usbredir_device_connect_header, device_version_bcd);
+    if (caps & (1u << USB_REDIR_CAP_CONNECT_DEVICE_VERSION))
+        clen = sizeof(usbredir_device_connect_header);
+
+    return usb_redir_send(sock, RT_DEVICE_CONNECT, 0, &c, clen);
 }
 
 /* ------------------------------------------------------------------ *
@@ -194,16 +206,19 @@ int usb_core_run(int sock, usb_device_t *dev)
         return -1;
     }
     LOG_INFO("Peer hello: \"%.63s\"", (char *)payload);
+
+    uint32_t peer_caps = 0;
     if (len >= sizeof(usbredir_hello_header)) {
-        uint32_t peer_caps;
         memcpy(&peer_caps, payload + 64, sizeof(peer_caps));
         LOG_DEBUG("peer capabilities[0]=0x%08x", peer_caps);
     }
+    uint32_t caps = USB_REDIR_OUR_CAPS & peer_caps;
+
     if (send_hello(sock) < 0)
         return -1;
 
-    /* 2. Announce the emulated device. */
-    if (announce_device(sock, dev) < 0)
+    /* 2. Announce the emulated device using the negotiated capabilities. */
+    if (announce_device(sock, dev, caps) < 0)
         return -1;
 
     /* 3. Serve requests until the peer goes away. The socket recv timeout

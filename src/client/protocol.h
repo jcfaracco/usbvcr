@@ -55,6 +55,13 @@ enum {
     USB_REDIR_CAP_EP_INFO_MAX_STREAMS     = 8,  /* ep_info.max_streams */
 };
 
+/* Capabilities we support. The effective set is the intersection with the
+ * peer's, which decides the wire length of ep_info/device_connect. We do
+ * not implement USB3 streams, so max_streams is deliberately absent. */
+#define USB_REDIR_OUR_CAPS \
+    ((1u << USB_REDIR_CAP_CONNECT_DEVICE_VERSION) | \
+     (1u << USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE))
+
 /* Link speeds. */
 #define USB_REDIR_SPEED_LOW     0
 #define USB_REDIR_SPEED_FULL    1

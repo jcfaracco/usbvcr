@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <errno.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -53,7 +54,12 @@ int connect_to_server(const char *host, const char *port)
     return sock;
 }
 
-/* Receive exactly `len` bytes (blocking) */
+/* Receive exactly `len` bytes. Blocks until the frame completes.
+ *
+ * Return: number of bytes read on success; 0 if the recv timeout
+ * (SO_RCVTIMEO) fires at a frame boundary with nothing read yet (idle,
+ * caller should keep waiting); -1 on EOF or a hard error. A timeout that
+ * hits mid-frame is not fatal — we keep waiting for the rest. */
 int recv_all(int sock, uint8_t *buf, size_t len)
 {
     size_t total = 0;
@@ -68,6 +74,13 @@ int recv_all(int sock, uint8_t *buf, size_t len)
             LOG_ERR("Connection closed by peer.");
             return -1;
         } else if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                if (total == 0)
+                    return 0;   /* idle at frame boundary */
+                continue;       /* partial frame: wait for the rest */
+            }
             perror("recv");
             return -1;
         }
@@ -122,7 +135,10 @@ int usb_redir_recv(int sock, usbredir_header *hdr,
                    uint8_t *buf, size_t cap, size_t *payload_len)
 {
     uint8_t hbuf[sizeof(*hdr)];
-    if (recv_all(sock, hbuf, sizeof(hbuf)) <= 0)
+    int r = recv_all(sock, hbuf, sizeof(hbuf));
+    if (r == 0)
+        return 1;   /* idle timeout, no frame */
+    if (r < 0)
         return -1;
     memcpy(hdr, hbuf, sizeof(*hdr));
 

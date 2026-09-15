@@ -165,8 +165,11 @@ int usb_core_run(int sock, usb_device_t *dev)
     uint8_t payload[USB_REDIR_BUF_SIZE];
     size_t len;
 
-    /* 1. Handshake: peer hello, then ours. */
-    if (usb_redir_recv(sock, &hdr, payload, sizeof(payload), &len) < 0)
+    /* 1. Handshake: peer hello, then ours. Ignore idle timeouts. */
+    int r;
+    while ((r = usb_redir_recv(sock, &hdr, payload, sizeof(payload), &len)) == 1)
+        ;
+    if (r < 0)
         return -1;
     if (hdr.type != RT_HELLO) {
         LOG_WARN("expected hello, got type %u", hdr.type);
@@ -180,13 +183,18 @@ int usb_core_run(int sock, usb_device_t *dev)
     if (announce_device(sock, dev) < 0)
         return -1;
 
-    /* 3. Serve requests until the peer goes away.
-     * TODO: this is a blocking loop bounded by the socket recv timeout.
-     * A real device needs poll()/non-blocking I/O to interleave streaming
-     * (tick) with incoming requests. */
+    /* 3. Serve requests until the peer goes away. The socket recv timeout
+     * turns an idle wait into a periodic tick, so streaming backends make
+     * progress even when no request is pending. */
     for (;;) {
-        if (usb_redir_recv(sock, &hdr, payload, sizeof(payload), &len) < 0)
-            break;
+        int rc = usb_redir_recv(sock, &hdr, payload, sizeof(payload), &len);
+        if (rc < 0)
+            break;              /* EOF / hard error: peer gone */
+        if (rc == 1) {          /* idle: no request pending */
+            if (dev->ops->tick)
+                dev->ops->tick(dev);
+            continue;
+        }
 
         switch (hdr.type) {
         case RT_CONTROL_PACKET:

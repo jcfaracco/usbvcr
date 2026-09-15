@@ -80,6 +80,13 @@ int recv_all(int sock, uint8_t *buf, size_t len)
  * usbredir frame layer                                                *
  * ------------------------------------------------------------------ */
 
+static FILE *g_record_fp;
+
+void transport_set_record(FILE *fp)
+{
+    g_record_fp = fp;
+}
+
 int usb_redir_send(int sock, uint32_t type, int32_t id,
                    const void *payload, size_t len)
 {
@@ -96,6 +103,13 @@ int usb_redir_send(int sock, uint32_t type, int32_t id,
         memcpy(frame + sizeof(hdr), payload, len);
 
     size_t frame_len = sizeof(hdr) + len;
+
+    if (g_record_fp) {
+        uint32_t rec = (uint32_t)frame_len;
+        fwrite(&rec, sizeof(rec), 1, g_record_fp);
+        fwrite(frame, 1, frame_len, g_record_fp);
+        fflush(g_record_fp);  /* survive a crash mid-run */
+    }
 
     if (send(sock, frame, frame_len, 0) < 0) {
         perror("send");

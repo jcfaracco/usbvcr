@@ -3,6 +3,9 @@ client_sources = files(
   'transport.c',
   'usb_core.c',
   'descriptor.c',
+  'fuzz.c',
+  'fuzz_wrap.c',
+  'record.c',
   'log.c',
   'backends/hid_keyboard.c',
 )

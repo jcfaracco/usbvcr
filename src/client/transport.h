@@ -3,8 +3,13 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "protocol.h"
+
+/* If set, every frame passed to usb_redir_send is also written to `fp`
+ * (length-prefixed) for later replay. Pass NULL to disable. */
+void transport_set_record(FILE *fp);
 
 /* Resolve host:port and open a TCP connection. Returns fd, or -1 on error. */
 int connect_to_server(const char *host, const char *port);

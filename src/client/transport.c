@@ -8,7 +8,8 @@
 #include <netdb.h>
 #include <unistd.h>
 
-#include "connection.h"
+#include "transport.h"
+#include "protocol.h"
 #include "log.h"
 
 /* ------------------------------------------------------------------ *
@@ -73,4 +74,52 @@ int recv_all(int sock, uint8_t *buf, size_t len)
         total += (size_t)n;
     }
     return (int)total;
+}
+
+/* ------------------------------------------------------------------ *
+ * usbredir frame layer                                                *
+ * ------------------------------------------------------------------ */
+
+int usb_redir_send(int sock, uint32_t type, int32_t id,
+                   const void *payload, size_t len)
+{
+    usbredir_header hdr = { type, (uint32_t)len, id };
+    uint8_t frame[USB_REDIR_BUF_SIZE];
+
+    if (sizeof(hdr) + len > sizeof(frame)) {
+        LOG_ERR("send: payload too large (%zu bytes)", len);
+        return -1;
+    }
+
+    memcpy(frame, &hdr, sizeof(hdr));
+    if (payload && len)
+        memcpy(frame + sizeof(hdr), payload, len);
+
+    size_t frame_len = sizeof(hdr) + len;
+
+    if (send(sock, frame, frame_len, 0) < 0) {
+        perror("send");
+        return -1;
+    }
+    return 0;
+}
+
+int usb_redir_recv(int sock, usbredir_header *hdr,
+                   uint8_t *buf, size_t cap, size_t *payload_len)
+{
+    uint8_t hbuf[sizeof(*hdr)];
+    if (recv_all(sock, hbuf, sizeof(hbuf)) <= 0)
+        return -1;
+    memcpy(hdr, hbuf, sizeof(*hdr));
+
+    if (hdr->length > cap) {
+        LOG_ERR("recv: payload %u exceeds buffer %zu", hdr->length, cap);
+        return -1;
+    }
+
+    if (hdr->length && recv_all(sock, buf, hdr->length) <= 0)
+        return -1;
+
+    *payload_len = hdr->length;
+    return 0;
 }

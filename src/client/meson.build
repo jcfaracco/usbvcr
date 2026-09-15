@@ -1,8 +1,10 @@
 client_sources = files(
   'main.c',
-  'connection.c',
+  'transport.c',
   'usb_core.c',
+  'descriptor.c',
   'log.c',
+  'backends/hid_keyboard.c',
 )
 
 # Pure POSIX sockets client — no external library dependencies.

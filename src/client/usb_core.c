@@ -1,167 +1,227 @@
-#include <stdio.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 #include "usb_core.h"
-#include "connection.h"
+#include "transport.h"
+#include "descriptor.h"
+#include "protocol.h"
 #include "log.h"
 
-/* The hello payload: 64‑byte version string + 4‑byte capabilities */
 #define HELLO_VERSION "usb_redir_hello 0.1"
-#define HELLO_PAYLOAD_SIZE 68
 
-static const char *packet_type_name(uint32_t type)
+/* ------------------------------------------------------------------ *
+ * Handshake / announcement                                            *
+ * ------------------------------------------------------------------ */
+
+static int send_hello(int sock)
 {
-    switch (type) {
-        case 0: return "hello";
-        case 1: return "device_connect";
-        case 2: return "device_disconnect";
-        case 3: return "reset";
-        case 4: return "interface_info";
-        case 5: return "ep_info";
-        case 6: return "set_configuration";
-        case 7: return "get_configuration";
-        case 8: return "configuration_status";
-        case 9: return "set_alt_setting";
-        case 10: return "get_alt_setting";
-        case 11: return "alt_setting_status";
-        case 12: return "start_iso_stream";
-        case 13: return "stop_iso_stream";
-        case 14: return "iso_stream_status";
-        case 15: return "start_interrupt_receiving";
-        case 16: return "stop_interrupt_receiving";
-        case 17: return "interrupt_receiving_status";
-        case 18: return "alloc_bulk_streams";
-        case 19: return "free_bulk_streams";
-        case 20: return "bulk_streams_status";
-        case 21: return "cancel_data_packet";
-        case 22: return "filter_reject";
-        case 23: return "filter_filter";
-        case 24: return "device_disconnect_ack";
-        case 100: return "data_control_packet";
-        case 101: return "data_bulk_packet";
-        case 102: return "data_iso_packet";
-        case 103: return "data_interrupt_packet";
-        default: return "UNKNOWN";
-    }
+    uint8_t hello[68];
+    memset(hello, 0, sizeof(hello));
+    strncpy((char *)hello, HELLO_VERSION, 63);
+    hello[64] = 0xdf;  /* capabilities bitmap (placeholder) */
+    return usb_redir_send(sock, RT_HELLO, 0, hello, sizeof(hello));
 }
 
-
-/* Receive and print one usbredir packet header + optional payload */
-int receive_and_print_packet(int sock)
+/* Derive interface_info + ep_info from the device's config descriptor and
+ * announce the device to the peer. */
+static int announce_device(int sock, usb_device_t *dev)
 {
-    uint8_t hdr_buf[12];
-    if (recv_all(sock, hdr_buf, sizeof(hdr_buf)) <= 0)
+    const uint8_t *dd, *cd;
+    uint16_t ddlen, cdlen;
+
+    if (dev->ops->get_descriptor(dev, USB_DESC_DEVICE, 0, 0, &dd, &ddlen) < 0 ||
+        dev->ops->get_descriptor(dev, USB_DESC_CONFIG, 0, 0, &cd, &cdlen) < 0) {
+        LOG_ERR("backend missing device/config descriptor");
+        return -1;
+    }
+
+    usbredir_interface_info_header ii;
+    usbredir_ep_info_header ei;
+    if (desc_parse_config(cd, cdlen, &ii, &ei) < 0)
         return -1;
 
-    /* Parse little‑endian fields */
-    uint32_t type = hdr_buf[0] | (hdr_buf[1] << 8) | (hdr_buf[2] << 16) | (hdr_buf[3] << 24);
-    uint32_t len  = hdr_buf[4] | (hdr_buf[5] << 8) | (hdr_buf[6] << 16) | (hdr_buf[7] << 24);
-    uint32_t id   = hdr_buf[8] | (hdr_buf[9] << 8) | (hdr_buf[10] << 16) | (hdr_buf[11] << 24);
+    if (usb_redir_send(sock, RT_INTERFACE_INFO, 0, &ii, sizeof(ii)) < 0 ||
+        usb_redir_send(sock, RT_EP_INFO, 0, &ei, sizeof(ei)) < 0)
+        return -1;
 
-    LOG_IN("Received packet: type=%s (%u), length=%u, id=0x%x",
-           packet_type_name(type), type, len, id);
+    /* Device descriptor: class @4/5/6, idVendor @8, idProduct @10, bcd @12. */
+    usbredir_device_connect_header c;
+    memset(&c, 0, sizeof(c));
+    c.speed              = USB_REDIR_SPEED_HIGH;  /* TODO: expose via backend */
+    c.device_class       = dd[4];
+    c.device_subclass    = dd[5];
+    c.device_protocol    = dd[6];
+    c.vendor_id          = (uint16_t)(dd[8]  | (dd[9]  << 8));
+    c.product_id         = (uint16_t)(dd[10] | (dd[11] << 8));
+    c.device_version_bcd = (uint16_t)(dd[12] | (dd[13] << 8));
 
-    char hex[12 * 3 + 1];
-    int off = 0;
-    for (int i = 0; i < 12; i++)
-        off += snprintf(hex + off, sizeof(hex) - off, "%02x ", hdr_buf[i]);
-    LOG_IN("    Raw header: %s", hex);
+    LOG_INFO("Announcing device %04x:%04x, %u interface(s)",
+             c.vendor_id, c.product_id, ii.interface_count);
 
-    /* Consume the payload (print first 64 bytes if it's a hello) */
-    if (len > 0) {
-        if (type == RT_HELLO && len >= 64) {
-            uint8_t version[65];
-            memset(version, 0, sizeof(version));
-            if (recv_all(sock, version, 64) <= 0)
-                return -1;
-            LOG_INFO("    Server version: \"%s\"", version);
+    return usb_redir_send(sock, RT_DEVICE_CONNECT, 0, &c, sizeof(c));
+}
 
-            /* Discard the rest of the hello payload (capabilities, etc.) */
-            if (len > 64) {
-                if (recv_all(sock, NULL, len - 64) < 0)
-                    return -1;
-            }
-        } else {
-            /* Discard unknown payload */
-            if (recv_all(sock, NULL, len) < 0)
-                return -1;
+/* ------------------------------------------------------------------ *
+ * Control transfers                                                   *
+ * ------------------------------------------------------------------ */
+
+static int reply_control(int sock, int32_t id,
+                         const usbredir_control_packet_header *setup,
+                         uint8_t status, const uint8_t *data, uint16_t n)
+{
+    uint8_t buf[USB_REDIR_BUF_SIZE];
+    usbredir_control_packet_header h = *setup;
+    h.status = status;
+    h.length = n;
+
+    memcpy(buf, &h, sizeof(h));
+    if (data && n)
+        memcpy(buf + sizeof(h), data, n);
+
+    return usb_redir_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n);
+}
+
+static void handle_control(int sock, usb_device_t *dev, int32_t id,
+                           const uint8_t *payload, size_t len)
+{
+    if (len < sizeof(usbredir_control_packet_header)) {
+        LOG_WARN("control packet too short (%zu bytes)", len);
+        return;
+    }
+
+    usbredir_control_packet_header setup;
+    memcpy(&setup, payload, sizeof(setup));
+
+    /* Standard GET_DESCRIPTOR (device-to-host). */
+    if (setup.requesttype == USB_DIR_IN &&
+        setup.request == USB_REQ_GET_DESCRIPTOR) {
+        uint8_t  dtype = (uint8_t)(setup.value >> 8);
+        uint8_t  dindex = (uint8_t)(setup.value & 0xff);
+        const uint8_t *desc;
+        uint16_t dlen;
+
+        if (dev->ops->get_descriptor(dev, dtype, dindex, setup.index,
+                                     &desc, &dlen) < 0) {
+            LOG_DEBUG("stall: no descriptor type=0x%02x index=%u", dtype, dindex);
+            reply_control(sock, id, &setup, 1, NULL, 0);  /* stall */
+            return;
+        }
+
+        uint16_t n = dlen < setup.length ? dlen : setup.length;
+        LOG_DEBUG("GET_DESCRIPTOR type=0x%02x index=%u -> %u bytes",
+                  dtype, dindex, n);
+        reply_control(sock, id, &setup, 0, desc, n);
+        return;
+    }
+
+    /* Class/vendor request: hand to the backend. */
+    if (dev->ops->control) {
+        uint8_t data[USB_REDIR_BUF_SIZE];
+        uint16_t n = 0;
+        if (dev->ops->control(dev, &setup, data, &n) == 0) {
+            reply_control(sock, id, &setup, 0, data, n);
+            return;
         }
     }
 
-    return (int)type;
+    LOG_DEBUG("stall: unhandled control req=0x%02x type=0x%02x",
+              setup.request, setup.requesttype);
+    reply_control(sock, id, &setup, 1, NULL, 0);  /* stall */
 }
-
 
 /* ------------------------------------------------------------------ *
- * USB‑redir hello exchange                                            *
+ * Interrupt IN production                                             *
  * ------------------------------------------------------------------ */
 
-/* Build our hello packet into `out`. Returns total size. */
-size_t build_hello_packet(uint8_t *out)
+static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep)
 {
-    uint8_t payload[HELLO_PAYLOAD_SIZE];
-    memset(payload, 0, sizeof(payload));
+    if (!dev->ops->ep_in)
+        return;
 
-    /* First 64 bytes: version string (zero‑padded) */
-    strncpy((char *)payload, HELLO_VERSION, 64);
+    /* Drain whatever the backend wants to send right now. */
+    for (;;) {
+        uint8_t data[USB_REDIR_BUF_SIZE];
+        int n = dev->ops->ep_in(dev, ep, data, sizeof(data));
+        if (n <= 0)
+            break;
 
-    /* Last 4 bytes: capabilities bitmap */
-    payload[64] = 0xdf;
-    payload[65] = 0x00;
-    payload[66] = 0x00;
-    payload[67] = 0x00;
+        uint8_t buf[USB_REDIR_BUF_SIZE];
+        usbredir_interrupt_packet_header h = { ep, 0, (uint16_t)n };
+        memcpy(buf, &h, sizeof(h));
+        memcpy(buf + sizeof(h), data, (size_t)n);
 
-    /* Prepend the 12‑byte header */
-    usbredir_header hdr;
-    hdr.type   = RT_HELLO;
-    hdr.length = HELLO_PAYLOAD_SIZE;
-    hdr.id     = 0;
-
-    memcpy(out, &hdr, sizeof(hdr));
-    memcpy(out + sizeof(hdr), payload, HELLO_PAYLOAD_SIZE);
-
-    return sizeof(hdr) + HELLO_PAYLOAD_SIZE;
-}
-
-size_t build_interface_info_pkt(uint8_t *out) {
-    usbredir_interface_info_header info = {0};
-    info.interface_count = 1;
-    info.interface_class[0] = 3;
-
-    usbredir_header hdr = {4, sizeof(info), 0};
-    memcpy(out, &hdr, sizeof(hdr));
-    memcpy(out + sizeof(hdr), &info, sizeof(info));
-    return sizeof(hdr) + sizeof(info);
-}
-
-size_t build_ep_info_pkt(uint8_t *out) {
-    usbredir_ep_info_header ep = {0};
-    for (int i = 0; i < 32; i++) {
-        ep.type[i] = 0;
-        ep.interval[i] = 0;
-        ep.interface[i] = 0;
-        ep.max_packet_size[i] = 0;
-        ep.max_streams[i] = 0;
+        if (usb_redir_send(sock, RT_INTERRUPT_PACKET, 0, buf, sizeof(h) + n) < 0)
+            break;
+        LOG_OUT("interrupt report on ep 0x%02x (%d bytes)", ep, n);
     }
-    ep.max_packet_size[0] = 0x40;
-
-    usbredir_header hdr = {5, sizeof(ep), 0};
-    memcpy(out, &hdr, sizeof(hdr));
-    memcpy(out + sizeof(hdr), &ep, sizeof(ep));
-    return sizeof(hdr) + sizeof(ep);
 }
 
-size_t build_connect_pkt(uint8_t *out) {
-    usbredir_device_connect_header conn = {
-        USB_REDIR_SPEED_HIGH, 0, 0, 0,
-        0x1130, 0x3101, 0x0002
-    };
+/* ------------------------------------------------------------------ *
+ * Main dispatch loop                                                  *
+ * ------------------------------------------------------------------ */
 
-    usbredir_header hdr = {1, sizeof(conn), 0};
-    memcpy(out, &hdr, sizeof(hdr));
-    memcpy(out + sizeof(hdr), &conn, sizeof(conn));
-    return sizeof(hdr) + sizeof(conn);
+int usb_core_run(int sock, usb_device_t *dev)
+{
+    usbredir_header hdr;
+    uint8_t payload[USB_REDIR_BUF_SIZE];
+    size_t len;
+
+    /* 1. Handshake: peer hello, then ours. */
+    if (usb_redir_recv(sock, &hdr, payload, sizeof(payload), &len) < 0)
+        return -1;
+    if (hdr.type != RT_HELLO) {
+        LOG_WARN("expected hello, got type %u", hdr.type);
+        return -1;
+    }
+    LOG_INFO("Peer hello: \"%.63s\"", (char *)payload);
+    if (send_hello(sock) < 0)
+        return -1;
+
+    /* 2. Announce the emulated device. */
+    if (announce_device(sock, dev) < 0)
+        return -1;
+
+    /* 3. Serve requests until the peer goes away.
+     * TODO: this is a blocking loop bounded by the socket recv timeout.
+     * A real device needs poll()/non-blocking I/O to interleave streaming
+     * (tick) with incoming requests. */
+    for (;;) {
+        if (usb_redir_recv(sock, &hdr, payload, sizeof(payload), &len) < 0)
+            break;
+
+        switch (hdr.type) {
+        case RT_CONTROL_PACKET:
+            handle_control(sock, dev, hdr.id, payload, len);
+            break;
+
+        case RT_START_INTERRUPT_RECEIVING:
+            if (len >= 1) {
+                uint8_t ep = payload[0];
+                LOG_DEBUG("start interrupt receiving on ep 0x%02x", ep);
+                push_interrupt_reports(sock, dev, ep);
+            }
+            break;
+
+        case RT_STOP_INTERRUPT_RECEIVING:
+            LOG_DEBUG("stop interrupt receiving");
+            break;
+
+        case RT_INTERRUPT_PACKET:  /* OUT (e.g. keyboard LEDs) */
+            if (dev->ops->ep_out && len > sizeof(usbredir_interrupt_packet_header)) {
+                usbredir_interrupt_packet_header h;
+                memcpy(&h, payload, sizeof(h));
+                dev->ops->ep_out(dev, h.endpoint,
+                                 payload + sizeof(h), len - sizeof(h));
+            }
+            break;
+
+        default:
+            LOG_DEBUG("unhandled packet type=%u len=%zu", hdr.type, len);
+            break;
+        }
+
+        if (dev->ops->tick)
+            dev->ops->tick(dev);
+    }
+
+    return 0;
 }

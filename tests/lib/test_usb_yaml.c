@@ -1,8 +1,8 @@
-/* Tests for src/lib/yaml2.c */
+/* Tests for src/lib/usb_yaml.c */
 #include <stdlib.h>
 #include <check.h>
 
-#include "yaml2.h"
+#include "usb_yaml.h"
 
 #ifndef TEST_DATA_DIR
 #define TEST_DATA_DIR "tests/data"
@@ -25,9 +25,9 @@ START_TEST(test_read_yaml_hid)
 }
 END_TEST
 
-static Suite *yaml2_suite(void)
+static Suite *usb_yaml_suite(void)
 {
-    Suite *s = suite_create("yaml2");
+    Suite *s = suite_create("usb_yaml");
     TCase *tc = tcase_create("read_yaml");
 
     tcase_add_test(tc, test_read_yaml_missing_file);
@@ -40,7 +40,7 @@ static Suite *yaml2_suite(void)
 int main(void)
 {
     int failed;
-    Suite *s = yaml2_suite();
+    Suite *s = usb_yaml_suite();
     SRunner *sr = srunner_create(s);
 
     srunner_run_all(sr, CK_NORMAL);

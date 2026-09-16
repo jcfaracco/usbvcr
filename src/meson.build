@@ -7,8 +7,8 @@ main_sources = files(
   'fuzz/fuzz_wrap.c',
   'lib/record.c',
   'lib/log.c',
-  'lib/yaml2.c',
-#  'lib/pcap2.c',
+  'lib/usb_yaml.c',
+#  'lib/usbpcap_hdr.c',
   'lib/utils.c',
   'backends/hid_keyboard.c',
 )

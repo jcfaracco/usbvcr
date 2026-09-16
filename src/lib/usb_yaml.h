@@ -1,7 +1,7 @@
 #ifndef USBREDIR_CLIENT_YAML_H
 #define USBREDIR_CLIENT_YAML_H
 
-#include "pcap2.h"
+#include "usbpcap_hdr.h"
 #include "../core/protocol.h"
 
 typedef struct {

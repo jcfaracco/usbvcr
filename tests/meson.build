@@ -7,11 +7,11 @@ endif
 if check_dep.found()
   test_data_dir = meson.current_source_dir() / 'data'
 
-  test_yaml2 = executable(
-    'test_yaml2',
-    'lib/test_yaml2.c',
+  test_usb_yaml = executable(
+    'test_usb_yaml',
+    'lib/test_usb_yaml.c',
     files(
-      '../src/lib/yaml2.c',
+      '../src/lib/usb_yaml.c',
       '../src/lib/log.c',
       '../src/lib/utils.c',
     ),
@@ -20,5 +20,5 @@ if check_dep.found()
     dependencies : [check_dep, yaml_dep],
   )
 
-  test('yaml2', test_yaml2)
+  test('usb_yaml', test_usb_yaml)
 endif

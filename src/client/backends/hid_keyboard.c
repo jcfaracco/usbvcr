@@ -7,8 +7,8 @@
 
 /* HID boot-protocol keyboard. Endpoint 0x81 (interrupt IN), 8-byte reports. */
 
-#define KBD_VID 0x1234
-#define KBD_PID 0x5678
+#define KBD_VID 0x04d9
+#define KBD_PID 0x1702
 #define KBD_EP_IN 0x81
 
 /* ---- Descriptors ---- */

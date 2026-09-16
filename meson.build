@@ -14,3 +14,4 @@ project(
 add_project_arguments('-D_DEFAULT_SOURCE', language : 'c')
 
 subdir('src')
+subdir('tests')

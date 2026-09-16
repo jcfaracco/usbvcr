@@ -5,7 +5,7 @@
 #include <stddef.h>
 
 /*
- * usbredir wire protocol definitions (little-endian on the wire).
+ * usb wire protocol definitions (little-endian on the wire).
  * NOTE: structs are memcpy'd to/from the socket assuming a little-endian
  * host. On a big-endian host these would need byte swapping.
  */
@@ -20,9 +20,9 @@ typedef struct {
     uint32_t type;
     uint32_t length;
     int64_t  id;
-} usbredir_header;
+} usb_header_t;
 
-/* usbredir packet types (subset we use). */
+/* usb packet types (subset we use). */
 enum {
     RT_HELLO                    = 0,
     RT_DEVICE_CONNECT           = 1,
@@ -41,7 +41,7 @@ enum {
     RT_INTERRUPT_PACKET         = 103,
 };
 
-/* usbredir capability bits (indices into hello capabilities[]). Several
+/* usb capability bits (indices into hello capabilities[]). Several
  * of these change wire struct sizes, so what we advertise MUST match the
  * layouts we actually send below. */
 enum {
@@ -60,7 +60,7 @@ enum {
  *
  * qemu-xhci puts the device on a SuperSpeed port and requires the host to
  * advertise ep_info_max_packet_size, 32bits_bulk_length and 64bits_ids
- * (see usbredir_do_attach). 64bits_ids widens the post-hello header to 16
+ * (see usb_do_attach). 64bits_ids widens the post-hello header to 16
  * bytes, which the transport layer handles. bulk_streams gates the
  * ep_info max_streams array (which we serialize, zeroed). */
 #define USB_REDIR_OUR_CAPS \
@@ -105,7 +105,7 @@ enum {
 typedef struct {
     char     version[64];
     uint32_t capabilities[1];
-} usbredir_hello_header;
+} usb_hello_header_t;
 
 /* RT_INTERFACE_INFO payload. Arrays indexed by interface number. */
 typedef struct {
@@ -114,16 +114,16 @@ typedef struct {
     uint8_t  interface_class[32];
     uint8_t  interface_subclass[32];
     uint8_t  interface_protocol[32];
-} usbredir_interface_info_header;
+} usb_interface_info_header_t;
 
-/* RT_EP_INFO payload. Arrays indexed by usbredir endpoint index (0..31). */
+/* RT_EP_INFO payload. Arrays indexed by usb endpoint index (0..31). */
 typedef struct {
     uint8_t  type[32];
     uint8_t  interval[32];
     uint8_t  interface[32];
     uint16_t max_packet_size[32];
     uint32_t max_streams[32];
-} usbredir_ep_info_header;
+} usb_ep_info_header_t;
 
 /* RT_DEVICE_CONNECT payload. */
 typedef struct {
@@ -134,7 +134,7 @@ typedef struct {
     uint16_t vendor_id;
     uint16_t product_id;
     uint16_t device_version_bcd;
-} usbredir_device_connect_header;
+} usb_device_connect_header_t;
 
 /* RT_CONTROL_PACKET header (mirrors the USB setup packet). */
 typedef struct {
@@ -145,19 +145,19 @@ typedef struct {
     uint16_t value;        /* wValue */
     uint16_t index;        /* wIndex */
     uint16_t length;       /* wLength */
-} usbredir_control_packet_header;
+} usb_control_packet_header_t;
 
 /* RT_INTERRUPT_PACKET header, followed by report data. */
 typedef struct {
     uint8_t  endpoint;
     uint8_t  status;
     uint16_t length;
-} usbredir_interrupt_packet_header;
+} usb_interrupt_packet_header_t;
 
 #pragma pack(pop)
 
-/* usbredir endpoint index: 0..15 for OUT eps, 16..31 for IN eps. */
-static inline uint8_t usbredir_ep_index(uint8_t ep_addr)
+/* usb endpoint index: 0..15 for OUT eps, 16..31 for IN eps. */
+static inline uint8_t usb_ep_index(uint8_t ep_addr)
 {
     return (ep_addr & 0x0f) | ((ep_addr & 0x80) >> 3);
 }

@@ -22,7 +22,7 @@
 
 void desc_set_interface_info_header(const uint8_t *cfg, uint8_t cur_iface,
                                     size_t offset,
-                                    usbredir_interface_info_header *ii)
+                                    usb_interface_info_header_t *ii)
 {
     uint32_t n = ii->interface_count;
 
@@ -41,10 +41,10 @@ void desc_set_interface_info_header(const uint8_t *cfg, uint8_t cur_iface,
 
 void desc_set_ep_info_header(const uint8_t *cfg, uint8_t cur_iface,
                              size_t offset,
-                             usbredir_ep_info_header *ei)
+                             usb_ep_info_header_t *ei)
 {
     uint8_t addr = cfg[offset + EP_bEndpointAddress];
-    uint8_t idx  = usbredir_ep_index(addr);
+    uint8_t idx  = usb_ep_index(addr);
 
     ei->type[idx]     = cfg[offset + EP_bmAttributes] & 0x03;
     ei->interval[idx] = cfg[offset + EP_bInterval];
@@ -56,8 +56,8 @@ void desc_set_ep_info_header(const uint8_t *cfg, uint8_t cur_iface,
 
 
 int desc_parse_config(const uint8_t *cfg, size_t len,
-                      usbredir_interface_info_header *ii,
-                      usbredir_ep_info_header *ei)
+                      usb_interface_info_header_t *ii,
+                      usb_ep_info_header_t *ei)
 {
     memset(ii, 0, sizeof(*ii));
     memset(ei, 0, sizeof(*ei));

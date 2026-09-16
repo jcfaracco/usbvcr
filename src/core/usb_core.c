@@ -14,7 +14,7 @@
 
 static int send_hello(int sock)
 {
-    usbredir_hello_header h;
+    usb_hello_header_t h;
     memset(&h, 0, sizeof(h));
     strncpy(h.version, HELLO_VERSION, sizeof(h.version) - 1);
 
@@ -36,8 +36,8 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
         return -1;
     }
 
-    usbredir_interface_info_header ii;
-    usbredir_ep_info_header ei;
+    usb_interface_info_header_t ii;
+    usb_ep_info_header_t ei;
     if (desc_parse_config(cd, cdlen, &ii, &ei) < 0)
         return -1;
 
@@ -45,8 +45,8 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
      * config, so fill its ep_info from the device descriptor's
      * bMaxPacketSize0 (byte 7). Without a nonzero max packet size the peer
      * cannot run control transfers and enumeration stalls. */
-    uint8_t ep0_out = usbredir_ep_index(0x00);
-    uint8_t ep0_in  = usbredir_ep_index(0x80);
+    uint8_t ep0_out = usb_ep_index(0x00);
+    uint8_t ep0_in  = usb_ep_index(0x80);
     ei.type[ep0_out] = ei.type[ep0_in] = 0;   /* control */
     ei.max_packet_size[ep0_out] = ei.max_packet_size[ep0_in] = dd[7];
 
@@ -55,11 +55,11 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
      *   max_packet_size  <- cap_ep_info_max_packet_size
      *   max_streams      <- cap_bulk_streams   (NOT a separate cap)
      * Sending the wrong length desyncs its parser. */
-    size_t eilen = offsetof(usbredir_ep_info_header, max_packet_size);
+    size_t eilen = offsetof(usb_ep_info_header_t, max_packet_size);
     if (caps & (1u << USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE))
-        eilen = offsetof(usbredir_ep_info_header, max_streams);
+        eilen = offsetof(usb_ep_info_header_t, max_streams);
     if (caps & (1u << USB_REDIR_CAP_BULK_STREAMS))
-        eilen = sizeof(usbredir_ep_info_header);   /* includes max_streams */
+        eilen = sizeof(usb_ep_info_header_t);   /* includes max_streams */
 
     LOG_DEBUG("announce: negotiated caps=0x%08x ep_info=%zu bytes", caps, eilen);
 
@@ -68,7 +68,7 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
         return -1;
 
     /* Device descriptor: class @4/5/6, idVendor @8, idProduct @10, bcd @12. */
-    usbredir_device_connect_header c;
+    usb_device_connect_header_t c;
     memset(&c, 0, sizeof(c));
     /* bMaxPacketSize0==8 is a full-speed value; announcing HIGH would be
      * inconsistent. TODO: expose speed via the backend. */
@@ -85,9 +85,9 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
 
     /* device_version_bcd is only present when connect_device_version is
      * negotiated; otherwise the peer expects the shorter header. */
-    size_t clen = offsetof(usbredir_device_connect_header, device_version_bcd);
+    size_t clen = offsetof(usb_device_connect_header_t, device_version_bcd);
     if (caps & (1u << USB_REDIR_CAP_CONNECT_DEVICE_VERSION))
-        clen = sizeof(usbredir_device_connect_header);
+        clen = sizeof(usb_device_connect_header_t);
 
     return usb_redir_send(sock, RT_DEVICE_CONNECT, 0, &c, clen);
 }
@@ -97,11 +97,11 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
  * ------------------------------------------------------------------ */
 
 static int reply_control(int sock, int64_t id,
-                         const usbredir_control_packet_header *setup,
+                         const usb_control_packet_header_t *setup,
                          uint8_t status, const uint8_t *data, uint16_t n)
 {
     uint8_t buf[USB_REDIR_BUF_SIZE];
-    usbredir_control_packet_header h = *setup;
+    usb_control_packet_header_t h = *setup;
     h.status = status;
     h.length = n;
 
@@ -115,12 +115,12 @@ static int reply_control(int sock, int64_t id,
 static void handle_control(int sock, usb_device_t *dev, int64_t id,
                            const uint8_t *payload, size_t len)
 {
-    if (len < sizeof(usbredir_control_packet_header)) {
+    if (len < sizeof(usb_control_packet_header_t)) {
         LOG_WARN("control packet too short (%zu bytes)", len);
         return;
     }
 
-    usbredir_control_packet_header setup;
+    usb_control_packet_header_t setup;
     memcpy(&setup, payload, sizeof(setup));
 
     /* Standard GET_DESCRIPTOR (device-to-host). */
@@ -177,7 +177,7 @@ static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep)
             break;
 
         uint8_t buf[USB_REDIR_BUF_SIZE];
-        usbredir_interrupt_packet_header h = { ep, 0, (uint16_t)n };
+        usb_interrupt_packet_header_t h = { ep, 0, (uint16_t)n };
         memcpy(buf, &h, sizeof(h));
         memcpy(buf + sizeof(h), data, (size_t)n);
 
@@ -193,7 +193,7 @@ static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep)
 
 int usb_core_run(int sock, usb_device_t *dev)
 {
-    usbredir_header hdr;
+    usb_header_t hdr;
     uint8_t payload[USB_REDIR_BUF_SIZE];
     size_t len;
 
@@ -210,7 +210,7 @@ int usb_core_run(int sock, usb_device_t *dev)
     LOG_INFO("Peer hello: \"%.63s\"", (char *)payload);
 
     uint32_t peer_caps = 0;
-    if (len >= sizeof(usbredir_hello_header)) {
+    if (len >= sizeof(usb_hello_header_t)) {
         memcpy(&peer_caps, payload + 64, sizeof(peer_caps));
         LOG_DEBUG("peer capabilities[0]=0x%08x", peer_caps);
     }
@@ -259,8 +259,8 @@ int usb_core_run(int sock, usb_device_t *dev)
             break;
 
         case RT_INTERRUPT_PACKET:  /* OUT (e.g. keyboard LEDs) */
-            if (dev->ops->ep_out && len > sizeof(usbredir_interrupt_packet_header)) {
-                usbredir_interrupt_packet_header h;
+            if (dev->ops->ep_out && len > sizeof(usb_interrupt_packet_header_t)) {
+                usb_interrupt_packet_header_t h;
                 memcpy(&h, payload, sizeof(h));
                 dev->ops->ep_out(dev, h.endpoint,
                                  payload + sizeof(h), len - sizeof(h));

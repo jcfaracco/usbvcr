@@ -90,7 +90,7 @@ int recv_all(int sock, uint8_t *buf, size_t len)
 }
 
 /* ------------------------------------------------------------------ *
- * usbredir frame layer                                                *
+ * usb frame layer                                                *
  * ------------------------------------------------------------------ */
 
 static FILE *g_record_fp;
@@ -156,7 +156,7 @@ int usb_redir_send(int sock, uint32_t type, int64_t id,
     return 0;
 }
 
-int usb_redir_recv(int sock, usbredir_header *hdr,
+int usb_redir_recv(int sock, usb_header_t *hdr,
                    uint8_t *buf, size_t cap, size_t *payload_len)
 {
     uint8_t hbuf[16];

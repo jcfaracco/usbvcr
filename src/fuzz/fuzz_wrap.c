@@ -42,7 +42,7 @@ static int fw_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
 }
 
 static int fw_control(usb_device_t *dev,
-                      const usbredir_control_packet_header *setup,
+                      const usb_control_packet_header_t *setup,
                       uint8_t *data, uint16_t *len)
 {
     fuzz_state_t *fs = dev->state;

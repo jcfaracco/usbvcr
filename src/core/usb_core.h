@@ -4,7 +4,7 @@
 #include "device.h"
 
 /*
- * usbredir engine. Performs the hello handshake, announces the device
+ * usb engine. Performs the hello handshake, announces the device
  * (derived from its descriptors), then serves control requests and
  * endpoint traffic by delegating to the backend `dev`.
  *

@@ -24,16 +24,16 @@ int connect_to_server(const char *host, const char *port);
  * -1 on error/EOF. */
 int recv_all(int sock, uint8_t *buf, size_t len);
 
-/* Send one usbredir frame: header (12 or 16 bytes) + payload. Returns 0,
+/* Send one usb frame: header (12 or 16 bytes) + payload. Returns 0,
  * or -1. */
 int usb_redir_send(int sock, uint32_t type, int64_t id,
                    const void *payload, size_t len);
 
-/* Receive one usbredir frame. Fills `hdr`, copies the payload into `buf`
+/* Receive one usb frame. Fills `hdr`, copies the payload into `buf`
  * (capacity `cap`) and stores its length in `*payload_len`.
  * Returns 0 on a frame; 1 on an idle timeout (no frame, keep waiting);
  * -1 on error/EOF/oversized payload. */
-int usb_redir_recv(int sock, usbredir_header *hdr,
+int usb_redir_recv(int sock, usb_header_t *hdr,
                    uint8_t *buf, size_t cap, size_t *payload_len);
 
 #endif

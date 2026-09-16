@@ -9,7 +9,7 @@
 /*
  * Generic emulated-device backend interface.
  *
- * The usb_core engine owns the usbredir transport, the handshake, the
+ * The usb_core engine owns the usb transport, the handshake, the
  * standard control requests and endpoint routing. A backend supplies only
  * what is class-specific: its descriptors and its endpoint I/O. The same
  * engine drives a HID keyboard, a mass-storage disk, a UVC camera, etc.
@@ -29,7 +29,7 @@ typedef struct {
      * For IN transfers, fill `data` and set *len. Return 0 on success
      * (ACK), -1 to stall. */
     int (*control)(usb_device_t *dev,
-                   const usbredir_control_packet_header *setup,
+                   const usb_control_packet_header_t *setup,
                    uint8_t *data, uint16_t *len);
 
     /* Endpoint data. `ep` is the full bEndpointAddress.

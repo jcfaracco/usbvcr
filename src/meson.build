@@ -7,6 +7,9 @@ main_sources = files(
   'fuzz/fuzz_wrap.c',
   'lib/record.c',
   'lib/log.c',
+  'lib/yaml2.c',
+#  'lib/pcap2.c',
+  'lib/utils.c',
   'backends/hid_keyboard.c',
 )
 
@@ -20,5 +23,6 @@ executable(
   'usb_redir_hello',
   main_sources,
   include_directories : [lib, core, fuzz],
+  dependencies: [yaml_dep],
   install : true,
 )

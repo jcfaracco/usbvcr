@@ -1,0 +1,77 @@
+# 1. Device Descriptor Request
+- packet:
+    - USBpcap:
+        header_len: 27
+        irp_id: 0xffff800010000001
+        status: 0
+        function: 0x000b # URB_FUNCTION_CONTROL_TRANSFER
+        info: 0          # Host -> Device (OUT)
+        bus: 1
+        device: 3
+        endpoint: 0x00
+        transfer: 2      # Control
+        data_length: 8
+    - USBpcapSetup:
+        bmRequestType: 0x80 # Device-to-Host, Standard, Device
+        bRequest: 0x06     # GET_DESCRIPTOR
+        wValue: 0x0100     # Device Descriptor
+        wIndex: 0x0000
+        wLength: 18
+
+# 2. HID Report Descriptor Request (Class-Specific Request)
+- packet:
+    - USBpcap:
+        header_len: 27
+        irp_id: 0xffff800010000002
+        status: 0
+        function: 0x000b # URB_FUNCTION_CONTROL_TRANSFER
+        info: 0          # Host -> Device
+        bus: 1
+        device: 3
+        endpoint: 0x00
+        transfer: 2      # Control
+        data_length: 8
+    - USBpcapSetup:
+        bmRequestType: 0x81 # Device-to-Host, Class, Interface
+        bRequest: 0x06     # GET_DESCRIPTOR
+        wValue: 0x2200     # Report Descriptor (0x22)
+        wIndex: 0x0000     # Interface 0
+        wLength: 63
+
+# 3. HID Interrupt IN Transfer (Keyboard Keypress Payload)
+# Standard 8-byte HID Keyboard Report:
+# [Modifiers, Reserved, Keycode 1, Keycode 2, Keycode 3, Keycode 4, Keycode 5, Keycode 6]
+- packet:
+    - USBpcap:
+        header_len: 27
+        irp_id: 0xffff800010000003
+        status: 0
+        function: 0x0009 # URB_FUNCTION_BULK_OR_INTERRUPT_TRANSFER
+        info: 1          # Device -> Host (IN)
+        bus: 1
+        device: 3
+        endpoint: 0x81   # EP 1 IN
+        transfer: 1      # Interrupt Transfer
+        data_length: 8
+    - Raw:
+        # Byte 0: Modifiers (0x00)
+        # Byte 1: Reserved (0x00)
+        # Byte 2: Keycode (0x04 = Keyboard 'a')
+        load: "\x00\x00\x04\x00\x00\x00\x00\x00"
+
+# 4. HID Interrupt IN Transfer (Key Release)
+- packet:
+    - USBpcap:
+        header_len: 27
+        irp_id: 0xffff800010000004
+        status: 0
+        function: 0x0009
+        info: 1          # Device -> Host (IN)
+        bus: 1
+        device: 3
+        endpoint: 0x81
+        transfer: 1      # Interrupt Transfer
+        data_length: 8
+    - Raw:
+        # All zeros = key released
+        load: "\x00\x00\x00\x00\x00\x00\x00\x00"

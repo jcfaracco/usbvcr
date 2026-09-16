@@ -19,6 +19,42 @@
 #define EP_wMaxPacketSize   4  /* little-endian u16 */
 #define EP_bInterval        6
 
+
+void desc_set_interface_info_header(const uint8_t *cfg, uint8_t cur_iface,
+                                    size_t offset,
+                                    usbredir_interface_info_header *ii)
+{
+    uint32_t n = ii->interface_count;
+
+    if (cur_iface >= 32)
+        return;
+
+    if (cur_iface + 1u > n)
+        ii->interface_count = cur_iface + 1u;
+
+    ii->interface[cur_iface]           = cur_iface;
+    ii->interface_class[cur_iface]     = cfg[offset + IFACE_bInterfaceClass];
+    ii->interface_subclass[cur_iface]  = cfg[offset + IFACE_bInterfaceSubClass];
+    ii->interface_protocol[cur_iface]  = cfg[offset + IFACE_bInterfaceProtocol];
+}
+
+
+void desc_set_ep_info_header(const uint8_t *cfg, uint8_t cur_iface,
+                             size_t offset,
+                             usbredir_ep_info_header *ei)
+{
+    uint8_t addr = cfg[offset + EP_bEndpointAddress];
+    uint8_t idx  = usbredir_ep_index(addr);
+
+    ei->type[idx]     = cfg[offset + EP_bmAttributes] & 0x03;
+    ei->interval[idx] = cfg[offset + EP_bInterval];
+    ei->interface[idx] = cur_iface;
+    ei->max_packet_size[idx] =
+        (uint16_t)(cfg[offset + EP_wMaxPacketSize] |
+                  (cfg[offset + EP_wMaxPacketSize + 1] << 8));
+}
+
+
 int desc_parse_config(const uint8_t *cfg, size_t len,
                       usbredir_interface_info_header *ii,
                       usbredir_ep_info_header *ei)
@@ -27,40 +63,35 @@ int desc_parse_config(const uint8_t *cfg, size_t len,
     memset(ei, 0, sizeof(*ei));
 
     uint8_t cur_iface = 0;   /* interface owning the endpoints we see */
-    size_t off = 0;
+    size_t offset = 0;
 
-    while (off + 2 <= len) {
-        uint8_t blen = cfg[off + DESC_bLength];
-        uint8_t btype = cfg[off + DESC_bDescriptorType];
+    while (offset + 2 <= len) {
+        uint8_t blen = cfg[offset + DESC_bLength];
+        uint8_t btype = cfg[offset + DESC_bDescriptorType];
 
-        if (blen == 0 || off + blen > len) {
-            LOG_ERR("descriptor: malformed at offset %zu", off);
+        if (blen == 0 || offset + blen > len) {
+            LOG_ERR("descriptor: malformed at offset %zu", offset);
             return -1;
         }
 
-        if (btype == USB_DESC_INTERFACE && blen >= 9) {
-            cur_iface = cfg[off + IFACE_bInterfaceNumber];
-            if (cur_iface < 32) {
-                uint32_t n = ii->interface_count;
-                if (cur_iface + 1u > n)
-                    ii->interface_count = cur_iface + 1u;
-                ii->interface[cur_iface]           = cur_iface;
-                ii->interface_class[cur_iface]     = cfg[off + IFACE_bInterfaceClass];
-                ii->interface_subclass[cur_iface]  = cfg[off + IFACE_bInterfaceSubClass];
-                ii->interface_protocol[cur_iface]  = cfg[off + IFACE_bInterfaceProtocol];
-            }
-        } else if (btype == USB_DESC_ENDPOINT && blen >= 7) {
-            uint8_t addr = cfg[off + EP_bEndpointAddress];
-            uint8_t idx  = usbredir_ep_index(addr);
-            ei->type[idx]     = cfg[off + EP_bmAttributes] & 0x03;
-            ei->interval[idx] = cfg[off + EP_bInterval];
-            ei->interface[idx] = cur_iface;
-            ei->max_packet_size[idx] =
-                (uint16_t)(cfg[off + EP_wMaxPacketSize] |
-                          (cfg[off + EP_wMaxPacketSize + 1] << 8));
+        switch (btype) {
+            case USB_DESC_INTERFACE:
+               if (blen < 9)
+                   break;
+
+               cur_iface = cfg[offset + IFACE_bInterfaceNumber];
+
+               desc_set_interface_info_header(cfg, cur_iface, offset, ii);
+               break;
+            case USB_DESC_ENDPOINT:
+               if (blen < 7)
+                   break;
+
+               desc_set_ep_info_header(cfg, cur_iface, offset, ei);
+               break;
         }
 
-        off += blen;
+        offset += blen;
     }
 
     return 0;

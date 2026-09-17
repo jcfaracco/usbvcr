@@ -137,13 +137,13 @@ void fill_raw(packet_raw_t *r,
     if (!r)
         return;
 
-    switch (parse_setup_field(key)) {
-        case FIELD_load:
+    switch (parse_raw_field(key)) {
+        case FIELD_load: {
             size_t raw_len = strlen(val);
-            r->load = malloc(raw_len);
-            memcpy(r->load, val, raw_len);
+            r->load = g_memdup2(val, raw_len);
             r->len = raw_len;
             break;
+        }
         default: break;
     }
 }
@@ -175,53 +175,37 @@ GList *read_yaml(const char *path)
 
     while (!done) {
         if (!yaml_parser_parse(&parser, &event)) {
-            fprintf(stderr, "Parser error %d\n", parser.error);
+            LOG_ERR("YAML parser error %d\n", parser.error);
             break;
         }
 
-        // Handle different event types
         switch (event.type) {
-            case YAML_NO_EVENT:
-                break;
-            case YAML_STREAM_START_EVENT:
-                printf("[Stream Start]\n");
-                break;
             case YAML_STREAM_END_EVENT:
-                printf("[Stream End]\n");
-                done = 1; // End loop when stream finishes
-                break;
-            case YAML_DOCUMENT_START_EVENT:
-                printf("  [Document Start]\n");
-                break;
-            case YAML_DOCUMENT_END_EVENT:
-                printf("  [Document End]\n");
-                break;
-            case YAML_MAPPING_START_EVENT:
-                printf("    [Mapping Start]\n");
-                break;
-            case YAML_MAPPING_END_EVENT:
-                printf("    [Mapping End]\n");
-                break;
-            case YAML_SEQUENCE_START_EVENT:
-                printf("    [Sequence Start]\n");
+                done = 1; /* End loop when stream finishes */
                 break;
             case YAML_SEQUENCE_END_EVENT:
-                printf("    [Sequence End]\n");
-                packets = g_list_append(packets, cur_packet);
-                /* Reset pointer to create a new packet structure */
-                cur_packet = NULL;
+                /* A completed packet closes with a sequence end; the outer
+                 * sequence has no pending packet, so guard against NULL. */
+                if (cur_packet) {
+                    packets = g_list_append(packets, cur_packet);
+                    cur_packet = NULL;
+                }
                 break;
-            case YAML_SCALAR_EVENT:
+            case YAML_SCALAR_EVENT: {
                 const char *val = (const char *) event.data.scalar.value;
 
                 if (is_packet(val)) {
-                    cur_packet = (packet_t *) g_new(packet_t, 1);
+                    cur_packet = g_new0(packet_t, 1);
+                    cur_packet->usb_pcap = g_new0(usb_pcap_t, 1);
+                    cur_packet->usb_pcap_setup = g_new0(usb_control_packet_header_t, 1);
+                    cur_packet->raw = g_new0(packet_raw_t, 1);
+                    packet_scope = SCOPE_PACKET_UNKNOWN;
                 } else if (is_sub_packet(val)) {
                     packet_scope = parse_packet_scope_name(val);
+                } else if (!key) {
+                    key = g_strdup(val);
                 } else {
-                    if (!key) {
-                        key = g_strdup(val);
-                    } else {
+                    if (cur_packet) {
                         switch (packet_scope) {
                             case SCOPE_USBpcap:
                                 fill_usb_pcap(cur_packet->usb_pcap, key, val);
@@ -232,27 +216,22 @@ GList *read_yaml(const char *path)
                             case SCOPE_Raw:
                                 fill_raw(cur_packet->raw, key, val);
                                 break;
-                            case SCOPE_PACKET_UNKNOWN:
                             default:
                                 break;
                         }
-
-                        if (key) {
-                            g_free(key);
-                            key = NULL;
-                        }
                     }
-
-                    printf("      Unkown scalar value: %s\n", event.data.scalar.value);
+                    g_clear_pointer(&key, g_free);
                 }
                 break;
-            case YAML_ALIAS_EVENT:
-                printf("      [Alias]: %s\n", event.data.alias.anchor);
+            }
+            default:
                 break;
         }
 
         yaml_event_delete(&event);
     }
+
+    g_free(key);
 
     yaml_parser_delete(&parser);
 

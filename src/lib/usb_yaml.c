@@ -1,12 +1,13 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <yaml.h>
 
 #include "log.h"
 #include "utils.h"
 #include "usb_yaml.h"
 
-#define ROOT_FIELDS(X) \
+#define ROOT_SCOPES(X) \
     X(packet)
 
 #define PACKET_SCOPES(X) \
@@ -16,7 +17,7 @@
     X(header_len) X(irp_id) X(status) X(function) X(info) \
     X(bus) X(device) X(endpoint) X(transfer) X(data_length)
 
-#define SETUP_FIELDS(X) \
+#define USBPCAP_SETUP_FIELDS(X) \
     X(bmRequestType) X(bRequest) X(wValue) X(wIndex) X(wLength)
 
 #define RAW_FIELDS(X) \
@@ -29,14 +30,14 @@
 #define MATCH_STRING_TO_SCOPE(id) if (strcmp(str, #id) == 0) return SCOPE_##id;
 
 typedef enum {
-    ROOT_UNKNOWN = 0,
-    ROOT_FIELDS(GENERATE_ENUM)
-} root_fields_enum_t;
+    SCOPE_ROOT_UNKNOWN = 0,
+    ROOT_SCOPES(GENERATE_SCOPE_ENUM)
+} root_scopes_enum_t;
 
 typedef enum {
-    SCOPE_UNKNOWN = 0,
+    SCOPE_PACKET_UNKNOWN = 0,
     PACKET_SCOPES(GENERATE_SCOPE_ENUM)
-} packet_key_enum_t;
+} packet_scopes_enum_t;
 
 typedef enum {
     FIELD_UNKNOWN = 0,
@@ -45,7 +46,7 @@ typedef enum {
 
 typedef enum {
     FIELD_SETUP_UNKNOWN = 0,
-    SETUP_FIELDS(GENERATE_ENUM)
+    USBPCAP_SETUP_FIELDS(GENERATE_ENUM)
 } usb_pcap_setup_fields_enum_t;
 
 typedef enum {
@@ -53,38 +54,48 @@ typedef enum {
     RAW_FIELDS(GENERATE_ENUM)
 } raw_fields_enum_t;
 
-typedef enum {
-    STATE_EXPECT_KEY,
-    STATE_EXPECT_VALUE
-} yaml_parser_state_enum_t;
-
-static inline root_fields_enum_t parse_root_field(const char *str) {
-    ROOT_FIELDS(MATCH_STRING_TO_ENUM)
-    return ROOT_UNKNOWN;
+static inline root_scopes_enum_t parse_root_scope_name(const char *str)
+{
+    ROOT_SCOPES(MATCH_STRING_TO_SCOPE)
+    return SCOPE_ROOT_UNKNOWN;
 }
 
-static inline packet_key_enum_t parse_scope_name(const char *str) {
+static inline packet_scopes_enum_t parse_packet_scope_name(const char *str)
+{
     PACKET_SCOPES(MATCH_STRING_TO_SCOPE)
-    return SCOPE_UNKNOWN;
+    return SCOPE_PACKET_UNKNOWN;
 }
 
-static inline usb_pcap_fields_enum_t parse_usbpcap_field(const char *str) {
+static inline usb_pcap_fields_enum_t parse_usbpcap_field(const char *str)
+{
     USBPCAP_FIELDS(MATCH_STRING_TO_ENUM)
     return FIELD_UNKNOWN;
 }
 
-static inline usb_pcap_setup_fields_enum_t parse_setup_field(const char *str) {
-    SETUP_FIELDS(MATCH_STRING_TO_ENUM)
+static inline usb_pcap_setup_fields_enum_t parse_setup_field(const char *str)
+{
+    USBPCAP_SETUP_FIELDS(MATCH_STRING_TO_ENUM)
     return FIELD_SETUP_UNKNOWN;
 }
 
-static inline raw_fields_enum_t parse_raw_field(const char *str) {
+static inline raw_fields_enum_t parse_raw_field(const char *str)
+{
     RAW_FIELDS(MATCH_STRING_TO_ENUM)
     return FIELD_RAW_UNKNOWN;
 }
 
-void map_usbpcap(usb_pcap_t *b,
-                 const char *key, const char *val)
+static inline bool is_packet(const char *str)
+{
+    return (parse_root_scope_name(str) == SCOPE_packet);
+}
+
+static inline bool is_sub_packet(const char *str)
+{
+    return (parse_packet_scope_name(str) != SCOPE_PACKET_UNKNOWN);
+}
+
+void fill_usb_pcap(usb_pcap_t *b,
+                   const char *key, const char *val)
 {
     if (!b)
         return;
@@ -104,8 +115,8 @@ void map_usbpcap(usb_pcap_t *b,
     }
 }
 
-void map_usb_pcap_setup(usb_control_packet_header_t *s,
-                        const char *key, const char *val)
+void fill_usb_pcap_setup(usb_control_packet_header_t *s,
+                         const char *key, const char *val)
 {
     if (!s)
         return;
@@ -120,8 +131,8 @@ void map_usb_pcap_setup(usb_control_packet_header_t *s,
     }
 }
 
-void map_raw(packet_raw_t *r,
-             const char *key, const char *val)
+void fill_raw(packet_raw_t *r,
+              const char *key, const char *val)
 {
     if (!r)
         return;
@@ -137,21 +148,16 @@ void map_raw(packet_raw_t *r,
     }
 }
 
-packet_t *read_yaml(const char *path)
+GList *read_yaml(const char *path)
 {
     yaml_parser_t parser;
     yaml_event_t event;
+    packet_scopes_enum_t packet_scope = SCOPE_PACKET_UNKNOWN;
+    packet_t *cur_packet = NULL;
+    GList *packets = NULL;
     FILE *fp = NULL;
-    int done = 0;
-
-    yaml_parser_state_enum_t state = STATE_EXPECT_KEY;
-    packet_key_enum_t active_scope = SCOPE_UNKNOWN;
-
-    char current_key[128] = "";
-    char clean_value[128] = "";
-
-    packet_t current_packet = { NULL };
-    int packet_counter = 0;
+    int done = false;
+    char *key = NULL;
 
     fp = fopen(path, "r");
     if (!fp) {
@@ -201,10 +207,44 @@ packet_t *read_yaml(const char *path)
                 break;
             case YAML_SEQUENCE_END_EVENT:
                 printf("    [Sequence End]\n");
+                packets = g_list_append(packets, cur_packet);
+                /* Reset pointer to create a new packet structure */
+                cur_packet = NULL;
                 break;
             case YAML_SCALAR_EVENT:
-                // Print the raw string text of the scalar value
-                printf("      Scalar value: %s\n", event.data.scalar.value);
+                const char *val = (const char *) event.data.scalar.value;
+
+                if (is_packet(val)) {
+                    cur_packet = (packet_t *) g_new(packet_t, 1);
+                } else if (is_sub_packet(val)) {
+                    packet_scope = parse_packet_scope_name(val);
+                } else {
+                    if (!key) {
+                        key = g_strdup(val);
+                    } else {
+                        switch (packet_scope) {
+                            case SCOPE_USBpcap:
+                                fill_usb_pcap(cur_packet->usb_pcap, key, val);
+                                break;
+                            case SCOPE_USBpcapSetup:
+                                fill_usb_pcap_setup(cur_packet->usb_pcap_setup, key, val);
+                                break;
+                            case SCOPE_Raw:
+                                fill_raw(cur_packet->raw, key, val);
+                                break;
+                            case SCOPE_PACKET_UNKNOWN:
+                            default:
+                                break;
+                        }
+
+                        if (key) {
+                            g_free(key);
+                            key = NULL;
+                        }
+                    }
+
+                    printf("      Unkown scalar value: %s\n", event.data.scalar.value);
+                }
                 break;
             case YAML_ALIAS_EVENT:
                 printf("      [Alias]: %s\n", event.data.alias.anchor);
@@ -217,4 +257,6 @@ packet_t *read_yaml(const char *path)
     yaml_parser_delete(&parser);
 
     fclose(fp);
+
+    return packets;
 }

@@ -5,11 +5,6 @@ main_sources = files(
   'core/descriptor.c',
   'fuzz/fuzz.c',
   'fuzz/fuzz_wrap.c',
-  'lib/record.c',
-  'lib/log.c',
-  'lib/usb_yaml.c',
-#  'lib/usbpcap_hdr.c',
-  'lib/utils.c',
   'backends/hid_keyboard.c',
 )
 
@@ -21,8 +16,8 @@ subdir('fuzz')
 # Pure POSIX sockets client — no external library dependencies.
 executable(
   'usb_redir_hello',
-  main_sources,
+  main_sources + lib_sources,
   include_directories : [lib, core, fuzz],
-  dependencies: [yaml_dep],
+  dependencies: [yaml_dep, glib_dep],
   install : true,
 )

@@ -11,7 +11,7 @@
 /* read_yaml() must return NULL when the file cannot be opened. */
 START_TEST(test_read_yaml_missing_file)
 {
-    packet_t *p = read_yaml(TEST_DATA_DIR "/does_not_exist.yaml");
+    GList *p = read_yaml(TEST_DATA_DIR "/does_not_exist.yaml");
     ck_assert_ptr_null(p);
 }
 END_TEST
@@ -19,7 +19,7 @@ END_TEST
 /* read_yaml() must parse tests/data/hid.yaml without crashing. */
 START_TEST(test_read_yaml_hid)
 {
-    packet_t *p = read_yaml(TEST_DATA_DIR "/hid.yaml");
+    GList *p = read_yaml(TEST_DATA_DIR "/hid.yaml");
     /* Parsing the sample HID capture should not fault. */
     (void)p;
 }

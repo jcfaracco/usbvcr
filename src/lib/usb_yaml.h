@@ -1,6 +1,8 @@
 #ifndef USBREDIR_CLIENT_YAML_H
 #define USBREDIR_CLIENT_YAML_H
 
+#include <glib.h>
+
 #include "usbpcap_hdr.h"
 #include "../core/protocol.h"
 
@@ -15,6 +17,6 @@ typedef struct {
     packet_raw_t *raw;
 } packet_t;
 
-packet_t *read_yaml(const char *path);
+GList *read_yaml(const char *path);
 
 #endif

@@ -17,7 +17,7 @@ if check_dep.found()
     ),
     include_directories : [lib, core],
     c_args : ['-DTEST_DATA_DIR="' + test_data_dir + '"'],
-    dependencies : [check_dep, yaml_dep],
+    dependencies : [check_dep, yaml_dep, glib_dep],
   )
 
   test('usb_yaml', test_usb_yaml)

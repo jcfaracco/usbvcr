@@ -165,6 +165,8 @@ packet_t *read_yaml(const char *path)
         return NULL;
     }
 
+    yaml_parser_set_input_file(&parser, fp);
+
     while (!done) {
         if (!yaml_parser_parse(&parser, &event)) {
             fprintf(stderr, "Parser error %d\n", parser.error);

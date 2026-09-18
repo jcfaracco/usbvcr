@@ -1,0 +1,47 @@
+version: "1.0"
+name: "Hello World Injector Keyboard"
+imports:
+  - "schemas/usb_base.yaml"
+
+device_descriptor:
+  template: "usb_base.device_descriptor"
+
+strings:
+  1: "Generic"
+  2: "Auto-Typing Keyboard"
+
+configurations:
+  - bConfigurationValue: 1
+    bmAttributes: 0xa0
+    bMaxPower: 50
+    interfaces:
+      - bInterfaceNumber: 0
+        bInterfaceClass: 0x03 # HID
+        bInterfaceSubClass: 0x01 # Boot
+        bInterfaceProtocol: 0x01 # Keyboard
+        hid_descriptor:
+          wDescriptorLength: 62
+        endpoints:
+          - address: 0x81
+            attributes: 0x03 # Interrupt
+            max_packet_size: 8
+            interval: 10
+        report_descriptor: 
+          - usage_page: "Generic Desktop"
+          - usage: "Keyboard"
+          - collection: "Application"
+          - usage_page: "Key Codes"
+          - usage_minimum: 0xe0
+          - usage_maximum: 0xe7
+          - logical_minimum: 0
+          - logical_maximum: 1
+          - report_size: 1
+          - report_count: 8
+          - input: "Data,Var,Abs"
+          - report_count: 1
+          - report_size: 8
+          - input: "Const,Array,Abs"
+          - end_collection: true
+
+flows:
+  - include: "flows/hello_world_flow.yaml"

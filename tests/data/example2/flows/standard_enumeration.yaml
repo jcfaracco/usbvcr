@@ -1,0 +1,34 @@
+version: "1.0"
+kind: "FlowLogic"
+
+states:
+  - name: "handle_setup_requests"
+    rules:
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0100
+        actions:
+          - respond_with: "$device.device_descriptor"
+
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0200
+        actions:
+          - respond_with: "$device.configurations[0]"
+
+      - match:
+          bmRequestType: 0x81
+          bRequest: 6
+          wValue: 0x2200
+          wIndex: 0
+        actions:
+          - respond_with: "$device.configurations[0].interfaces[0].report_descriptor"
+          
+      - match:
+          bmRequestType: 0xC0
+          bRequest: 0xAA
+        actions:
+          - respond_raw:
+              file: "payloads/opaque_firmware_blob.bin"

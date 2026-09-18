@@ -1,0 +1,19 @@
+version: "1.0"
+namespace: "usb_base"
+
+templates:
+  device_descriptor:
+    bLength: 18
+    bDescriptorType: 0x01
+    bcdUSB: 0x0110
+    bDeviceClass: 0x00
+    bDeviceSubClass: 0x00
+    bDeviceProtocol: 0x00
+    bMaxPacketSize0: 8
+    idVendor: 0x04d9
+    idProduct: 0x1702
+    bcdDevice: 0x0406
+    iManufacturer: 1
+    iProduct: 2
+    iSerialNumber: 0
+    bNumConfigurations: 1

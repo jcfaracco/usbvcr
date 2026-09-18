@@ -1,0 +1,22 @@
+version: "1.0"
+namespace: "hid_base"
+
+templates:
+  interface_descriptor:
+    bLength: 9
+    bDescriptorType: 0x04
+    bInterfaceNumber: null
+    bAlternateSetting: 0
+    bNumEndpoints: null
+    bInterfaceClass: 0x03
+    bInterfaceSubClass: null
+    bInterfaceProtocol: null
+    iInterface: 0
+    hid_descriptor:
+      bLength: 9
+      bDescriptorType: 0x21
+      bcdHID: 0x0110
+      bCountryCode: 0x00
+      bNumDescriptors: 1
+      bReportDescriptorType: 0x22
+      wDescriptorLength: null

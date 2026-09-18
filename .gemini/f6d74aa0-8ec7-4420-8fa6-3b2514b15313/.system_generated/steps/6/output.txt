@@ -1,0 +1,17 @@
+{"name":".editorconfig","sizeBytes":"273"}
+{"name":"README.md","sizeBytes":"10162"}
+{"name":"build","isDir":true}
+{"name":"context","sizeBytes":"37"}
+{"name":"converter.py","sizeBytes":"5204"}
+{"name":"glib.c","sizeBytes":"6269"}
+{"name":"harness","isDir":true}
+{"name":"holtek_keyboard.pcap","sizeBytes":"2389"}
+{"name":"meson.build","sizeBytes":"352"}
+{"name":"src","isDir":true}
+{"name":"tests","isDir":true}
+{"name":"tools","isDir":true}
+{"name":"usb_capture.pcap","sizeBytes":"19480"}
+{"name":"usb_traffic.json","sizeBytes":"106440"}
+{"name":"usbredir-scripts","isDir":true}
+
+Summary: This directory contains 6 subdirectories and 9 files.

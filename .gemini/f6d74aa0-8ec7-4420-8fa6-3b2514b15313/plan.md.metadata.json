@@ -1,0 +1,5 @@
+{
+  "summary": "Detailed plan for restructuring the usbredir codebase according to README.md §5 target source layout. Lists all file moves, new stubs, include path updates, and logical commit breakdown.",
+  "updatedAt": "2026-09-18T21:11:03.351875775Z",
+  "userFacing": true
+}

@@ -1,0 +1,32 @@
+device_info:
+  bus_id: 44088
+  device_address: 106
+  endpoint_base: '0x0'
+negotiation_logic:
+- description: "Transa\xE7\xE3o do Teclado Holtek (IRP ID: 0x243ffff89d28e8d)"
+  request_match:
+    urb_type: Submit
+    transfer_type: Isochronous
+    endpoint: '0x0'
+  response_action:
+    urb_type: Complete
+    status: 0
+    payload_hex: ''
+- description: "Transa\xE7\xE3o do Teclado Holtek (IRP ID: 0x253ffff89d2835e)"
+  request_match:
+    urb_type: Submit
+    transfer_type: Isochronous
+    endpoint: '0x0'
+  response_action:
+    urb_type: Complete
+    status: 0
+    payload_hex: ''
+- description: "Transa\xE7\xE3o do Teclado Holtek (IRP ID: 0x243ffff89d2835e)"
+  request_match:
+    urb_type: Submit
+    transfer_type: Isochronous
+    endpoint: '0x0'
+  response_action:
+    urb_type: Complete
+    status: 0
+    payload_hex: ''

@@ -148,7 +148,17 @@ void fill_raw(packet_raw_t *r,
     }
 }
 
-GList *read_yaml(const char *path)
+packet_t *init_packet(void)
+{
+    packet_t *packet = g_new0(packet_t, 1);
+    packet->usb_pcap = g_new0(usb_pcap_t, 1);
+    packet->usb_pcap_setup = g_new0(usb_control_packet_header_t, 1);
+    packet->raw = g_new0(packet_raw_t, 1);
+
+    return packet;
+}
+
+GList *yaml_parse_from_file(const char *path)
 {
     yaml_parser_t parser;
     yaml_event_t event;
@@ -181,7 +191,7 @@ GList *read_yaml(const char *path)
 
         switch (event.type) {
             case YAML_STREAM_END_EVENT:
-                done = 1; /* End loop when stream finishes */
+                done = true; /* End loop when stream finishes */
                 break;
             case YAML_SEQUENCE_END_EVENT:
                 /* A completed packet closes with a sequence end; the outer
@@ -195,10 +205,7 @@ GList *read_yaml(const char *path)
                 const char *val = (const char *) event.data.scalar.value;
 
                 if (is_packet(val)) {
-                    cur_packet = g_new0(packet_t, 1);
-                    cur_packet->usb_pcap = g_new0(usb_pcap_t, 1);
-                    cur_packet->usb_pcap_setup = g_new0(usb_control_packet_header_t, 1);
-                    cur_packet->raw = g_new0(packet_raw_t, 1);
+                    cur_packet = init_packet();
                     packet_scope = SCOPE_PACKET_UNKNOWN;
                 } else if (is_sub_packet(val)) {
                     packet_scope = parse_packet_scope_name(val);
@@ -231,10 +238,9 @@ GList *read_yaml(const char *path)
         yaml_event_delete(&event);
     }
 
-    g_free(key);
-
     yaml_parser_delete(&parser);
 
+    g_free(key);
     fclose(fp);
 
     return packets;

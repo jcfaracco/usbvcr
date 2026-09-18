@@ -8,30 +8,30 @@
 #define TEST_DATA_DIR "tests/data"
 #endif
 
-/* read_yaml() must return NULL when the file cannot be opened. */
-START_TEST(test_read_yaml_missing_file)
+/* yaml_parse_from_file() must return NULL when the file cannot be opened. */
+START_TEST(test_yaml_parse_from_file_missing_file)
 {
-    GList *p = read_yaml(TEST_DATA_DIR "/does_not_exist.yaml");
+    GList *p = yaml_parse_from_file(TEST_DATA_DIR "/does_not_exist.yaml");
     ck_assert_ptr_null(p);
 }
 END_TEST
 
-/* read_yaml() must parse tests/data/hid.yaml without crashing. */
-START_TEST(test_read_yaml_hid)
+/* yaml_parse_from_file() must parse tests/data/test1.yaml without crashing. */
+START_TEST(test_yaml_parse_from_file_test1)
 {
-    GList *p = read_yaml(TEST_DATA_DIR "/hid.yaml");
+    GList *pkts = yaml_parse_from_file(TEST_DATA_DIR "/test1.yaml");
     /* Parsing the sample HID capture should not fault. */
-    (void)p;
+    ck_assert(g_list_length(pkts) == 4);
 }
 END_TEST
 
 static Suite *usb_yaml_suite(void)
 {
     Suite *s = suite_create("usb_yaml");
-    TCase *tc = tcase_create("read_yaml");
+    TCase *tc = tcase_create("yaml_parse_from_file");
 
-    tcase_add_test(tc, test_read_yaml_missing_file);
-    tcase_add_test(tc, test_read_yaml_hid);
+    tcase_add_test(tc, test_yaml_parse_from_file_missing_file);
+    tcase_add_test(tc, test_yaml_parse_from_file_test1);
     suite_add_tcase(s, tc);
 
     return s;

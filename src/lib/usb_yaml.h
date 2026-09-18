@@ -17,6 +17,6 @@ typedef struct {
     packet_raw_t *raw;
 } packet_t;
 
-GList *read_yaml(const char *path);
+GList *yaml_parse_from_file(const char *path);
 
 #endif

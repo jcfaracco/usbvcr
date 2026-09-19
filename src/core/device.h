@@ -47,7 +47,4 @@ struct usb_device {
     void *state;   /* backend-private */
 };
 
-/* Backend factories (registry lives in main.c). */
-usb_device_t *hid_keyboard_create(void);
-
 #endif

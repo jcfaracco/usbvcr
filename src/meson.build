@@ -5,9 +5,10 @@ main_sources = files(
   'core/descriptor.c',
   'fuzz/fuzz.c',
   'fuzz/fuzz_wrap.c',
-  'backends/hid_keyboard.c',
-  'backends/yaml_backend.c',
+  'engine/yaml_backend.c',
 )
+
+engine = include_directories('engine')
 
 # Go into individual module directories
 subdir('core')
@@ -18,7 +19,7 @@ subdir('fuzz')
 executable(
   'usb_redir_hello',
   main_sources + lib_sources,
-  include_directories : [lib, core, fuzz],
+  include_directories : [lib, core, fuzz, engine],
   dependencies: [yaml_dep, glib_dep],
   install : true,
 )

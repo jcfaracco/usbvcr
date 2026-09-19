@@ -3,8 +3,6 @@ lib = include_directories('.')
 lib_sources = files(
   'record.c',
   'log.c',
-  'usb_yaml.c',
-#  'usbpcap_hdr.c',
   'utils.c',
   'usb_node.c',
   'yaml_loader.c',

@@ -11,31 +11,33 @@
 #include "flow.h"
 
 #include <stdlib.h>
+#include <glib.h>
 
-struct Flow {
+struct flow {
     char *state; /* current state name */
     /* TODO: states, rules, queues, vars, counters */
 };
 
-Flow *flow_create(void)
+flow_t *flow_create(void)
 {
-    return calloc(1, sizeof(Flow));
+    return g_new(flow_t, 1);
 }
 
-void flow_free(Flow *flow)
+void flow_free(flow_t *flow)
 {
     if (!flow)
         return;
-    free(flow->state);
-    free(flow);
+
+    g_free(flow->state);
+    g_free(flow);
 }
 
-const char *flow_current_state(Flow *flow)
+const char *flow_current_state(flow_t *flow)
 {
     return flow ? flow->state : NULL;
 }
 
-int flow_control(Flow *flow, const uint8_t *setup,
+int flow_control(flow_t *flow, const uint8_t *setup,
                  uint8_t *out, uint16_t *len)
 {
     (void)flow;
@@ -45,7 +47,7 @@ int flow_control(Flow *flow, const uint8_t *setup,
     return -1; /* no match */
 }
 
-int flow_ep_in(Flow *flow, uint8_t ep, uint8_t *buf, size_t cap)
+int flow_ep_in(flow_t *flow, uint8_t ep, uint8_t *buf, size_t cap)
 {
     (void)flow;
     (void)ep;
@@ -54,7 +56,7 @@ int flow_ep_in(Flow *flow, uint8_t ep, uint8_t *buf, size_t cap)
     return 0; /* NAK */
 }
 
-int flow_ep_out(Flow *flow, uint8_t ep, const uint8_t *buf, size_t len)
+int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
 {
     (void)flow;
     (void)ep;
@@ -63,7 +65,7 @@ int flow_ep_out(Flow *flow, uint8_t ep, const uint8_t *buf, size_t len)
     return 0;
 }
 
-void flow_tick(Flow *flow)
+void flow_tick(flow_t *flow)
 {
     (void)flow;
 }

@@ -13,10 +13,11 @@
 #include "flow.h"
 
 #include <stdlib.h>
+#include <glib.h>
 
 typedef struct {
-    YamlDevice *dev;
-} yaml_backend_state;
+    yaml_device_t *dev;
+} yaml_backend_state_t;
 
 static int yb_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
                              uint16_t lang, const uint8_t **out, uint16_t *len)
@@ -29,7 +30,7 @@ static int yb_control(usb_device_t *dev,
                       const usb_control_packet_header_t *setup,
                       uint8_t *data, uint16_t *len)
 {
-    yaml_backend_state *st = dev->state;
+    yaml_backend_state_t *st = dev->state;
     if (!st || !st->dev)
         return -1;
     return flow_control(st->dev->flow, (const uint8_t *)setup, data, len);
@@ -37,19 +38,19 @@ static int yb_control(usb_device_t *dev,
 
 static int yb_ep_in(usb_device_t *dev, uint8_t ep, uint8_t *buf, size_t cap)
 {
-    yaml_backend_state *st = dev->state;
+    yaml_backend_state_t *st = dev->state;
     return flow_ep_in(st->dev->flow, ep, buf, cap);
 }
 
 static int yb_ep_out(usb_device_t *dev, uint8_t ep, const uint8_t *buf, size_t len)
 {
-    yaml_backend_state *st = dev->state;
+    yaml_backend_state_t *st = dev->state;
     return flow_ep_out(st->dev->flow, ep, buf, len);
 }
 
 static void yb_tick(usb_device_t *dev)
 {
-    yaml_backend_state *st = dev->state;
+    yaml_backend_state_t *st = dev->state;
     flow_tick(st->dev->flow);
 }
 
@@ -64,15 +65,15 @@ static const usb_device_ops yaml_ops = {
 
 usb_device_t *yaml_backend_create(const char *dir)
 {
-    YamlDevice *yd = yaml_loader_load(dir);
+    yaml_device_t *yd = yaml_loader_load(dir);
     if (!yd)
         return NULL;
 
-    yaml_backend_state *st = calloc(1, sizeof(*st));
-    usb_device_t *dev = calloc(1, sizeof(*dev));
+    yaml_backend_state_t *st = g_new(yaml_backend_state_t, 1);
+    usb_device_t *dev = g_new(usb_device_t, 1);
     if (!st || !dev) {
-        free(st);
-        free(dev);
+        g_free(st);
+        g_free(dev);
         yaml_device_free(yd);
         return NULL;
     }

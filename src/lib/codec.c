@@ -12,27 +12,28 @@
 #include "codec.h"
 
 #include <stdlib.h>
+#include <glib.h>
 
-struct Codec {
+struct codec {
     char *codec_name; /* value of table `codec:` field */
     /* TODO: tokens / symbols / flagsets tables */
 };
 
-Codec *codec_load(const char *table_path)
+codec_t *codec_load(const char *table_path)
 {
     (void)table_path;
     return NULL; /* not implemented */
 }
 
-void codec_free(Codec *codec)
+void codec_free(codec_t *codec)
 {
     if (!codec)
         return;
-    free(codec->codec_name);
-    free(codec);
+    g_free(codec->codec_name);
+    g_free(codec);
 }
 
-int codec_encode(Codec *codec, void *item_stream, GByteArray *out)
+int codec_encode(codec_t *codec, void *item_stream, GByteArray *out)
 {
     (void)codec;
     (void)item_stream;

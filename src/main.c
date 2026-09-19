@@ -6,55 +6,43 @@
 #include "transport.h"
 #include "usb_core.h"
 #include "device.h"
+#include "yaml_backend.h"
 #include "fuzz_wrap.h"
 #include "record.h"
 #include "log.h"
 
-/* Backend registry: name -> factory. Add mass-storage, uvc, ccid here. */
-static const struct {
-    const char *name;
-    usb_device_t *(*create)(void);
-} registry[] = {
-    { "hid-keyboard", hid_keyboard_create },
-};
-
-static usb_device_t *create_device(const char *name)
-{
-    for (size_t i = 0; i < sizeof(registry) / sizeof(registry[0]); i++)
-        if (strcmp(name, registry[i].name) == 0)
-            return registry[i].create();
-    return NULL;
-}
-
 static void usage(const char *prog)
 {
-    LOG_ERR("Usage: %s [opts] [host [port [device]]]", prog);
+    LOG_ERR("Usage: %s [opts] --device-yaml <dir> [host [port]]", prog);
+    LOG_ERR("  --device-yaml DIR canonical device project (devices/ flows/ ...)");
     LOG_ERR("  --debug           verbose per-packet logging");
     LOG_ERR("  --fuzz            enable descriptor/endpoint mutation");
     LOG_ERR("  --seed N          fixed PRNG seed (implies --fuzz; for repro)");
     LOG_ERR("  --record FILE     log every sent frame to FILE");
     LOG_ERR("  --replay FILE     resend frames from FILE, then exit");
-    LOG_ERR("  defaults: localhost 1337 hid-keyboard");
+    LOG_ERR("  defaults: localhost 1337");
 }
 
 int main(int argc, char *argv[])
 {
     const char *host = "localhost";
     const char *port = "1337";
-    const char *device = "hid-keyboard";
+    const char *device_yaml = NULL;
     const char *record_path = NULL;
     const char *replay_path = NULL;
     int do_fuzz = 0;
     int have_seed = 0;
     uint64_t seed = 0;
 
-    /* Options, then up to three positionals. */
-    const char *pos[3];
+    /* Options, then up to two positionals (host, port). */
+    const char *pos[2];
     int npos = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--debug") == 0) {
             current_log_level = LOG_LEVEL_DEBUG;
+        } else if (strcmp(argv[i], "--device-yaml") == 0 && i + 1 < argc) {
+            device_yaml = argv[++i];
         } else if (strcmp(argv[i], "--fuzz") == 0) {
             do_fuzz = 1;
         } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
@@ -68,7 +56,7 @@ int main(int argc, char *argv[])
         } else if (argv[i][0] == '-') {
             usage(argv[0]);
             return EXIT_FAILURE;
-        } else if (npos < 3) {
+        } else if (npos < 2) {
             pos[npos++] = argv[i];
         } else {
             usage(argv[0]);
@@ -78,7 +66,6 @@ int main(int argc, char *argv[])
 
     if (npos >= 1) host = pos[0];
     if (npos >= 2) port = pos[1];
-    if (npos >= 3) device = pos[2];
 
     LOG_DEBUG("Connecting to %s:%s ...", host, port);
     int sock = connect_to_server(host, port);
@@ -95,9 +82,15 @@ int main(int argc, char *argv[])
         return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
-    usb_device_t *dev = create_device(device);
+    if (!device_yaml) {
+        LOG_ERR("no device: pass --device-yaml <dir>");
+        usage(argv[0]);
+        close(sock);
+        return EXIT_FAILURE;
+    }
+    usb_device_t *dev = yaml_backend_create(device_yaml);
     if (!dev) {
-        LOG_ERR("unknown device backend: %s", device);
+        LOG_ERR("failed to load device project: %s", device_yaml);
         close(sock);
         return EXIT_FAILURE;
     }
@@ -127,7 +120,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    LOG_INFO("Emulating device: %s", device);
+    LOG_INFO("Emulating device: %s", device_yaml);
     int rc = usb_core_run(sock, dev);
 
     record_close();

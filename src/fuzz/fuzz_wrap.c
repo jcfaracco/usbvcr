@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <glib.h>
 
 #include "fuzz_wrap.h"
 #include "protocol.h"
@@ -94,8 +95,8 @@ static const usb_device_ops fuzz_ops = {
 
 usb_device_t *fuzz_wrap(usb_device_t *base, const fuzz_cfg_t *cfg)
 {
-    usb_device_t *dev = calloc(1, sizeof(*dev));
-    fuzz_state_t *fs = calloc(1, sizeof(*fs));
+    usb_device_t *dev = g_new(usb_device_t, 1);
+    fuzz_state_t *fs = g_new(fuzz_state_t, 1);
     if (!dev || !fs) {
         free(dev); free(fs);
         LOG_ERR("fuzz_wrap: out of memory");

@@ -8,6 +8,7 @@ lib_sources = files(
   'yaml_loader.c',
   'codec.c',
   'flow.c',
+  'version.c',
 )
 
 glib_dep = dependency('glib-2.0')

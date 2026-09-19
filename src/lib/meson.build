@@ -6,6 +6,10 @@ lib_sources = files(
   'usb_yaml.c',
 #  'usbpcap_hdr.c',
   'utils.c',
+  'usb_node.c',
+  'yaml_loader.c',
+  'codec.c',
+  'flow.c',
 )
 
 glib_dep = dependency('glib-2.0')

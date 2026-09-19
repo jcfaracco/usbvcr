@@ -6,6 +6,7 @@ main_sources = files(
   'fuzz/fuzz.c',
   'fuzz/fuzz_wrap.c',
   'backends/hid_keyboard.c',
+  'backends/yaml_backend.c',
 )
 
 # Go into individual module directories

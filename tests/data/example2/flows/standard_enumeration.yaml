@@ -1,5 +1,4 @@
 version: "1.0"
-kind: "FlowLogic"
 
 states:
   - name: "handle_setup_requests"

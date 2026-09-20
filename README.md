@@ -215,7 +215,7 @@ usable skeleton with known gaps to fix:
 
 ## 8. Validation / CVE tests
 
-`tests/*/tests/*.yaml` (`kind: ValidationSuite`): inject crafted packets
+`tests/*/tests/*.yaml` (scope inferred from the `tests/` directory): inject crafted packets
 (`inject_packet`, `override_payload`) and assert guest behavior
 (`assert_behavior: { kernel_crash: false, driver_status: stalled }`).
 A separate test driver reuses `yaml_loader` plus a raw inject path into

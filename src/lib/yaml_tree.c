@@ -42,10 +42,12 @@ static gboolean parse_uint(const char *val, uint32_t *out)
 
     char *end = NULL;
     unsigned long long v = g_ascii_strtoull(val, &end, 0);
+
     if (!end || *end != '\0')   /* trailing junk => not a plain integer */
         return FALSE;
 
     *out = (uint32_t) v;
+
     return TRUE;
 }
 
@@ -153,6 +155,8 @@ static void build_map(yaml_document_t *doc, yaml_node_t *map,
 static void build_scalar(schema_t *schemas, usb_node_t *out,
                          const char *key, const char *val, char **ns)
 {
+    uint32_t n;
+
     if (strcmp(key, "namespace") == 0) {
         g_free(*ns);
         *ns = g_strdup(val);
@@ -175,7 +179,6 @@ static void build_scalar(schema_t *schemas, usb_node_t *out,
         return;
     }
 
-    uint32_t n;
     if (parse_uint(val, &n)) {
         if (width_for_key(key) == 2)
             usb_node_set_prop(out, create_prop_u16(key, (uint16_t) n));

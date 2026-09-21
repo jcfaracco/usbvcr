@@ -11,6 +11,11 @@
 
 #include "yaml_loader.h"
 
+/* meson passes -DTEST_DATA_DIR="<srcdir>/data"; fall back for ad-hoc builds. */
+#ifndef TEST_DATA_DIR
+#define TEST_DATA_DIR "../data"
+#endif
+
 /* ── yaml_scope_from_path: each recognized directory maps to its scope ── */
 
 START_TEST(test_scope_each_dir)
@@ -74,12 +79,10 @@ END_TEST
 
 START_TEST(test_parse_from_file_missing_dir)
 {
-    /* Missing subdirs are not an error: returns an (empty) device today.
-     * Parsers are stubs, so nothing populates the tree yet. */
+    /* A missing project file is a hard error: yaml_parse_from_file returns
+     * NULL (the manifest is mandatory, README §3). */
     yaml_device_t *dev = yaml_parse_from_file("/nonexistent/project");
-    ck_assert_ptr_nonnull(dev);
-    ck_assert_ptr_null(dev->tree);
-    yaml_device_free(dev);
+    ck_assert_ptr_null(dev);
 }
 END_TEST
 
@@ -92,8 +95,14 @@ END_TEST
 
 START_TEST(test_parse_from_file_example1)
 {
-    /* Load example 1 of data samples (the project manifest file). */
-    yaml_parse_from_file("../data/example1/example1.yaml");
+    /* Load example 1 of data samples (the project manifest file). Path is
+     * absolute (TEST_DATA_DIR from meson) so it resolves regardless of the
+     * test's working directory. */
+    yaml_device_t *dev =
+        yaml_parse_from_file(TEST_DATA_DIR "/example1/example1.yaml");
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_ptr_nonnull(dev->tree);
+    yaml_device_free(dev);
 }
 END_TEST
 

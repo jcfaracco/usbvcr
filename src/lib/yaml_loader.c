@@ -15,6 +15,7 @@
 #include "yaml_tree.h"
 #include "codec.h"
 #include "log.h"
+#include "version.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -120,20 +121,32 @@ static void dev_entry_free(gpointer p)
  * file is not an error (no devices). */
 static int parse_main(const char *path, yaml_device_t *dev)
 {
-    FILE *fp = fopen(path, "r");
-    if (!fp) {
-        LOG_DEBUG("[Manifest] no project file '%s'", path);
-        return 0;
+    yaml_parser_t parser;
+    yaml_document_t doc;
+    yaml_node_t *devs = NULL;
+    FILE *fp = NULL;
+    const char *version;
+    char *dir = NULL;
+    int rc = 0;
+
+    if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
+        LOG_ERR("No project file '%s'", path);
+        return -1;
     }
 
-    yaml_parser_t parser;
+    fp = fopen(path, "r");
+    if (!fp) {
+        LOG_ERR("Unable to open the file '%s'", path);
+        return -1;
+    }
+
     if (!yaml_parser_initialize(&parser)) {
         fclose(fp);
         return -1;
     }
+
     yaml_parser_set_input_file(&parser, fp);
 
-    yaml_document_t doc;
     if (!yaml_parser_load(&parser, &doc)) {
         LOG_ERR("YAML error(%lu, %lu): %s",
                 (unsigned long) parser.problem_mark.line + 1,
@@ -144,10 +157,21 @@ static int parse_main(const char *path, yaml_device_t *dev)
         return -1;
     }
 
-    int   rc  = 0;
-    char *dir = g_path_get_dirname(path);
+    dir = g_path_get_dirname(path);
     yaml_node_t *root = yaml_document_get_root_node(&doc);
-    yaml_node_t *devs = yaml_tree_map_get(&doc, root, "devices");
+
+    /* Fallback version check. */
+    version = yaml_tree_scalar(yaml_tree_map_get(&doc, root, "version"));
+    if (match_version(version) == YAML_VERSION_INVALID) {
+        LOG_ERR("Mismatch version '%s'", version);
+        g_free(dir);
+        yaml_document_delete(&doc);
+        yaml_parser_delete(&parser);
+        fclose(fp);
+        return -1;
+    }
+
+    devs = yaml_tree_map_get(&doc, root, "devices");
 
     if (!devs || devs->type != YAML_SEQUENCE_NODE) {
         LOG_WARN("yaml_loader: project '%s' has no devices: manifest", path);
@@ -279,8 +303,9 @@ yaml_device_t *yaml_parse_from_file(const char *path)
      * them. tests/ is still dir-scanned (stub). */
     if (load_scope_dir(dir, "schemas", YAML_SCOPE_SCHEMAS, dev) < 0 ||
         load_scope_dir(dir, "codecs",  YAML_SCOPE_CODECS,  dev) < 0 ||
-        parse_main(path, dev) < 0 ||
-        load_scope_dir(dir, "tests",   YAML_SCOPE_TESTS,   dev) < 0) {
+        load_scope_dir(dir, "tests",   YAML_SCOPE_TESTS,   dev) < 0 ||
+        parse_main(path, dev) < 0) {
+
 
         yaml_device_free(dev);
         g_free(dir);

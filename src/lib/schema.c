@@ -35,12 +35,16 @@ void schema_register(schema_t *s, usb_node_t *root, const char *ns)
         return;
 
     for (GList *l = root->props; l; l = l->next) {
+        char *key = NULL;
         usb_prop_t *p = l->data;
+
         if (p->type != USB_PROP_NODE)
             continue;   /* skip the `namespace` scalar and other metadata */
 
-        char *key = g_strdup_printf("%s.%s", ns ? ns : "", p->name);
+        key = g_strdup_printf("%s.%s", ns ? ns : "", p->name);
+
         g_hash_table_insert(s->templates, key, usb_node_clone(p->val.node));
+
         LOG_DEBUG("[Schema] registered template %s", key);
     }
 }
@@ -49,5 +53,6 @@ usb_node_t *schema_lookup(schema_t *s, const char *key)
 {
     if (!s || !key)
         return NULL;
+
     return g_hash_table_lookup(s->templates, key);
 }

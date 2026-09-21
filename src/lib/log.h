@@ -23,10 +23,10 @@ extern int current_log_level;
 // Format lives in __VA_ARGS__ so a bare message stays ISO C (no ##__VA_ARGS__).
 #define LOG_DEBUG(...) \
     do { if (current_log_level <= LOG_LEVEL_DEBUG) { \
-        fprintf(stderr, USB_DEBUG_PREFIX " %s:%s:%d ", \
+        fprintf(stdout, USB_DEBUG_PREFIX " %s:%s:%d ", \
                 __FILE__, __func__, __LINE__); \
-        fprintf(stderr, __VA_ARGS__); \
-        fprintf(stderr, "\n"); } } while (0)
+        fprintf(stdout, __VA_ARGS__); \
+        fprintf(stdout, "\n"); } } while (0)
 
 #define LOG_INFO(...) \
     do { if (current_log_level <= LOG_LEVEL_INFO) { \

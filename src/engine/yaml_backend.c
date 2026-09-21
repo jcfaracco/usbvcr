@@ -10,7 +10,9 @@
 
 #include "yaml_backend.h"
 #include "yaml_loader.h"
+#include "usb_node.h"
 #include "flow.h"
+#include "log.h"
 
 #include <stdlib.h>
 #include <glib.h>
@@ -63,11 +65,16 @@ static const usb_device_ops yaml_ops = {
     .tick           = yb_tick,
 };
 
-usb_device_t *yaml_backend_create(const char *dir)
+usb_device_t *yaml_backend_create(const char *path)
 {
-    yaml_device_t *yd = yaml_loader_load(dir);
+    yaml_device_t *yd = yaml_parse_from_file(path);
     if (!yd)
         return NULL;
+
+    if (current_log_level <= LOG_LEVEL_DEBUG) {
+        fprintf(stderr, USB_DEBUG_PREFIX " loaded descriptor tree for %s:\n", path);
+        usb_node_dump(yd->tree, stderr);
+    }
 
     yaml_backend_state_t *st = g_new(yaml_backend_state_t, 1);
     usb_device_t *dev = g_new(usb_device_t, 1);

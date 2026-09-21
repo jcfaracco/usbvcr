@@ -1,9 +1,7 @@
-version: "1.0"
 namespace: "usb_base"
 
-templates:
-  device_descriptor:
-    bLength: 18
+device_descriptor:
+  - bLength: 18
     bDescriptorType: 0x01
     bcdUSB: 0x0110
     bDeviceClass: 0x00
@@ -18,8 +16,8 @@ templates:
     iSerialNumber: 0
     bNumConfigurations: 1
 
-  configuration_descriptor:
-    bLength: 9
+configuration_descriptor:
+  - bLength: 9
     bDescriptorType: 0x02
     wTotalLength: null
     bNumInterfaces: null

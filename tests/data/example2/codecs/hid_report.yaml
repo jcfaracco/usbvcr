@@ -1,0 +1,26 @@
+version: "1.0"
+codec: "hid_report"
+# HID short item prefix byte = bTag<<4 | bType<<2 | bSize
+item_types: { main: 0, global: 1, local: 2 }
+
+tokens:
+  usage_page:      { type: global, tag: 0x0, width: auto }
+  logical_minimum: { type: global, tag: 0x1, width: auto, signed: true }
+  logical_maximum: { type: global, tag: 0x2, width: auto, signed: true }
+  report_size:     { type: global, tag: 0x7, width: auto }
+  report_count:    { type: global, tag: 0x9, width: auto }
+  usage:           { type: local,  tag: 0x0, width: auto }
+  usage_minimum:   { type: local,  tag: 0x1, width: auto }
+  usage_maximum:   { type: local,  tag: 0x2, width: auto }
+  collection:      { type: main,   tag: 0xA, width: 1 }
+  end_collection:  { type: main,   tag: 0xC, width: 0 }
+  input:           { type: main,   tag: 0x8, width: 1, flagset: io }
+  output:          { type: main,   tag: 0x9, width: 1, flagset: io }
+
+symbols:
+  usage_page: { "Generic Desktop": 0x01, "Key Codes": 0x07 }
+  usage:      { "Keyboard": 0x06 }
+  collection: { "Application": 0x01, "Physical": 0x00 }
+
+flagsets:
+  io: { Data: 0, Const: 1, Array: 0, Var: 2, Abs: 0, Rel: 4 }

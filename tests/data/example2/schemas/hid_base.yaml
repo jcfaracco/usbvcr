@@ -1,9 +1,7 @@
-version: "1.0"
 namespace: "hid_base"
 
-templates:
-  interface_descriptor:
-    bLength: 9
+interface_descriptor:
+  - bLength: 9
     bDescriptorType: 0x04
     bInterfaceNumber: null
     bAlternateSetting: 0

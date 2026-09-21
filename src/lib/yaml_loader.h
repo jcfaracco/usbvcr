@@ -12,6 +12,7 @@
 #define YAML_LOADER_H
 
 #include "usb_node.h"
+#include "schema.h"
 
 /* Canonical file scopes. The containing directory is authoritative:
  * devices/ schemas/ flows/ codecs/ tests/ -> the scope. The scope is never
@@ -42,7 +43,7 @@ typedef struct {
  * schema templates and codec tables they resolve against. */
 typedef struct {
     GList      *devices;    /* yaml_dev_entry_t* — all manifest entries */
-    GHashTable *templates;  /* "namespace.name" -> usb_node_t* (schema bases) */
+    schema_t   *schemas;    /* schema base templates (schemas/ registry) */
     GHashTable *codecs;     /* "codec name" -> codec_t* (codecs/ tables) */
 
     /* Convenience aliases to the first manifest entry (not owned), so single-

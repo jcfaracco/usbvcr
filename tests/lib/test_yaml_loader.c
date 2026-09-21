@@ -91,6 +91,13 @@ START_TEST(test_device_free_null)
 }
 END_TEST
 
+START_TEST(test_loader_load_example1)
+{
+    /* Load example 1 of data samples. */
+    yaml_loader_load("../data/example1");
+}
+END_TEST
+
 static Suite *yaml_loader_suite(void)
 {
     Suite *s = suite_create("yaml_loader");
@@ -108,6 +115,7 @@ static Suite *yaml_loader_suite(void)
     tcase_add_test(tc_load, test_loader_load_null_dir);
     tcase_add_test(tc_load, test_loader_load_missing_dir);
     tcase_add_test(tc_load, test_device_free_null);
+    tcase_add_test(tc_load, test_loader_load_example1);
     suite_add_tcase(s, tc_load);
 
     return s;

@@ -22,6 +22,8 @@ if check_dep.found()
     'lib/test_yaml_loader.c',
     files(
       '../src/lib/yaml_loader.c',
+      '../src/lib/yaml_tree.c',
+      '../src/lib/schema.c',
       '../src/lib/usb_node.c',
       '../src/lib/codec.c',
       '../src/lib/log.c',

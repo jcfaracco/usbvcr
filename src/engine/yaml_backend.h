@@ -14,6 +14,6 @@
 
 /* Create a backend from a canonical device project directory.
  * Returns NULL on error. */
-usb_device_t *yaml_backend_create(const char *dir);
+usb_device_t *yaml_backend_create(const char *path);
 
 #endif /* YAML_BACKEND_H */

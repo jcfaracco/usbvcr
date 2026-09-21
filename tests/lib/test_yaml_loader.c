@@ -1,7 +1,7 @@
 /* Unit tests for src/lib/yaml_loader.c.
  *
  * yaml_scope_from_path() is fully implemented and tested here.
- * yaml_loader_load() / yaml_device_free() are stubs today — the few
+ * yaml_parse_from_file() / yaml_device_free() are stubs today — the few
  * assertions below just pin their current contract. Extend as the loader
  * grows (imports, templates, null autofill, flow load).
  */
@@ -15,11 +15,10 @@
 
 START_TEST(test_scope_each_dir)
 {
-    ck_assert_int_eq(yaml_scope_from_path("devices/kbd.yaml"), YAML_SCOPE_DEVICE);
-    ck_assert_int_eq(yaml_scope_from_path("schemas/usb.yaml"), YAML_SCOPE_SCHEMA);
-    ck_assert_int_eq(yaml_scope_from_path("flows/enum.yaml"),  YAML_SCOPE_FLOW);
-    ck_assert_int_eq(yaml_scope_from_path("codecs/hid.yaml"),  YAML_SCOPE_CODEC);
-    ck_assert_int_eq(yaml_scope_from_path("tests/cve.yaml"),   YAML_SCOPE_TEST);
+    ck_assert_int_eq(yaml_scope_from_path("schemas/kbd_base.yaml"), YAML_SCOPE_SCHEMAS);
+    ck_assert_int_eq(yaml_scope_from_path("devices/kbd.yaml"), YAML_SCOPE_DEVICES);
+    ck_assert_int_eq(yaml_scope_from_path("flows/enum.yaml"),  YAML_SCOPE_FLOWS);
+    ck_assert_int_eq(yaml_scope_from_path("tests/cve.yaml"),   YAML_SCOPE_TESTS);
 }
 END_TEST
 
@@ -27,9 +26,9 @@ END_TEST
 START_TEST(test_scope_deep_path)
 {
     ck_assert_int_eq(yaml_scope_from_path("tests/data/example2/flows/x.yaml"),
-                     YAML_SCOPE_FLOW);
+                     YAML_SCOPE_FLOWS);
     ck_assert_int_eq(yaml_scope_from_path("/abs/proj/tests/cve.yaml"),
-                     YAML_SCOPE_TEST);
+                     YAML_SCOPE_TESTS);
 }
 END_TEST
 
@@ -66,18 +65,18 @@ END_TEST
 
 /* ── loader stubs: pin current contract (update when implemented) ── */
 
-START_TEST(test_loader_load_null_dir)
+START_TEST(test_parse_from_file_null_dir)
 {
     /* NULL project dir -> NULL. */
-    ck_assert_ptr_null(yaml_loader_load(NULL));
+    ck_assert_ptr_null(yaml_parse_from_file(NULL));
 }
 END_TEST
 
-START_TEST(test_loader_load_missing_dir)
+START_TEST(test_parse_from_file_missing_dir)
 {
     /* Missing subdirs are not an error: returns an (empty) device today.
      * Parsers are stubs, so nothing populates the tree yet. */
-    yaml_device_t *dev = yaml_loader_load("/nonexistent/project");
+    yaml_device_t *dev = yaml_parse_from_file("/nonexistent/project");
     ck_assert_ptr_nonnull(dev);
     ck_assert_ptr_null(dev->tree);
     yaml_device_free(dev);
@@ -91,10 +90,10 @@ START_TEST(test_device_free_null)
 }
 END_TEST
 
-START_TEST(test_loader_load_example1)
+START_TEST(test_parse_from_file_example1)
 {
-    /* Load example 1 of data samples. */
-    yaml_loader_load("../data/example1");
+    /* Load example 1 of data samples (the project manifest file). */
+    yaml_parse_from_file("../data/example1/example1.yaml");
 }
 END_TEST
 
@@ -112,10 +111,10 @@ static Suite *yaml_loader_suite(void)
     suite_add_tcase(s, tc_scope);
 
     TCase *tc_load = tcase_create("loader");
-    tcase_add_test(tc_load, test_loader_load_null_dir);
-    tcase_add_test(tc_load, test_loader_load_missing_dir);
+    tcase_add_test(tc_load, test_parse_from_file_null_dir);
+    tcase_add_test(tc_load, test_parse_from_file_missing_dir);
     tcase_add_test(tc_load, test_device_free_null);
-    tcase_add_test(tc_load, test_loader_load_example1);
+    tcase_add_test(tc_load, test_parse_from_file_example1);
     suite_add_tcase(s, tc_load);
 
     return s;

@@ -23,6 +23,7 @@ if check_dep.found()
     files(
       '../src/lib/yaml_loader.c',
       '../src/lib/usb_node.c',
+      '../src/lib/codec.c',
       '../src/lib/log.c',
     ),
     include_directories : [lib],

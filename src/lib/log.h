@@ -22,8 +22,8 @@ extern int current_log_level;
 // Helper macros. DEBUG/ERR also emit file:line metadata.
 #define LOG_DEBUG(fmt, ...) \
     do { if (current_log_level <= LOG_LEVEL_DEBUG) \
-        fprintf(stderr, USB_DEBUG_PREFIX " %s:%d " fmt "\n", \
-                __FILE__, __LINE__, ##__VA_ARGS__); } while (0)
+        fprintf(stderr, USB_DEBUG_PREFIX " %s:%s:%d " fmt "\n", \
+                __FILE__, __func__, __LINE__, ##__VA_ARGS__); } while (0)
 
 #define LOG_INFO(fmt, ...) \
     do { if (current_log_level <= LOG_LEVEL_INFO) \

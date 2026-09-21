@@ -1,4 +1,3 @@
-version: "1.0"
 target_device: "devices/keyboard_04d9_1702.yaml"
 
 test_case:

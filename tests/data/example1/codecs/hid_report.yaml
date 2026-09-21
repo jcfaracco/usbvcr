@@ -1,12 +1,11 @@
-version: "1.0"
 codec: "hid_report"
 # HID short item prefix byte = bTag<<4 | bType<<2 | bSize
 item_types: { main: 0, global: 1, local: 2 }
 
 tokens:
   usage_page:      { type: global, tag: 0x0, width: auto }
-  logical_minimum: { type: global, tag: 0x1, width: auto }
-  logical_maximum: { type: global, tag: 0x2, width: auto }
+  logical_minimum: { type: global, tag: 0x1, width: auto, signed: true }
+  logical_maximum: { type: global, tag: 0x2, width: auto, signed: true }
   report_size:     { type: global, tag: 0x7, width: auto }
   report_count:    { type: global, tag: 0x9, width: auto }
   usage:           { type: local,  tag: 0x0, width: auto }

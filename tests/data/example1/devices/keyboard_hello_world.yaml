@@ -1,14 +1,21 @@
 version: "1.0"
 name: "Hello World Injector Keyboard"
-imports:
-  - "schemas/usb_base.yaml"
 
 device_descriptor:
-  template: "usb_base.device_descriptor"
-
-strings:
-  1: "Generic"
-  2: "Auto-Typing Keyboard"
+  - bLength: 18
+    bDescriptorType: 0x01
+    bcdUSB: 0x0110
+    bDeviceClass: 0x00
+    bDeviceSubClass: 0x00
+    bDeviceProtocol: 0x00
+    bMaxPacketSize0: 8
+    idVendor: 0x04d9
+    idProduct: 0x1702
+    bcdDevice: 0x0406
+    iManufacturer: 1
+    iProduct: 2
+    iSerialNumber: 0
+    bNumConfigurations: 1
 
 configurations:
   - bConfigurationValue: 1
@@ -26,22 +33,21 @@ configurations:
             attributes: 0x03 # Interrupt
             max_packet_size: 8
             interval: 10
-        report_descriptor: 
-          - usage_page: "Generic Desktop"
-          - usage: "Keyboard"
-          - collection: "Application"
-          - usage_page: "Key Codes"
-          - usage_minimum: 0xe0
-          - usage_maximum: 0xe7
-          - logical_minimum: 0
-          - logical_maximum: 1
-          - report_size: 1
-          - report_count: 8
-          - input: "Data,Var,Abs"
-          - report_count: 1
-          - report_size: 8
-          - input: "Const,Array,Abs"
-          - end_collection: true
-
-flows:
-  - include: "flows/hello_world_flow.yaml"
+        report_descriptor:
+          codec: "hid_report"
+          items:
+            - usage_page: "Generic Desktop"
+            - usage: "Keyboard"
+            - collection: "Application"
+            - usage_page: "Key Codes"
+            - usage_minimum: 0xe0
+            - usage_maximum: 0xe7
+            - logical_minimum: 0
+            - logical_maximum: 1
+            - report_size: 1
+            - report_count: 8
+            - input: "Data,Var,Abs"
+            - report_count: 1
+            - report_size: 8
+            - input: "Const,Array,Abs"
+            - end_collection: true

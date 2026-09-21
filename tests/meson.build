@@ -26,10 +26,13 @@ if check_dep.found()
       '../src/lib/schema.c',
       '../src/lib/usb_node.c',
       '../src/lib/codec.c',
+      '../src/lib/version.c',
+      '../src/lib/utils.c',
       '../src/lib/log.c',
     ),
     include_directories : [lib],
     dependencies : [check_dep, glib_dep, yaml_dep],
+    c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
   test('yaml_loader', test_yaml_loader)
 endif

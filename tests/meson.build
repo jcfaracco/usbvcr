@@ -23,9 +23,10 @@ if check_dep.found()
     files(
       '../src/lib/yaml_loader.c',
       '../src/lib/usb_node.c',
+      '../src/lib/log.c',
     ),
     include_directories : [lib],
-    dependencies : [check_dep, glib_dep],
+    dependencies : [check_dep, glib_dep, yaml_dep],
   )
   test('yaml_loader', test_yaml_loader)
 endif

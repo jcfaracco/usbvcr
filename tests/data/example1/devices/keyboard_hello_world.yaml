@@ -1,12 +1,3 @@
-# Phase 1: canonical wire-order descriptors.
-# Every descriptor carries its full prologue (bLength, bDescriptorType) and
-# fields are listed in USB wire order. Serialization is verbatim, so YAML order
-# == byte order. Widths follow the field-name prefix convention (bcd*/id*/w* =
-# 2 bytes, else 1), so u16 fields MUST keep a w/bcd/id name.
-#
-# Computed values (wTotalLength, bNumInterfaces, bNumEndpoints) are written
-# literally here; a later autofill pass (phase 2) will derive them.
-
 device_descriptor:
   - bLength: 18
     bDescriptorType: 0x01

@@ -42,6 +42,7 @@ struct codec {
     GHashTable *flagsets;  /* set(char*)  -> GHashTable(flag -> GUINT)   */
 };
 
+
 /* Parse a flat `name: uint` mapping into a new GHashTable(char* -> GUINT).
  * Values accept decimal or 0x-hex (g_ascii_strtoull base 0). */
 static GHashTable *parse_uint_map(yaml_document_t *doc, yaml_node_t *map)

@@ -24,7 +24,27 @@ if check_dep.found()
       '../src/lib/yaml_loader.c',
       '../src/lib/yaml_tree.c',
       '../src/lib/schema.c',
+      '../src/lib/flow.c',
       '../src/lib/usb_node.c',
+      '../src/lib/codec.c',
+      '../src/lib/version.c',
+      '../src/lib/utils.c',
+      '../src/lib/log.c',      
+    ),
+    include_directories : [lib],
+    dependencies : [check_dep, glib_dep, yaml_dep],
+    c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+  )
+  test('yaml_loader', test_yaml_loader)
+
+  test_flow = executable(
+    'test_flow',
+    'lib/test_flow.c',
+    files(
+      '../src/lib/flow.c',
+      '../src/lib/yaml_tree.c',
+      '../src/lib/usb_node.c',
+      '../src/lib/schema.c',
       '../src/lib/codec.c',
       '../src/lib/version.c',
       '../src/lib/utils.c',
@@ -34,7 +54,7 @@ if check_dep.found()
     dependencies : [check_dep, glib_dep, yaml_dep],
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
-  test('yaml_loader', test_yaml_loader)
+  test('flow', test_flow)
 endif
 
-# TODO: canonical-dialect tests (yaml_loader / codec / flow / ValidationSuite).
+# TODO: canonical-dialect tests (codec / ValidationSuite).

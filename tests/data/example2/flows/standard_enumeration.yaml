@@ -1,5 +1,3 @@
-version: "1.0"
-
 states:
   - name: "handle_setup_requests"
     rules:

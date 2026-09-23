@@ -1,10 +1,7 @@
-version: "1.0"
-name: "Hello World Injector Keyboard"
-
 device_descriptor:
   - bLength: 18
     bDescriptorType: 0x01
-    bcdUSB: 0x0110
+    bcdUSB: 0x0200
     bDeviceClass: 0x00
     bDeviceSubClass: 0x00
     bDeviceProtocol: 0x00
@@ -27,7 +24,7 @@ configurations:
         bInterfaceSubClass: 0x01 # Boot
         bInterfaceProtocol: 0x01 # Keyboard
         hid_descriptor:
-          wDescriptorLength: 62
+          wDescriptorLength: 63
         endpoints:
           - address: 0x81
             attributes: 0x03 # Interrupt

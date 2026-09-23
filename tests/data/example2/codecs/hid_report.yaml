@@ -1,4 +1,3 @@
-version: "1.0"
 codec: "hid_report"
 # HID short item prefix byte = bTag<<4 | bType<<2 | bSize
 item_types: { main: 0, global: 1, local: 2 }

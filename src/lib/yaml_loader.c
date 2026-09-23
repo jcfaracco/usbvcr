@@ -12,6 +12,7 @@
  */
 
 #include "yaml_loader.h"
+#include "flow.h"
 #include "yaml_tree.h"
 #include "codec.h"
 #include "log.h"
@@ -110,7 +111,7 @@ static void dev_entry_free(gpointer p)
     g_free(e->name);
     g_free(e->flow_path);
     usb_node_free(e->tree);
-    /* TODO (step 4): flow_free(e->flow); */
+    if (e->flow) { flow_free(e->flow); }
     g_free(e);
 }
 
@@ -205,7 +206,7 @@ static int parse_main(const char *path, yaml_device_t *dev)
             e->name      = g_strdup(dref);
             e->flow_path = fref ? g_build_filename(dir, fref, NULL) : NULL;
             e->tree      = tree;   /* entry owns it */
-            e->flow      = NULL;   /* built in step 4 from flow_path */
+            e->flow      = e->flow_path ? flow_load(e->flow_path) : NULL;
             dev->devices = g_list_append(dev->devices, e);
             LOG_DEBUG("[Manifest] device '%s' flow '%s'",
                       dref, fref ? fref : "(none)");

@@ -16,6 +16,7 @@
 typedef struct flow flow_t;
 
 flow_t *flow_create(void);
+flow_t *flow_load(const char *path);
 void  flow_free(flow_t *flow);
 
 /* Current state name (NULL if none). */

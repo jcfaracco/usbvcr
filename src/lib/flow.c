@@ -53,23 +53,30 @@ struct flow {
 };
 
 static void flow_action_free(flow_action_t *act) {
-    if (!act) return;
+    if (!act)
+        return;
+
     g_free(act->respond_with);
     g_free(act->transition_state);
-    if (act->payloads) {
+
+    if (act->payloads)
         g_queue_free_full(act->payloads, (GDestroyNotify)g_byte_array_unref);
-    }
+
     g_free(act);
 }
 
 static void flow_rule_free(flow_rule_t *rule) {
-    if (!rule) return;
+    if (!rule)
+        return;
+
     g_list_free_full(rule->actions, (GDestroyNotify)flow_action_free);
     g_free(rule);
 }
 
 static void flow_state_free(flow_state_t *st) {
-    if (!st) return;
+    if (!st)
+        return;
+
     g_free(st->name);
     g_list_free_full(st->on_enter, (GDestroyNotify)flow_action_free);
     g_list_free_full(st->rules, (GDestroyNotify)flow_rule_free);
@@ -79,8 +86,10 @@ static void flow_state_free(flow_state_t *st) {
 flow_t *flow_create(void)
 {
     flow_t *f = g_new0(flow_t, 1);
+
     f->states = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, (GDestroyNotify)flow_state_free);
     f->ep_queues = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)g_queue_free);
+
     return f;
 }
 
@@ -88,16 +97,21 @@ void flow_free(flow_t *flow)
 {
     if (!flow)
         return;
+
     g_free(flow->state);
     g_free(flow->next_state);
     
     GHashTableIter iter;
     gpointer key, value;
     g_hash_table_iter_init(&iter, flow->ep_queues);
+
     while (g_hash_table_iter_next(&iter, &key, &value)) {
         GQueue *q = value;
-        if (q) while (!g_queue_is_empty(q)) { g_byte_array_unref(g_queue_pop_head(q)); }
-        
+        if (q) {
+            while (!g_queue_is_empty(q)) {
+                g_byte_array_unref(g_queue_pop_head(q));
+            }
+        }        
     }
     g_hash_table_destroy(flow->ep_queues);
     g_hash_table_destroy(flow->states);
@@ -114,8 +128,10 @@ static uint32_t parse_int(const char *s) {
 }
 
 static flow_match_t parse_match(yaml_document_t *doc, yaml_node_t *n) {
-    flow_match_t m = {0};
-    if (n->type != YAML_MAPPING_NODE) return m;
+    flow_match_t m = { 0 };
+
+    if (n->type != YAML_MAPPING_NODE)
+        return m;
     
     yaml_node_t *v;
     if ((v = yaml_tree_map_get(doc, n, "bmRequestType"))) {
@@ -138,7 +154,10 @@ static flow_match_t parse_match(yaml_document_t *doc, yaml_node_t *n) {
 
 static GByteArray* parse_hex_string(const char *hex_str) {
     GByteArray *arr = g_byte_array_new();
-    if (!hex_str) return arr;
+
+    if (!hex_str)
+        return arr;
+
     size_t len = strlen(hex_str);
     for (size_t i = 0; i + 1 < len; i += 2) {
         char buf[3] = {hex_str[i], hex_str[i+1], 0};
@@ -224,8 +243,12 @@ static GList* parse_rules(yaml_document_t *doc, yaml_node_t *seq) {
 }
 
 flow_t *flow_load(const char *path) {
-    if (!path) return NULL;
-    FILE *fp = fopen(path, "rb");
+    FILE *fp = NULL;
+
+    if (!path)
+        return NULL;
+
+    fp = fopen(path, "rb");
     if (!fp) return NULL;
 
     yaml_parser_t parser;
@@ -290,6 +313,7 @@ static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t
         flow_action_t *a = l->data;
         switch (a->type) {
             case ACT_RESPOND_WITH:
+                LOG_DEBUG("[flow] ACT_RESPOND_WITH");
                 if (out && len && a->respond_with) {
                     size_t slen = strlen(a->respond_with) + 1;
                     if (slen > 1024) slen = 1024;
@@ -299,12 +323,14 @@ static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t
                 }
                 break;
             case ACT_RESPOND_WITH_STATUS:
+                LOG_DEBUG("[flow] ACT_RESPOND_WITH_STATUS");
                 if (out && len) {
                     *len = 0;
                     if (handled) *handled = 1;
                 }
                 break;
             case ACT_TRANSITION_STATE:
+                LOG_DEBUG("[flow] ACT_TRANSITION_STATE");
                 g_free(flow->next_state);
                 flow->next_state = g_strdup(a->transition_state);
                 break;
@@ -391,7 +417,9 @@ int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
 
 void flow_tick(flow_t *flow)
 {
-    if (!flow) return;
+    if (!flow)
+        return;
+
     if (flow->next_state) {
         g_free(flow->state);
         flow->state = flow->next_state;

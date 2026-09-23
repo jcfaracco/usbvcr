@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdbool.h>
 
 #include "usb_core.h"
 #include "transport.h"
@@ -228,6 +229,8 @@ int usb_core_run(int sock, usb_device_t *dev)
     if (announce_device(sock, dev, caps) < 0)
         return -1;
 
+    bool int_ep_active[32] = {false};
+
     /* 3. Serve requests until the peer goes away. The socket recv timeout
      * turns an idle wait into a periodic tick, so streaming backends make
      * progress even when no request is pending. */
@@ -238,6 +241,15 @@ int usb_core_run(int sock, usb_device_t *dev)
         if (rc == 1) {          /* idle: no request pending */
             if (dev->ops->tick)
                 dev->ops->tick(dev);
+
+            /* Poll all active interrupt endpoints to push queued data */
+            for (int i = 0; i < 32; i++) {
+                if (int_ep_active[i]) {
+                    /* Reverse of usb_ep_index: reconstruct bEndpointAddress */
+                    uint8_t ep = (i & 0x0f) | ((i & 0x10) << 3);
+                    push_interrupt_reports(sock, dev, ep);
+                }
+            }
             continue;
         }
 
@@ -250,12 +262,17 @@ int usb_core_run(int sock, usb_device_t *dev)
             if (len >= 1) {
                 uint8_t ep = payload[0];
                 LOG_DEBUG("start interrupt receiving on ep 0x%02x", ep);
+                int_ep_active[usb_ep_index(ep)] = true;
                 push_interrupt_reports(sock, dev, ep);
             }
             break;
 
         case RT_STOP_INTERRUPT_RECEIVING:
-            LOG_DEBUG("stop interrupt receiving");
+            if (len >= 1) {
+                uint8_t ep = payload[0];
+                LOG_DEBUG("stop interrupt receiving on ep 0x%02x", ep);
+                int_ep_active[usb_ep_index(ep)] = false;
+            }
             break;
 
         case RT_INTERRUPT_PACKET:  /* OUT (e.g. keyboard LEDs) */
@@ -274,6 +291,15 @@ int usb_core_run(int sock, usb_device_t *dev)
 
         if (dev->ops->tick)
             dev->ops->tick(dev);
+
+        /* Poll all active interrupt endpoints to push queued data */
+        for (int i = 0; i < 32; i++) {
+            if (int_ep_active[i]) {
+                /* Reverse of usb_ep_index: reconstruct bEndpointAddress */
+                uint8_t ep = (i & 0x0f) | ((i & 0x10) << 3);
+                push_interrupt_reports(sock, dev, ep);
+            }
+        }
     }
 
     return 0;

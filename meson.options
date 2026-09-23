@@ -1,0 +1,5 @@
+option('enable_coverage', 
+  type: 'boolean', 
+  value: false, 
+  description: 'Enable code coverage instrumentation (gcovr)'
+)

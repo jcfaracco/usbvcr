@@ -1,5 +1,5 @@
 /*
- * yaml_util.h – Low-level libyaml document accessors.
+ * yaml/util.h – Low-level libyaml document accessors.
  *
  * The tiny read helpers every YAML consumer needs (tree builder, codec loader,
  * flow loader, manifest reader). Depends only on libyaml so any lib module can

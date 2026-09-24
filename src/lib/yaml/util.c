@@ -1,8 +1,8 @@
 /*
- * yaml_util.c – Low-level libyaml document accessors (see yaml_util.h).
+ * yaml/util.c – Low-level libyaml document accessors (see yaml/util.h).
  */
 
-#include "yaml_util.h"
+#include "yaml/util.h"
 
 #include <string.h>
 

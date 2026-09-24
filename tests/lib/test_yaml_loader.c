@@ -1,4 +1,4 @@
-/* Unit tests for src/lib/yaml_loader.c.
+/* Unit tests for src/lib/yaml/loader.c.
  *
  * yaml_scope_from_path() is fully implemented and tested here.
  * yaml_parse_from_file() / yaml_device_free() are stubs today — the few
@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <check.h>
 
-#include "yaml_loader.h"
+#include "yaml/loader.h"
 
 /* meson passes -DTEST_DATA_DIR="<srcdir>/data"; fall back for ad-hoc builds. */
 #ifndef TEST_DATA_DIR

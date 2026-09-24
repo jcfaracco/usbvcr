@@ -9,7 +9,7 @@
  */
 
 #include "yaml_backend.h"
-#include "yaml_loader.h"
+#include "yaml/loader.h"
 #include "usb_node.h"
 #include "flow.h"
 #include "log.h"

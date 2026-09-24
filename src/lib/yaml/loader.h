@@ -1,5 +1,5 @@
 /*
- * yaml_loader.h – Canonical-dialect YAML -> usb_node_t descriptor tree.
+ * yaml/loader.h – Canonical-dialect YAML -> usb_node_t descriptor tree.
  *
  * Parses the canonical `schemas/ devices/ flows/` dialect (README §3):
  * resolves `import`, applies `template`, overrides fields, and fills the

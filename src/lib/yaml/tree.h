@@ -1,5 +1,5 @@
 /*
- * yaml_tree.h – Canonical-dialect YAML -> usb_node_t descriptor tree.
+ * yaml/tree.h – Canonical-dialect YAML -> usb_node_t descriptor tree.
  *
  * The one cohesive engine: walk a libyaml document and fold it into a
  * usb_node_t tree, resolving schema/template merges and codec blocks along

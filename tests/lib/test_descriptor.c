@@ -6,7 +6,7 @@
 
 #include "descriptor.h"
 #include "usb_node.h"
-#include "yaml_loader.h"
+#include "yaml/loader.h"
 #include "yaml_backend.h"
 
 

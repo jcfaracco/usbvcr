@@ -14,7 +14,7 @@
  */
 
 #include "codec.h"
-#include "yaml_util.h"
+#include "yaml/util.h"
 #include "log.h"
 
 #include <stdio.h>

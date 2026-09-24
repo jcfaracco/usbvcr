@@ -1,5 +1,5 @@
 #include "flow.h"
-#include "yaml_util.h" // for yaml_map_get, yaml_scalar
+#include "yaml/util.h" // for yaml_map_get, yaml_scalar
 #include "log.h"
 #include "utils.h"
 

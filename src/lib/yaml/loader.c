@@ -1,9 +1,9 @@
 /*
- * yaml_loader.c – Canonical-dialect project loader.
+ * yaml/loader.c – Canonical-dialect project loader.
  *
  * Orchestration only: resolve a project's scopes (schemas/ codecs/ tests/)
  * and its `devices:` manifest, delegating the YAML->usb_node build to
- * yaml_tree.{c,h} and codec tables to codec.{c,h}.
+ * yaml/tree.{c,h} and codec tables to codec.{c,h}.
  *
  * TODO:
  *   - autofill null length/count fields (README §3.1)
@@ -11,10 +11,10 @@
  *   - build ValidationSuite from tests/ (README §3.4)
  */
 
-#include "yaml_loader.h"
+#include "yaml/loader.h"
 #include "flow.h"
-#include "yaml_tree.h"
-#include "yaml_util.h"
+#include "yaml/tree.h"
+#include "yaml/util.h"
 #include "codec.h"
 #include "log.h"
 #include "version.h"

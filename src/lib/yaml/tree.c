@@ -1,5 +1,5 @@
 /*
- * yaml_tree.c – Canonical-dialect YAML -> usb_node_t descriptor tree.
+ * yaml/tree.c – Canonical-dialect YAML -> usb_node_t descriptor tree.
  *
  * The whole file is loaded into a yaml_document_t, then walked recursively:
  * mapping -> usb_node, sequence -> repeated props under the key, scalar ->
@@ -7,8 +7,8 @@
  * `codec:`-tagged block encodes to a single byte array (README §6).
  */
 
-#include "yaml_tree.h"
-#include "yaml_util.h"
+#include "yaml/tree.h"
+#include "yaml/util.h"
 #include "codec.h"
 #include "log.h"
 

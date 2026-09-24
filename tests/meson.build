@@ -55,6 +55,30 @@ if check_dep.found()
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
   test('flow', test_flow)
+
+  test_descriptor = executable(
+    'test_descriptor',
+    'lib/test_descriptor.c',
+    files(
+      '../src/core/descriptor.c',
+      '../src/core/usb_core.c',
+      '../src/core/transport.c',
+      '../src/lib/codec.c',
+      '../src/lib/flow.c',
+      '../src/lib/log.c',
+      '../src/lib/schema.c',
+      '../src/lib/yaml_loader.c',
+      '../src/lib/yaml_tree.c',
+      '../src/lib/usb_node.c',
+      '../src/lib/utils.c',
+      '../src/lib/version.c',
+      '../src/engine/yaml_backend.c',
+    ),
+    include_directories : [lib, core, engine],
+    dependencies : [check_dep, glib_dep, yaml_dep],
+    c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+  )
+  test('descriptor', test_descriptor)
 endif
 
 # TODO: canonical-dialect tests (codec / ValidationSuite).

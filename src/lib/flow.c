@@ -1,5 +1,5 @@
 #include "flow.h"
-#include "yaml_tree.h" // for yaml_tree_map_get, yaml_tree_scalar
+#include "yaml_util.h" // for yaml_map_get, yaml_scalar
 #include "log.h"
 #include "utils.h"
 
@@ -134,20 +134,20 @@ static flow_match_t parse_match(yaml_document_t *doc, yaml_node_t *n) {
         return m;
     
     yaml_node_t *v;
-    if ((v = yaml_tree_map_get(doc, n, "bmRequestType"))) {
-        m.has_bmRequestType = 1; m.bmRequestType = parse_int(yaml_tree_scalar(v));
+    if ((v = yaml_map_get(doc, n, "bmRequestType"))) {
+        m.has_bmRequestType = 1; m.bmRequestType = parse_int(yaml_scalar(v));
     }
-    if ((v = yaml_tree_map_get(doc, n, "bRequest"))) {
-        m.has_bRequest = 1; m.bRequest = parse_int(yaml_tree_scalar(v));
+    if ((v = yaml_map_get(doc, n, "bRequest"))) {
+        m.has_bRequest = 1; m.bRequest = parse_int(yaml_scalar(v));
     }
-    if ((v = yaml_tree_map_get(doc, n, "wValue"))) {
-        m.has_wValue = 1; m.wValue = parse_int(yaml_tree_scalar(v));
+    if ((v = yaml_map_get(doc, n, "wValue"))) {
+        m.has_wValue = 1; m.wValue = parse_int(yaml_scalar(v));
     }
-    if ((v = yaml_tree_map_get(doc, n, "wIndex"))) {
-        m.has_wIndex = 1; m.wIndex = parse_int(yaml_tree_scalar(v));
+    if ((v = yaml_map_get(doc, n, "wIndex"))) {
+        m.has_wIndex = 1; m.wIndex = parse_int(yaml_scalar(v));
     }
-    if ((v = yaml_tree_map_get(doc, n, "endpoint_poll"))) {
-        m.has_endpoint_poll = 1; m.endpoint_poll = parse_int(yaml_tree_scalar(v));
+    if ((v = yaml_map_get(doc, n, "endpoint_poll"))) {
+        m.has_endpoint_poll = 1; m.endpoint_poll = parse_int(yaml_scalar(v));
     }
     return m;
 }
@@ -176,40 +176,40 @@ static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq) {
         if (!item || item->type != YAML_MAPPING_NODE) continue;
         
         yaml_node_t *v;
-        if ((v = yaml_tree_map_get(doc, item, "respond_with"))) {
+        if ((v = yaml_map_get(doc, item, "respond_with"))) {
             flow_action_t *a = g_new0(flow_action_t, 1);
             a->type = ACT_RESPOND_WITH;
-            a->respond_with = g_strdup(yaml_tree_scalar(v));
+            a->respond_with = g_strdup(yaml_scalar(v));
             list = g_list_append(list, a);
-        } else if ((v = yaml_tree_map_get(doc, item, "respond_with_status"))) {
+        } else if ((v = yaml_map_get(doc, item, "respond_with_status"))) {
             flow_action_t *a = g_new0(flow_action_t, 1);
             a->type = ACT_RESPOND_WITH_STATUS;
-            a->respond_with_status = parse_int(yaml_tree_scalar(v));
+            a->respond_with_status = parse_int(yaml_scalar(v));
             list = g_list_append(list, a);
-        } else if ((v = yaml_tree_map_get(doc, item, "transition_state"))) {
+        } else if ((v = yaml_map_get(doc, item, "transition_state"))) {
             flow_action_t *a = g_new0(flow_action_t, 1);
             a->type = ACT_TRANSITION_STATE;
-            a->transition_state = g_strdup(yaml_tree_scalar(v));
+            a->transition_state = g_strdup(yaml_scalar(v));
             list = g_list_append(list, a);
-        } else if ((v = yaml_tree_map_get(doc, item, "return_nak_if_queue_empty"))) {
+        } else if ((v = yaml_map_get(doc, item, "return_nak_if_queue_empty"))) {
             flow_action_t *a = g_new0(flow_action_t, 1);
             a->type = ACT_RETURN_NAK_IF_QUEUE_EMPTY;
-            a->return_nak_if_queue_empty = (g_strcmp0(yaml_tree_scalar(v), "true") == 0);
+            a->return_nak_if_queue_empty = (g_strcmp0(yaml_scalar(v), "true") == 0);
             list = g_list_append(list, a);
-        } else if ((v = yaml_tree_map_get(doc, item, "queue_endpoint_data"))) {
+        } else if ((v = yaml_map_get(doc, item, "queue_endpoint_data"))) {
             flow_action_t *a = g_new0(flow_action_t, 1);
             a->type = ACT_QUEUE_ENDPOINT_DATA;
             a->payloads = g_queue_new();
-            yaml_node_t *ep_n = yaml_tree_map_get(doc, v, "endpoint");
-            if (ep_n) a->ep = parse_int(yaml_tree_scalar(ep_n));
-            yaml_node_t *pay_n = yaml_tree_map_get(doc, v, "payloads");
+            yaml_node_t *ep_n = yaml_map_get(doc, v, "endpoint");
+            if (ep_n) a->ep = parse_int(yaml_scalar(ep_n));
+            yaml_node_t *pay_n = yaml_map_get(doc, v, "payloads");
             if (pay_n && pay_n->type == YAML_SEQUENCE_NODE) {
                 for (yaml_node_item_t *pi = pay_n->data.sequence.items.start; pi < pay_n->data.sequence.items.top; pi++) {
                     yaml_node_t *pitem = yaml_document_get_node(doc, *pi);
                     if (pitem && pitem->type == YAML_MAPPING_NODE) {
-                        yaml_node_t *hex_n = yaml_tree_map_get(doc, pitem, "hex");
+                        yaml_node_t *hex_n = yaml_map_get(doc, pitem, "hex");
                         if (hex_n) {
-                            g_queue_push_tail(a->payloads, parse_hex_string(yaml_tree_scalar(hex_n)));
+                            g_queue_push_tail(a->payloads, parse_hex_string(yaml_scalar(hex_n)));
                         }
                     }
                 }
@@ -229,11 +229,11 @@ static GList* parse_rules(yaml_document_t *doc, yaml_node_t *seq) {
         if (!item || item->type != YAML_MAPPING_NODE) continue;
         
         flow_rule_t *r = g_new0(flow_rule_t, 1);
-        yaml_node_t *m_node = yaml_tree_map_get(doc, item, "match");
+        yaml_node_t *m_node = yaml_map_get(doc, item, "match");
         if (m_node) {
             r->match = parse_match(doc, m_node);
         }
-        yaml_node_t *a_node = yaml_tree_map_get(doc, item, "actions");
+        yaml_node_t *a_node = yaml_map_get(doc, item, "actions");
         if (a_node) {
             r->actions = parse_actions(doc, a_node);
         }
@@ -274,23 +274,23 @@ flow_t *flow_load(const char *path) {
     }
 
     flow_t *f = flow_create();
-    yaml_node_t *states_n = yaml_tree_map_get(&doc, top, "states");
+    yaml_node_t *states_n = yaml_map_get(&doc, top, "states");
     if (states_n && states_n->type == YAML_SEQUENCE_NODE) {
         for (yaml_node_item_t *i = states_n->data.sequence.items.start; i < states_n->data.sequence.items.top; i++) {
             yaml_node_t *item = yaml_document_get_node(&doc, *i);
             if (!item || item->type != YAML_MAPPING_NODE) continue;
             
             flow_state_t *st = g_new0(flow_state_t, 1);
-            yaml_node_t *name_n = yaml_tree_map_get(&doc, item, "name");
+            yaml_node_t *name_n = yaml_map_get(&doc, item, "name");
             if (name_n) {
-                const char *s = yaml_tree_scalar(name_n);
+                const char *s = yaml_scalar(name_n);
                 if (s) st->name = g_strdup(s);
             }
             
-            yaml_node_t *enter_n = yaml_tree_map_get(&doc, item, "on_enter");
+            yaml_node_t *enter_n = yaml_map_get(&doc, item, "on_enter");
             if (enter_n) st->on_enter = parse_actions(&doc, enter_n);
             
-            yaml_node_t *rules_n = yaml_tree_map_get(&doc, item, "rules");
+            yaml_node_t *rules_n = yaml_map_get(&doc, item, "rules");
             if (rules_n) st->rules = parse_rules(&doc, rules_n);
             
             if (st->name) {

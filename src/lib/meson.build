@@ -7,6 +7,7 @@ lib_sources = files(
   'usb_node.c',
   'yaml_loader.c',
   'yaml_tree.c',
+  'yaml_util.c',
   'schema.c',
   'codec.c',
   'flow.c',

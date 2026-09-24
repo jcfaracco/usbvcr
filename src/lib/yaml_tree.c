@@ -8,6 +8,7 @@
  */
 
 #include "yaml_tree.h"
+#include "yaml_util.h"
 #include "codec.h"
 #include "log.h"
 
@@ -68,26 +69,6 @@ static usb_prop_t *find_prop(usb_node_t *node, const char *name)
     return NULL;
 }
 
-const char *yaml_tree_scalar(yaml_node_t *n)
-{
-    return (n && n->type == YAML_SCALAR_NODE)
-         ? (const char *) n->data.scalar.value : NULL;
-}
-
-yaml_node_t *yaml_tree_map_get(yaml_document_t *doc, yaml_node_t *map,
-                               const char *key)
-{
-    if (!map || map->type != YAML_MAPPING_NODE)
-        return NULL;
-    for (yaml_node_pair_t *p = map->data.mapping.pairs.start;
-         p < map->data.mapping.pairs.top; p++) {
-        yaml_node_t *k = yaml_document_get_node(doc, p->key);
-        if (k && k->type == YAML_SCALAR_NODE &&
-            strcmp((const char *) k->data.scalar.value, key) == 0)
-            return yaml_document_get_node(doc, p->value);
-    }
-    return NULL;
-}
 
 /* Handle a codec block:
  *   report_descriptor:
@@ -100,7 +81,7 @@ static gboolean build_codec_block(yaml_document_t *doc, yaml_node_t *map,
                                   GHashTable *codecs, usb_node_t *out,
                                   const char *key)
 {
-    const char *cname = yaml_tree_scalar(yaml_tree_map_get(doc, map, "codec"));
+    const char *cname = yaml_scalar(yaml_map_get(doc, map, "codec"));
     if (!cname)
         return FALSE;   /* not a codec block */
 
@@ -113,7 +94,7 @@ static gboolean build_codec_block(yaml_document_t *doc, yaml_node_t *map,
     /* Build the ordered item list; codec_item_t borrows the yaml scalar strings
      * (valid until the document is deleted, well after codec_encode). */
     GList *items = NULL;
-    yaml_node_t *seq = yaml_tree_map_get(doc, map, "items");
+    yaml_node_t *seq = yaml_map_get(doc, map, "items");
     if (seq && seq->type == YAML_SEQUENCE_NODE) {
         for (yaml_node_item_t *i = seq->data.sequence.items.start;
              i < seq->data.sequence.items.top; i++) {
@@ -122,8 +103,8 @@ static gboolean build_codec_block(yaml_document_t *doc, yaml_node_t *map,
                 continue;
             for (yaml_node_pair_t *p = im->data.mapping.pairs.start;
                  p < im->data.mapping.pairs.top; p++) {
-                const char *k = yaml_tree_scalar(yaml_document_get_node(doc, p->key));
-                const char *v = yaml_tree_scalar(yaml_document_get_node(doc, p->value));
+                const char *k = yaml_scalar(yaml_document_get_node(doc, p->key));
+                const char *v = yaml_scalar(yaml_document_get_node(doc, p->value));
                 if (!k)
                     continue;
                 codec_item_t *ci = g_new0(codec_item_t, 1);

@@ -29,13 +29,4 @@ usb_node_t *yaml_tree_load(const char *path,
                            GHashTable *codecs,
                            char **ns_out);
 
-/* Shared libyaml accessors (used here and by the manifest reader). */
-
-/* Scalar text of a yaml node, or NULL. */
-const char *yaml_tree_scalar(yaml_node_t *n);
-
-/* Value node of `key` in mapping `map`, or NULL. */
-yaml_node_t *yaml_tree_map_get(yaml_document_t *doc, yaml_node_t *map,
-                               const char *key);
-
 #endif /* YAML_TREE_H */

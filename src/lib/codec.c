@@ -14,6 +14,7 @@
  */
 
 #include "codec.h"
+#include "yaml_util.h"
 #include "log.h"
 
 #include <stdio.h>
@@ -41,30 +42,6 @@ struct codec {
     GHashTable *flagsets;  /* set(char*)  -> GHashTable(flag -> GUINT)   */
 };
 
-/* ── libyaml document helpers ── */
-
-static const char *scalar_val(yaml_node_t *n)
-{
-    return (n && n->type == YAML_SCALAR_NODE)
-         ? (const char *) n->data.scalar.value : NULL;
-}
-
-/* Value node of `key` in mapping `map`, or NULL. */
-static yaml_node_t *map_get(yaml_document_t *doc, yaml_node_t *map,
-                            const char *key)
-{
-    if (!map || map->type != YAML_MAPPING_NODE)
-        return NULL;
-    for (yaml_node_pair_t *p = map->data.mapping.pairs.start;
-         p < map->data.mapping.pairs.top; p++) {
-        yaml_node_t *k = yaml_document_get_node(doc, p->key);
-        if (k && k->type == YAML_SCALAR_NODE &&
-            strcmp((const char *) k->data.scalar.value, key) == 0)
-            return yaml_document_get_node(doc, p->value);
-    }
-    return NULL;
-}
-
 /* Parse a flat `name: uint` mapping into a new GHashTable(char* -> GUINT).
  * Values accept decimal or 0x-hex (g_ascii_strtoull base 0). */
 static GHashTable *parse_uint_map(yaml_document_t *doc, yaml_node_t *map)
@@ -75,8 +52,8 @@ static GHashTable *parse_uint_map(yaml_document_t *doc, yaml_node_t *map)
 
     for (yaml_node_pair_t *p = map->data.mapping.pairs.start;
          p < map->data.mapping.pairs.top; p++) {
-        const char *name = scalar_val(yaml_document_get_node(doc, p->key));
-        const char *val  = scalar_val(yaml_document_get_node(doc, p->value));
+        const char *name = yaml_scalar(yaml_document_get_node(doc, p->key));
+        const char *val  = yaml_scalar(yaml_document_get_node(doc, p->value));
         if (!name || !val)
             continue;
         guint v = (guint) g_ascii_strtoull(val, NULL, 0);
@@ -92,25 +69,25 @@ static codec_token_t *parse_token(yaml_document_t *doc, yaml_node_t *tmap,
 {
     codec_token_t *t = g_new0(codec_token_t, 1);
 
-    const char *type = scalar_val(map_get(doc, tmap, "type"));
+    const char *type = yaml_scalar(yaml_map_get(doc, tmap, "type"));
     if (type && g_hash_table_contains(item_types, type))
         t->type = (guint8) GPOINTER_TO_UINT(g_hash_table_lookup(item_types, type));
     else
         LOG_WARN("codec: token has unknown item type '%s'", type ? type : "(none)");
 
-    const char *tag = scalar_val(map_get(doc, tmap, "tag"));
+    const char *tag = yaml_scalar(yaml_map_get(doc, tmap, "tag"));
     t->tag = tag ? (guint8) g_ascii_strtoull(tag, NULL, 0) : 0;
 
-    const char *w = scalar_val(map_get(doc, tmap, "width"));
+    const char *w = yaml_scalar(yaml_map_get(doc, tmap, "width"));
     if (!w || strcmp(w, "auto") == 0)
         t->width = -1;
     else
         t->width = (int) g_ascii_strtoull(w, NULL, 0);
 
-    const char *sg = scalar_val(map_get(doc, tmap, "signed"));
+    const char *sg = yaml_scalar(yaml_map_get(doc, tmap, "signed"));
     t->is_signed = sg && (strcmp(sg, "true") == 0 || strcmp(sg, "1") == 0);
 
-    const char *fs = scalar_val(map_get(doc, tmap, "flagset"));
+    const char *fs = yaml_scalar(yaml_map_get(doc, tmap, "flagset"));
     t->flagset = fs ? g_strdup(fs) : NULL;
 
     return t;
@@ -134,7 +111,7 @@ static void parse_nested_maps(yaml_document_t *doc, yaml_node_t *outer,
         return;
     for (yaml_node_pair_t *p = outer->data.mapping.pairs.start;
          p < outer->data.mapping.pairs.top; p++) {
-        const char *key = scalar_val(yaml_document_get_node(doc, p->key));
+        const char *key = yaml_scalar(yaml_document_get_node(doc, p->key));
         yaml_node_t *inner = yaml_document_get_node(doc, p->value);
         if (!key)
             continue;
@@ -187,7 +164,7 @@ codec_t *codec_load(const char *table_path)
         LOG_ERR("codec: '%s' has no top-level mapping", table_path);
     } else {
         c = g_new0(codec_t, 1);
-        const char *name = scalar_val(map_get(&doc, root, "codec"));
+        const char *name = yaml_scalar(yaml_map_get(&doc, root, "codec"));
         c->codec_name = g_strdup(name ? name : "");
         c->tokens   = g_hash_table_new_full(g_str_hash, g_str_equal,
                                             g_free, codec_token_free);
@@ -198,13 +175,13 @@ codec_t *codec_load(const char *table_path)
 
         /* item_types only resolves token `type:` names; scoped to this load. */
         GHashTable *item_types =
-            parse_uint_map(&doc, map_get(&doc, root, "item_types"));
+            parse_uint_map(&doc, yaml_map_get(&doc, root, "item_types"));
 
-        yaml_node_t *tokens = map_get(&doc, root, "tokens");
+        yaml_node_t *tokens = yaml_map_get(&doc, root, "tokens");
         if (tokens && tokens->type == YAML_MAPPING_NODE) {
             for (yaml_node_pair_t *p = tokens->data.mapping.pairs.start;
                  p < tokens->data.mapping.pairs.top; p++) {
-                const char *key = scalar_val(yaml_document_get_node(&doc, p->key));
+                const char *key = yaml_scalar(yaml_document_get_node(&doc, p->key));
                 yaml_node_t *tmap = yaml_document_get_node(&doc, p->value);
                 if (!key)
                     continue;
@@ -213,8 +190,8 @@ codec_t *codec_load(const char *table_path)
             }
         }
 
-        parse_nested_maps(&doc, map_get(&doc, root, "symbols"),  c->symbols);
-        parse_nested_maps(&doc, map_get(&doc, root, "flagsets"), c->flagsets);
+        parse_nested_maps(&doc, yaml_map_get(&doc, root, "symbols"),  c->symbols);
+        parse_nested_maps(&doc, yaml_map_get(&doc, root, "flagsets"), c->flagsets);
 
         g_hash_table_destroy(item_types);
         LOG_DEBUG("[Codec] loaded table '%s' (%u tokens, %u symbol maps, "

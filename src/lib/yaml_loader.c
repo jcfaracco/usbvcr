@@ -14,6 +14,7 @@
 #include "yaml_loader.h"
 #include "flow.h"
 #include "yaml_tree.h"
+#include "yaml_util.h"
 #include "codec.h"
 #include "log.h"
 #include "version.h"
@@ -162,7 +163,7 @@ static int parse_main(const char *path, yaml_device_t *dev)
     yaml_node_t *root = yaml_document_get_root_node(&doc);
 
     /* Fallback version check. */
-    version = yaml_tree_scalar(yaml_tree_map_get(&doc, root, "version"));
+    version = yaml_scalar(yaml_map_get(&doc, root, "version"));
     if (match_version(version) == YAML_VERSION_INVALID) {
         LOG_ERR("Mismatch version '%s'", version);
         g_free(dir);
@@ -172,7 +173,7 @@ static int parse_main(const char *path, yaml_device_t *dev)
         return -1;
     }
 
-    devs = yaml_tree_map_get(&doc, root, "devices");
+    devs = yaml_map_get(&doc, root, "devices");
 
     if (!devs || devs->type != YAML_SEQUENCE_NODE) {
         LOG_WARN("yaml_loader: project '%s' has no devices: manifest", path);
@@ -183,8 +184,8 @@ static int parse_main(const char *path, yaml_device_t *dev)
             if (!item || item->type != YAML_MAPPING_NODE)
                 continue;
 
-            const char *dref = yaml_tree_scalar(yaml_tree_map_get(&doc, item, "device"));
-            const char *fref = yaml_tree_scalar(yaml_tree_map_get(&doc, item, "flow"));
+            const char *dref = yaml_scalar(yaml_map_get(&doc, item, "device"));
+            const char *fref = yaml_scalar(yaml_map_get(&doc, item, "flow"));
             if (!dref) {
                 LOG_WARN("yaml_loader: manifest entry with no device:, skipping");
                 continue;

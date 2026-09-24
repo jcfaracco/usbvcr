@@ -1,13 +1,19 @@
 #include <string.h>
+#include <stddef.h>
 #include <stdbool.h>
 
 #include "usb_core.h"
 #include "transport.h"
 #include "descriptor.h"
 #include "protocol.h"
+#include "bytes.h"
 #include "log.h"
 
 #define HELLO_VERSION "usb_redir_hello 0.1"
+
+/* Read a byte / little-endian u16 descriptor field at a named offset. */
+#define DESC_U8(desc, off)  ((desc)[(off)])
+#define DESC_U16(desc, off) get_u16le((desc) + (off))
 
 /* ------------------------------------------------------------------ *
  * Handshake / announcement                                            *
@@ -44,12 +50,13 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
 
     /* ep0 (control) is implicit: it has no endpoint descriptor in the
      * config, so fill its ep_info from the device descriptor's
-     * bMaxPacketSize0 (byte 7). Without a nonzero max packet size the peer
-     * cannot run control transfers and enumeration stalls. */
+     * bMaxPacketSize0. Without a nonzero max packet size the peer cannot run
+     * control transfers and enumeration stalls. */
     uint8_t ep0_out = usb_ep_index(0x00);
     uint8_t ep0_in  = usb_ep_index(0x80);
     ei.type[ep0_out] = ei.type[ep0_in] = 0;   /* control */
-    ei.max_packet_size[ep0_out] = ei.max_packet_size[ep0_in] = dd[7];
+    ei.max_packet_size[ep0_out] = ei.max_packet_size[ep0_in] =
+        DESC_U8(dd, USB_DD_bMaxPacketSize0);
 
     /* Serialize ep_info to the length the *negotiated* caps imply. The peer
      * reads the trailing arrays only for caps both sides advertise:
@@ -68,18 +75,18 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
         usb_redir_send(sock, RT_EP_INFO, 0, &ei, eilen) < 0)
         return -1;
 
-    /* Device descriptor: class @4/5/6, idVendor @8, idProduct @10, bcd @12. */
+    /* Pull the connect fields from the device descriptor by named offset. */
     usb_device_connect_header_t c;
     memset(&c, 0, sizeof(c));
     /* bMaxPacketSize0==8 is a full-speed value; announcing HIGH would be
      * inconsistent. TODO: expose speed via the backend. */
     c.speed              = USB_REDIR_SPEED_FULL;
-    c.device_class       = dd[4];
-    c.device_subclass    = dd[5];
-    c.device_protocol    = dd[6];
-    c.vendor_id          = (uint16_t)(dd[8]  | (dd[9]  << 8));
-    c.product_id         = (uint16_t)(dd[10] | (dd[11] << 8));
-    c.device_version_bcd = (uint16_t)(dd[12] | (dd[13] << 8));
+    c.device_class       = DESC_U8(dd,  USB_DD_bDeviceClass);
+    c.device_subclass    = DESC_U8(dd,  USB_DD_bDeviceSubClass);
+    c.device_protocol    = DESC_U8(dd,  USB_DD_bDeviceProtocol);
+    c.vendor_id          = DESC_U16(dd, USB_DD_idVendor);
+    c.product_id         = DESC_U16(dd, USB_DD_idProduct);
+    c.device_version_bcd = DESC_U16(dd, USB_DD_bcdDevice);
 
     LOG_INFO("Announcing device %04x:%04x, %u interface(s)",
              c.vendor_id, c.product_id, ii.interface_count);
@@ -212,7 +219,8 @@ int usb_core_run(int sock, usb_device_t *dev)
 
     uint32_t peer_caps = 0;
     if (len >= sizeof(usb_hello_header_t)) {
-        memcpy(&peer_caps, payload + 64, sizeof(peer_caps));
+        peer_caps = get_u32le(payload +
+                              offsetof(usb_hello_header_t, capabilities));
         LOG_DEBUG("peer capabilities[0]=0x%08x", peer_caps);
     }
     uint32_t caps = USB_REDIR_OUR_CAPS & peer_caps;

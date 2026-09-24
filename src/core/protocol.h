@@ -80,6 +80,15 @@ enum {
 #define USB_REDIR_SPEED_SUPER   3
 #define USB_REDIR_SPEED_UNKNOWN 255
 
+/* Device descriptor field offsets (USB 2.0 spec, table 9-8). */
+#define USB_DD_bDeviceClass     4
+#define USB_DD_bDeviceSubClass  5
+#define USB_DD_bDeviceProtocol  6
+#define USB_DD_bMaxPacketSize0  7
+#define USB_DD_idVendor         8   /* u16 LE */
+#define USB_DD_idProduct        10  /* u16 LE */
+#define USB_DD_bcdDevice        12  /* u16 LE */
+
 /* Standard USB descriptor types. */
 #define USB_DESC_DEVICE     0x01
 #define USB_DESC_CONFIG     0x02

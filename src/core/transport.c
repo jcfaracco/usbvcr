@@ -11,7 +11,18 @@
 
 #include "transport.h"
 #include "protocol.h"
+#include "bytes.h"
 #include "log.h"
+
+/* On-wire frame header field offsets. id is 4 or 8 bytes (see g_id64), giving
+ * a 12- or 16-byte header. */
+enum {
+    HDR_OFF_TYPE   = 0,
+    HDR_OFF_LENGTH = 4,
+    HDR_OFF_ID     = 8,
+};
+#define HDR_SIZE_ID32 (HDR_OFF_ID + 4)   /* 32-bit id: 12-byte header */
+#define HDR_SIZE_ID64 (HDR_OFF_ID + 8)   /* 64-bit id: 16-byte header */
 
 /* ------------------------------------------------------------------ *
  * Socket helpers                                                      *
@@ -113,7 +124,7 @@ void transport_set_id64(int enable)
 
 static size_t hdr_wire_size(void)
 {
-    return g_id64 ? 16 : 12;
+    return g_id64 ? HDR_SIZE_ID64 : HDR_SIZE_ID32;
 }
 
 int usb_redir_send(int sock, uint32_t type, int64_t id,
@@ -128,15 +139,12 @@ int usb_redir_send(int sock, uint32_t type, int64_t id,
     }
 
     /* Serialize the header field by field: type(4) length(4) id(4 or 8). */
-    uint32_t t = type, l = (uint32_t)len;
-    memcpy(frame + 0, &t, 4);
-    memcpy(frame + 4, &l, 4);
-    if (g_id64) {
-        memcpy(frame + 8, &id, 8);
-    } else {
-        int32_t id32 = (int32_t)id;
-        memcpy(frame + 8, &id32, 4);
-    }
+    put_u32le(frame + HDR_OFF_TYPE,   type);
+    put_u32le(frame + HDR_OFF_LENGTH, (uint32_t)len);
+    if (g_id64)
+        put_i64le(frame + HDR_OFF_ID, id);
+    else
+        put_i32le(frame + HDR_OFF_ID, (int32_t)id);
     if (payload && len)
         memcpy(frame + hs, payload, len);
 
@@ -159,7 +167,7 @@ int usb_redir_send(int sock, uint32_t type, int64_t id,
 int usb_redir_recv(int sock, usb_header_t *hdr,
                    uint8_t *buf, size_t cap, size_t *payload_len)
 {
-    uint8_t hbuf[16];
+    uint8_t hbuf[HDR_SIZE_ID64];
     size_t hs = hdr_wire_size();
 
     int r = recv_all(sock, hbuf, hs);
@@ -168,17 +176,11 @@ int usb_redir_recv(int sock, usb_header_t *hdr,
     if (r < 0)
         return -1;
 
-    memcpy(&hdr->type, hbuf + 0, 4);
-    memcpy(&hdr->length, hbuf + 4, 4);
-    if (g_id64) {
-        int64_t id;
-        memcpy(&id, hbuf + 8, 8);
-        hdr->id = id;
-    } else {
-        int32_t id;
-        memcpy(&id, hbuf + 8, 4);
-        hdr->id = id;   /* sign-extend into the 64-bit field */
-    }
+    hdr->type   = get_u32le(hbuf + HDR_OFF_TYPE);
+    hdr->length = get_u32le(hbuf + HDR_OFF_LENGTH);
+    /* Narrow id sign-extends into the 64-bit field. */
+    hdr->id = g_id64 ? get_i64le(hbuf + HDR_OFF_ID)
+                     : (int64_t)get_i32le(hbuf + HDR_OFF_ID);
 
     if (hdr->length > cap) {
         LOG_ERR("recv: payload %u exceeds buffer %zu", hdr->length, cap);

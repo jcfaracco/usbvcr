@@ -1,5 +1,5 @@
-#ifndef USBREDIR_CLIENT_TRANSPORT_H
-#define USBREDIR_CLIENT_TRANSPORT_H
+#ifndef TRANSPORT_H
+#define TRANSPORT_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -36,4 +36,4 @@ int usb_redir_send(int sock, uint32_t type, int64_t id,
 int usb_redir_recv(int sock, usb_header_t *hdr,
                    uint8_t *buf, size_t cap, size_t *payload_len);
 
-#endif
+#endif /* TRANSPORT_H */

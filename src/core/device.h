@@ -1,5 +1,5 @@
-#ifndef USBREDIR_CLIENT_DEVICE_H
-#define USBREDIR_CLIENT_DEVICE_H
+#ifndef DEVICE_H
+#define DEVICE_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -47,4 +47,4 @@ struct usb_device {
     void *state;   /* backend-private */
 };
 
-#endif
+#endif /* DEVICE_H */

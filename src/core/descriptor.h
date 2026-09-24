@@ -1,5 +1,5 @@
-#ifndef USBREDIR_CLIENT_DESCRIPTOR_H
-#define USBREDIR_CLIENT_DESCRIPTOR_H
+#ifndef DESCRIPTOR_H
+#define DESCRIPTOR_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -19,4 +19,4 @@ int desc_parse_config(const uint8_t *cfg, size_t len,
                       usb_interface_info_header_t *ii,
                       usb_ep_info_header_t *ei);
 
-#endif
+#endif /* DESCRIPTOR_H */

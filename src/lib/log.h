@@ -20,30 +20,42 @@
 extern int current_log_level;
 
 // Helper macros. DEBUG/ERR also emit file:line metadata.
-#define LOG_DEBUG(fmt, ...) \
-    do { if (current_log_level <= LOG_LEVEL_DEBUG) \
-        fprintf(stderr, USB_DEBUG_PREFIX " %s:%s:%d " fmt "\n", \
-                __FILE__, __func__, __LINE__, ##__VA_ARGS__); } while (0)
+// Format lives in __VA_ARGS__ so a bare message stays ISO C (no ##__VA_ARGS__).
+#define LOG_DEBUG(...) \
+    do { if (current_log_level <= LOG_LEVEL_DEBUG) { \
+        fprintf(stderr, USB_DEBUG_PREFIX " %s:%s:%d ", \
+                __FILE__, __func__, __LINE__); \
+        fprintf(stderr, __VA_ARGS__); \
+        fprintf(stderr, "\n"); } } while (0)
 
-#define LOG_INFO(fmt, ...) \
-    do { if (current_log_level <= LOG_LEVEL_INFO) \
-        fprintf(stdout, USB_INFO_PREFIX " " fmt "\n", ##__VA_ARGS__); } while (0)
+#define LOG_INFO(...) \
+    do { if (current_log_level <= LOG_LEVEL_INFO) { \
+        fprintf(stdout, USB_INFO_PREFIX " "); \
+        fprintf(stdout, __VA_ARGS__); \
+        fprintf(stdout, "\n"); } } while (0)
 
-#define LOG_WARN(fmt, ...) \
-    do { if (current_log_level <= LOG_LEVEL_WARN) \
-        fprintf(stdout, USB_WARN_PREFIX " " fmt "\n", ##__VA_ARGS__); } while (0)
+#define LOG_WARN(...) \
+    do { if (current_log_level <= LOG_LEVEL_WARN) { \
+        fprintf(stdout, USB_WARN_PREFIX " "); \
+        fprintf(stdout, __VA_ARGS__); \
+        fprintf(stdout, "\n"); } } while (0)
 
-#define LOG_ERR(fmt, ...) \
-    do { if (current_log_level <= LOG_LEVEL_ERROR) \
-        fprintf(stderr, USB_ERR_PREFIX " %s:%d " fmt "\n", \
-                __FILE__, __LINE__, ##__VA_ARGS__); } while (0)
+#define LOG_ERR(...) \
+    do { if (current_log_level <= LOG_LEVEL_ERROR) { \
+        fprintf(stderr, USB_ERR_PREFIX " %s:%d ", __FILE__, __LINE__); \
+        fprintf(stderr, __VA_ARGS__); \
+        fprintf(stderr, "\n"); } } while (0)
 
-#define LOG_IN(fmt, ...) \
-    do { if (current_log_level <= LOG_LEVEL_INFO) \
-        fprintf(stdout, USB_IN_PREFIX " " fmt "\n", ##__VA_ARGS__); } while (0)
+#define LOG_IN(...) \
+    do { if (current_log_level <= LOG_LEVEL_INFO) { \
+        fprintf(stdout, USB_IN_PREFIX " "); \
+        fprintf(stdout, __VA_ARGS__); \
+        fprintf(stdout, "\n"); } } while (0)
 
-#define LOG_OUT(fmt, ...) \
-    do { if (current_log_level <= LOG_LEVEL_INFO) \
-        fprintf(stdout, USB_OUT_PREFIX " " fmt "\n", ##__VA_ARGS__); } while (0)
+#define LOG_OUT(...) \
+    do { if (current_log_level <= LOG_LEVEL_INFO) { \
+        fprintf(stdout, USB_OUT_PREFIX " "); \
+        fprintf(stdout, __VA_ARGS__); \
+        fprintf(stdout, "\n"); } } while (0)
 
 #endif

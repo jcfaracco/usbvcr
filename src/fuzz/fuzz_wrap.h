@@ -1,5 +1,5 @@
-#ifndef USBREDIR_CLIENT_FUZZ_WRAP_H
-#define USBREDIR_CLIENT_FUZZ_WRAP_H
+#ifndef FUZZ_WRAP_H
+#define FUZZ_WRAP_H
 
 #include "device.h"
 #include "fuzz.h"
@@ -14,4 +14,4 @@
  */
 usb_device_t *fuzz_wrap(usb_device_t *base, const fuzz_cfg_t *cfg);
 
-#endif
+#endif /* FUZZ_WRAP_H */

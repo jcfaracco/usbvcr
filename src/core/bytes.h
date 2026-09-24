@@ -1,5 +1,5 @@
-#ifndef USBREDIR_CLIENT_BYTES_H
-#define USBREDIR_CLIENT_BYTES_H
+#ifndef BYTES_H
+#define BYTES_H
 
 #include <stdint.h>
 #include <string.h>
@@ -30,4 +30,4 @@ BYTES_DEFINE_LE(i64le, int64_t)
 
 #undef BYTES_DEFINE_LE
 
-#endif
+#endif /* BYTES_H */

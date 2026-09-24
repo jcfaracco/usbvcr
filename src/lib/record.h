@@ -1,5 +1,5 @@
-#ifndef USBREDIR_CLIENT_RECORD_H
-#define USBREDIR_CLIENT_RECORD_H
+#ifndef RECORD_H
+#define RECORD_H
 
 /* Open `path` for recording sent frames (wires it into the transport).
  * Returns 0, or -1 on error. */
@@ -10,4 +10,4 @@ void record_close(void);
  * Deterministic reproduction of a crashing run. Returns 0, or -1. */
 int replay_run(int sock, const char *path);
 
-#endif
+#endif /* RECORD_H */

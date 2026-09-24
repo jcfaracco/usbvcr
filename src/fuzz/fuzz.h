@@ -1,5 +1,5 @@
-#ifndef USBREDIR_CLIENT_FUZZ_H
-#define USBREDIR_CLIENT_FUZZ_H
+#ifndef FUZZ_H
+#define FUZZ_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -38,4 +38,4 @@ size_t fuzz_mutate_descriptor(fuzz_rng_t *r, const fuzz_cfg_t *cfg,
 size_t fuzz_mutate_bytes(fuzz_rng_t *r, const fuzz_cfg_t *cfg,
                          uint8_t *buf, size_t len, size_t cap);
 
-#endif
+#endif /* FUZZ_H */

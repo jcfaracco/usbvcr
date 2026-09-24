@@ -1,5 +1,5 @@
-#ifndef USBREDIR_CLIENT_USB_CORE_H
-#define USBREDIR_CLIENT_USB_CORE_H
+#ifndef USB_CORE_H
+#define USB_CORE_H
 
 #include "device.h"
 
@@ -13,4 +13,4 @@
  */
 int usb_core_run(int sock, usb_device_t *dev);
 
-#endif
+#endif /* USB_CORE_H */

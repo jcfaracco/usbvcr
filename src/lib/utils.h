@@ -1,5 +1,5 @@
-#ifndef __UTILS_H_
-#define __UTILS_H_
+#ifndef UTILS_H
+#define UTILS_H
 
 #include <stddef.h>
 
@@ -11,4 +11,4 @@ void trim_string(char *dst, const char *src, size_t dst_size);
  * `set` has `n` entries. */
 int str_index_in_set(const char *s, const char *const set[], size_t n);
 
-#endif /* __UTILS_H_ */
+#endif /* UTILS_H */

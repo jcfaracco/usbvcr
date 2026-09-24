@@ -1,5 +1,5 @@
-#ifndef USBREDIR_CLIENT_LOG_H
-#define USBREDIR_CLIENT_LOG_H
+#ifndef LOG_H
+#define LOG_H
 
 #include <stdio.h>
 
@@ -58,4 +58,4 @@ extern int current_log_level;
         fprintf(stdout, __VA_ARGS__); \
         fprintf(stdout, "\n"); } } while (0)
 
-#endif
+#endif /* LOG_H */

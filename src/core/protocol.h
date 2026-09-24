@@ -1,5 +1,5 @@
-#ifndef USBREDIR_CLIENT_PROTOCOL_H
-#define USBREDIR_CLIENT_PROTOCOL_H
+#ifndef PROTOCOL_H
+#define PROTOCOL_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -171,4 +171,4 @@ static inline uint8_t usb_ep_index(uint8_t ep_addr)
     return (ep_addr & 0x0f) | ((ep_addr & 0x80) >> 3);
 }
 
-#endif
+#endif /* PROTOCOL_H */

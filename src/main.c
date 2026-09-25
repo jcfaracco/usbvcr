@@ -2,6 +2,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <glib.h>
 
 #include "transport.h"
 #include "usb_core.h"
@@ -9,100 +10,118 @@
 #include "yaml_backend.h"
 #include "fuzz_wrap.h"
 #include "record.h"
+#include "version.h"
 #include "log.h"
 
-static void usage(const char *prog)
+
+typedef struct {
+    gchar *host;
+    gchar *port;
+    gchar *yaml;
+    gchar *pcap;
+    gchar *record_path;
+    gchar *replay_path;
+    gboolean debug;
+    gboolean version;
+    gboolean do_record;
+    gboolean do_fuzz;
+    gboolean have_seed;
+    uint64_t seed;
+} GAppConfig;
+
+static gboolean on_version_requested(const gchar *option_name G_GNUC_UNUSED,
+                                     const gchar *value G_GNUC_UNUSED,
+                                     gpointer data G_GNUC_UNUSED,
+                                     GError **error G_GNUC_UNUSED) 
 {
-    LOG_ERR("Usage: %s [opts] --yaml <file> [host [port]]", prog);
-    LOG_ERR("  --yaml FILE   canonical device project (devices/ flows/ ...)");
-    LOG_ERR("  --debug       verbose per-packet logging");
-    LOG_ERR("  --fuzz        enable descriptor/endpoint mutation");
-    LOG_ERR("  --seed N      fixed PRNG seed (implies --fuzz; for repro)");
-    LOG_ERR("  --record FILE log every sent frame to FILE");
-    LOG_ERR("  --replay FILE resend frames from FILE, then exit");
-    LOG_ERR("  defaults: localhost 1337");
+    // Immediate action logic (e.g., printing version and exiting)
+    // Here we can use printf.
+    g_print("USB VCR version " USB_VCR_VERSION "\n");
+    exit(0);
+    return TRUE;
 }
 
 int main(int argc, char *argv[])
 {
-    const char *host = "localhost";
-    const char *port = "1337";
-    const char *devices_yaml = NULL;
-    const char *record_path = NULL;
-    const char *replay_path = NULL;
-    int do_fuzz = 0;
-    int have_seed = 0;
-    uint64_t seed = 0;
+    GOptionContext *context;
+    GAppConfig config = {
+        .host = "localhost",
+        .port = "1337",
+        .yaml = NULL,
+        .pcap = NULL,
+        .record_path = NULL,
+        .debug = FALSE,
+        .version = FALSE,
+        .do_record = FALSE,
+        .do_fuzz = FALSE,
+        .have_seed = FALSE,
+        .seed = 0,
+    };
+    GError *error = NULL;
+    int rc = 0;
 
-    /* Options, then up to two positionals (host, port). */
-    const char *pos[2];
-    int npos = 0;
+    GOptionEntry entries[] = {
+        { "debug", 'D', 0, G_OPTION_ARG_NONE, &config.debug, "enable debugging logs.", NULL },
+        { "host", 'H', 0, G_OPTION_ARG_STRING, &config.host, "address of the host to connect (default=localhost).", "HOST" },
+        { "port", 'P', 0, G_OPTION_ARG_STRING, &config.port, "port of the host to connect (default=1337).", "PORT" },
+        { "yaml", 0, 0, G_OPTION_ARG_FILENAME, &config.yaml, "canonical device project (devices/ flows/ ...).", "FILE" },
+        { "pcap", 0, 0, G_OPTION_ARG_FILENAME, &config.pcap, "pcap file to replay USB behaviour.", "FILE" },
+        // Callback argument that triggers an immediate exit
+        { "version", 'V', G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_CALLBACK, (void *)on_version_requested, "Show version and exit.", NULL },
+        { NULL }
+    };
 
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--debug") == 0) {
-            current_log_level = LOG_LEVEL_DEBUG;
-        } else if (strcmp(argv[i], "--yaml") == 0 && i + 1 < argc) {
-            devices_yaml = argv[++i];
-        } else if (strcmp(argv[i], "--fuzz") == 0) {
-            do_fuzz = 1;
-        } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
-            seed = strtoull(argv[++i], NULL, 0);
-            have_seed = 1;
-            do_fuzz = 1;
-        } else if (strcmp(argv[i], "--record") == 0 && i + 1 < argc) {
-            record_path = argv[++i];
-        } else if (strcmp(argv[i], "--replay") == 0 && i + 1 < argc) {
-            replay_path = argv[++i];
-        } else if (argv[i][0] == '-') {
-            usage(argv[0]);
-            return EXIT_FAILURE;
-        } else if (npos < 2) {
-            pos[npos++] = argv[i];
-        } else {
-            usage(argv[0]);
-            return EXIT_FAILURE;
-        }
+    // Create the context with a usage summary
+    context = g_option_context_new("- USB VCR: emulate or replay USB device behaviours");
+    g_option_context_add_main_entries(context, entries, NULL);
+
+    if (!g_option_context_parse(context, &argc, &argv, &error)) {
+        g_print("Error parsing options: %s\n", error->message);
+        rc = -1;
+        goto end;
     }
 
-    if (npos >= 1) host = pos[0];
-    if (npos >= 2) port = pos[1];
-
-    LOG_DEBUG("Connecting to %s:%s ...", host, port);
-    int sock = connect_to_server(host, port);
+    LOG_DEBUG("Connecting to %s:%s ...", config.host, config.port);
+    int sock = connect_to_server(config.host, config.port);
     if (sock < 0) {
-        LOG_WARN("Connection failed");
-//        return EXIT_FAILURE;
+        LOG_ERR("Connection failed");
+        rc = -1;
+        goto end;
     }
-//    LOG_INFO("Connected!");
+    LOG_INFO("Connected!");
 
     /* Replay mode: just resend a recorded run and exit. */
-    if (replay_path) {
-        int rc = replay_run(sock, replay_path);
+    if (config.pcap) {
+        rc = replay_run(sock, config.pcap);
         close(sock);
-        return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        rc = -1;
+        goto end;
     }
 
-    if (!devices_yaml) {
-        LOG_ERR("no device: pass --yaml <dir>");
-        usage(argv[0]);
+    if (!config.yaml) {
+        LOG_ERR("no device: pass --yaml <FILE>");
         close(sock);
-        return EXIT_FAILURE;
+        rc = -1;
+        goto end;
     }
-    usb_device_t *dev = yaml_backend_create(devices_yaml);
+
+    usb_device_t *dev = yaml_backend_create(config.yaml);
     if (!dev) {
-        LOG_ERR("failed to load device project: %s", devices_yaml);
+        LOG_ERR("failed to load device project: %s", config.yaml);
         close(sock);
-        return EXIT_FAILURE;
+        rc = -1;
+        goto end;
     }
 
-    if (do_fuzz) {
-        if (!have_seed)
-            seed = ((uint64_t)time(NULL) << 16) ^ (uint64_t)getpid();
+    if (config.do_fuzz) {
+        if (!config.have_seed)
+            config.seed = ((uint64_t)time(NULL) << 16) ^ (uint64_t)getpid();
         LOG_INFO("FUZZ seed=%llu  (reproduce: --seed %llu)",
-                 (unsigned long long)seed, (unsigned long long)seed);
+                 (unsigned long long)config.seed,
+                 (unsigned long long)config.seed);
 
         fuzz_cfg_t cfg = {
-            .seed = seed,
+            .seed = config.seed,
             .prob = 4,              /* ~25% of mutable items */
             .fuzz_descriptors = 1,
             .fuzz_ep_in = 1,
@@ -111,20 +130,28 @@ int main(int argc, char *argv[])
         dev = fuzz_wrap(dev, &cfg);
         if (!dev) {
             close(sock);
-            return EXIT_FAILURE;
+            rc = -1;
+            goto end;
         }
     }
 
-    if (record_path && record_open(record_path) < 0) {
+    if (config.record_path && record_open(config.record_path) < 0) {
         close(sock);
-        return EXIT_FAILURE;
+        rc = -1;
+        goto end;
     }
 
-    LOG_INFO("Emulating device: %s", devices_yaml);
-    int rc = usb_core_run(sock, dev);
+    LOG_INFO("Emulating device: %s", config.yaml);
+    rc = usb_core_run(sock, dev);
 
     record_close();
     close(sock);
     LOG_INFO("Session ended (rc=%d)", rc);
+
+end:
+    if (error)
+        g_clear_error(&error);
+    if (context)
+        g_option_context_free(context);
     return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

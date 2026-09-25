@@ -1,6 +1,7 @@
 #ifndef VERSION_H
 #define VERSION_H
 
+#define USB_VCR_VERSION "1.0.0"
 
 typedef enum {
     YAML_VERSION_INVALID,

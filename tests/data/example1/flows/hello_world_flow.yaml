@@ -1,6 +1,13 @@
 states:
-  - name: "enumeration"
+  # Single operational state. The flow engine matches rules only within the
+  # current state, so transitioning away from enumeration after
+  # SET_CONFIGURATION would drop the descriptor/class rules the host still needs
+  # afterwards (it re-fetches the HID report descriptor and sends SET_IDLE once
+  # its HID driver binds). Keep every control rule live and start typing by
+  # queueing endpoint data directly in the SET_CONFIGURATION rule.
+  - name: "operational"
     rules:
+      # GET_DESCRIPTOR (device)
       - match:
           bmRequestType: 0x80
           bRequest: 6
@@ -8,6 +15,7 @@ states:
         actions:
           - respond_with: "$device.device_descriptor"
 
+      # GET_DESCRIPTOR (configuration)
       - match:
           bmRequestType: 0x80
           bRequest: 6
@@ -15,6 +23,9 @@ states:
         actions:
           - respond_with: "$device.configurations[0]"
 
+      # GET_DESCRIPTOR (HID report), issued on the interface. The host re-fetches
+      # this after SET_CONFIGURATION when the HID driver binds, so it must stay
+      # available past enumeration.
       - match:
           bmRequestType: 0x81
           bRequest: 6
@@ -23,46 +34,50 @@ states:
         actions:
           - respond_with: "$device.report_descriptor"
 
-      # When the host activates the device configuration, start typing
+      # SET_IDLE (HID class, host-to-device, interface). No payload; just ACK so
+      # the host's HID driver finishes binding instead of erroring on a stall.
+      - match:
+          bmRequestType: 0x21
+          bRequest: 0x0a
+        actions:
+          - respond_with_status: 0
+
+      # SET_CONFIGURATION: ACK, then start typing by queueing 8-byte HID reports
+      # to the Interrupt IN endpoint. The host pulls them one by one at the
+      # endpoint's polling interval.
       - match:
           bmRequestType: 0x00 # Host to Device, Standard, Device
           bRequest: 9         # SET_CONFIGURATION
           wValue: 1
         actions:
           - respond_with_status: 0 # ACK the setup packet
-          - transition_state: "type_hello_world"
+          - queue_endpoint_data:
+              endpoint: 0x81
+              payloads:
+                - hex: "02000B0000000000" # Shift + H (0x0B)
+                - hex: "0000000000000000" # Release all
+                - hex: "0000080000000000" # e (0x08)
+                - hex: "0000000000000000" # Release
+                - hex: "00000F0000000000" # l (0x0F)
+                - hex: "0000000000000000" # Release (Crucial between identical consecutive keys)
+                - hex: "00000F0000000000" # l (0x0F)
+                - hex: "0000000000000000" # Release
+                - hex: "0000120000000000" # o (0x12)
+                - hex: "0000000000000000" # Release
+                - hex: "00002C0000000000" # Space (0x2C)
+                - hex: "0000000000000000" # Release
+                - hex: "00001A0000000000" # w (0x1A)
+                - hex: "0000000000000000" # Release
+                - hex: "0000120000000000" # o (0x12)
+                - hex: "0000000000000000" # Release
+                - hex: "0000150000000000" # r (0x15)
+                - hex: "0000000000000000" # Release
+                - hex: "00000F0000000000" # l (0x0F)
+                - hex: "0000000000000000" # Release
+                - hex: "0000070000000000" # d (0x07)
+                - hex: "0000000000000000" # Release
 
-  - name: "type_hello_world"
-    on_enter:
-      # Queue 8-byte HID reports to the Interrupt IN endpoint buffer.
-      # The host will pull these one by one based on the endpoint's polling interval.
-      - queue_endpoint_data:
-          endpoint: 0x81
-          payloads:
-            - hex: "02000B0000000000" # Shift + H (0x0B)
-            - hex: "0000000000000000" # Release all
-            - hex: "0000080000000000" # e (0x08)
-            - hex: "0000000000000000" # Release
-            - hex: "00000F0000000000" # l (0x0F)
-            - hex: "0000000000000000" # Release (Crucial between identical consecutive keys)
-            - hex: "00000F0000000000" # l (0x0F)
-            - hex: "0000000000000000" # Release
-            - hex: "0000120000000000" # o (0x12)
-            - hex: "0000000000000000" # Release
-            - hex: "00002C0000000000" # Space (0x2C)
-            - hex: "0000000000000000" # Release
-            - hex: "00001A0000000000" # w (0x1A)
-            - hex: "0000000000000000" # Release
-            - hex: "0000120000000000" # o (0x12)
-            - hex: "0000000000000000" # Release
-            - hex: "0000150000000000" # r (0x15)
-            - hex: "0000000000000000" # Release
-            - hex: "00000F0000000000" # l (0x0F)
-            - hex: "0000000000000000" # Release
-            - hex: "0000070000000000" # d (0x07)
-            - hex: "0000000000000000" # Release
-    rules:
-      # While in this state, handle empty polling requests gracefully
+      # Interrupt IN polling: NAK while the queue is empty.
       - match:
           endpoint_poll: 0x81
         actions:

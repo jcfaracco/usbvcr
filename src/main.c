@@ -81,6 +81,9 @@ int main(int argc, char *argv[])
         goto end;
     }
 
+    if (config.debug)
+        current_log_level = LOG_LEVEL_DEBUG;
+
     LOG_DEBUG("Connecting to %s:%s ...", config.host, config.port);
     int sock = connect_to_server(config.host, config.port);
     if (sock < 0) {

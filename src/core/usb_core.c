@@ -132,7 +132,22 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
     usb_control_packet_header_t setup;
     memcpy(&setup, payload, sizeof(setup));
 
-    /* Standard GET_DESCRIPTOR (device-to-host). */
+    /* Backend (YAML flow / pcap replay) gets first refusal on EVERY setup.
+     * Descriptor responses, SET_CONFIGURATION acks, and class/vendor requests
+     * all live in the flow rules now; rc==0 means a rule handled it and filled
+     * data+n. This keeps device behavior data-driven and lets the same engine
+     * serve both a YAML description and a captured pcap replay. */
+    if (dev->ops->control) {
+        uint8_t data[USB_VCR_BUF_SIZE];
+        uint16_t n = 0;
+        if (dev->ops->control(dev, &setup, data, &n) == 0) {
+            reply_control(sock, id, &setup, 0, data, n);
+            return;
+        }
+    }
+
+    /* Fallback: standard GET_DESCRIPTOR served straight from the descriptor
+     * table, for backends that declare no flow rule for it. */
     if (setup.requesttype == USB_DIR_IN &&
         setup.request == USB_REQ_GET_DESCRIPTOR) {
         uint8_t  dtype = (uint8_t)(setup.value >> 8);
@@ -152,16 +167,6 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
                   dtype, dindex, n);
         reply_control(sock, id, &setup, 0, desc, n);
         return;
-    }
-
-    /* Class/vendor request: hand to the backend. */
-    if (dev->ops->control) {
-        uint8_t data[USB_VCR_BUF_SIZE];
-        uint16_t n = 0;
-        if (dev->ops->control(dev, &setup, data, &n) == 0) {
-            reply_control(sock, id, &setup, 0, data, n);
-            return;
-        }
     }
 
     LOG_DEBUG("stall: unhandled control req=0x%02x type=0x%02x",

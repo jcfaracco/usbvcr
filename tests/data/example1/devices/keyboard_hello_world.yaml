@@ -1,3 +1,12 @@
+# Phase 1: canonical wire-order descriptors.
+# Every descriptor carries its full prologue (bLength, bDescriptorType) and
+# fields are listed in USB wire order. Serialization is verbatim, so YAML order
+# == byte order. Widths follow the field-name prefix convention (bcd*/id*/w* =
+# 2 bytes, else 1), so u16 fields MUST keep a w/bcd/id name.
+#
+# Computed values (wTotalLength, bNumInterfaces, bNumEndpoints) are written
+# literally here; a later autofill pass (phase 2) will derive them.
+
 device_descriptor:
   - bLength: 18
     bDescriptorType: 0x01
@@ -15,36 +24,60 @@ device_descriptor:
     bNumConfigurations: 1
 
 configurations:
-  - bConfigurationValue: 1
+  - bLength: 9
+    bDescriptorType: 0x02
+    wTotalLength: 34          # 9 (config) + 9 (iface) + 9 (HID) + 7 (ep)
+    bNumInterfaces: 1
+    bConfigurationValue: 1
+    iConfiguration: 0
     bmAttributes: 0xa0
     bMaxPower: 50
     interfaces:
-      - bInterfaceNumber: 0
-        bInterfaceClass: 0x03 # HID
-        bInterfaceSubClass: 0x01 # Boot
-        bInterfaceProtocol: 0x01 # Keyboard
+      - bLength: 9
+        bDescriptorType: 0x04
+        bInterfaceNumber: 0
+        bAlternateSetting: 0
+        bNumEndpoints: 1
+        bInterfaceClass: 0x03      # HID
+        bInterfaceSubClass: 0x01   # Boot
+        bInterfaceProtocol: 0x01   # Keyboard
+        iInterface: 0
+        # HID class descriptor sits between interface and endpoint on the wire.
         hid_descriptor:
+          bLength: 9
+          bDescriptorType: 0x21
+          bcdHID: 0x0111
+          bCountryCode: 0
+          bNumDescriptors: 1
+          bReportDescriptorType: 0x22
           wDescriptorLength: 63
         endpoints:
-          - address: 0x81
-            attributes: 0x03 # Interrupt
-            max_packet_size: 8
-            interval: 10
-        report_descriptor:
-          codec: "hid_report"
-          items:
-            - usage_page: "Generic Desktop"
-            - usage: "Keyboard"
-            - collection: "Application"
-            - usage_page: "Key Codes"
-            - usage_minimum: 0xe0
-            - usage_maximum: 0xe7
-            - logical_minimum: 0
-            - logical_maximum: 1
-            - report_size: 1
-            - report_count: 8
-            - input: "Data,Var,Abs"
-            - report_count: 1
-            - report_size: 8
-            - input: "Const,Array,Abs"
-            - end_collection: true
+          - bLength: 7
+            bDescriptorType: 0x05
+            bEndpointAddress: 0x81
+            bmAttributes: 0x03       # Interrupt
+            wMaxPacketSize: 8
+            bInterval: 10
+
+# The HID report descriptor is a separate descriptor, served on its own
+# GET_DESCRIPTOR (wValue 0x2200). It lives OUTSIDE `configurations` so it is not
+# serialized into the config TLV stream. Referenced by the flow as
+# $device.report_descriptor.
+report_descriptor:
+  codec: "hid_report"
+  items:
+    - usage_page: "Generic Desktop"
+    - usage: "Keyboard"
+    - collection: "Application"
+    - usage_page: "Key Codes"
+    - usage_minimum: 0xe0
+    - usage_maximum: 0xe7
+    - logical_minimum: 0
+    - logical_maximum: 1
+    - report_size: 1
+    - report_count: 8
+    - input: "Data,Var,Abs"
+    - report_count: 1
+    - report_size: 8
+    - input: "Const,Array,Abs"
+    - end_collection: true

@@ -1,3 +1,10 @@
+# Phase 1: canonical wire-order descriptors.
+# Schema templates (usb_base / hid_base) already list fields in USB wire order
+# with `null` for deferred/computed fields. Since serialization is verbatim and
+# a null serializes to *nothing* (USB_PROP_UNKNOWN is skipped), phase 1 must
+# override every null with a literal value so the byte layout is complete.
+# A later autofill pass (phase 2) will compute these instead.
+
 device_descriptor:
   schema: "usb_base.device_descriptor"
   idVendor: 0x04d9
@@ -8,48 +15,58 @@ device_descriptor:
 
 configurations:
   - schema: "usb_base.configuration_descriptor"
+    wTotalLength: 59          # 9 (config) + 2 x [9 iface + 9 HID + 7 ep]
+    bNumInterfaces: 2
     bmAttributes: 0xa0
     interfaces:
       - schema: "hid_base.interface_descriptor"
         bInterfaceNumber: 0
+        bNumEndpoints: 1
         bInterfaceSubClass: 0x01
         bInterfaceProtocol: 0x01
         hid_descriptor:
-          wDescriptorLength: 62
+          wDescriptorLength: 63
         endpoints:
-          - address: 0x81
-            attributes: 0x03
-            max_packet_size: 8
-            interval: 10
-        report_descriptor:
-          codec: "hid_report"
-          items:
-            - usage_page: "Generic Desktop"
-            - usage: "Keyboard"
-            - collection: "Application"
-            - usage_page: "Key Codes"
-            - usage_minimum: 0xe0
-            - usage_maximum: 0xe7
-            - logical_minimum: 0
-            - logical_maximum: 1
-            - report_size: 1
-            - report_count: 8
-            - input: "Data,Var,Abs"
-            - report_count: 1
-            - report_size: 8
-            - input: "Const,Array,Abs"
-            - end_collection: true
+          - bLength: 7
+            bDescriptorType: 0x05
+            bEndpointAddress: 0x81
+            bmAttributes: 0x03
+            wMaxPacketSize: 8
+            bInterval: 10
 
       - schema: "hid_base.interface_descriptor"
         bInterfaceNumber: 1
+        bNumEndpoints: 1
         bInterfaceSubClass: 0x00
         bInterfaceProtocol: 0x00
         hid_descriptor:
           wDescriptorLength: 101
         endpoints:
-          - address: 0x82
-            attributes: 0x03
-            max_packet_size: 8
-            interval: 10
-        report_descriptor:
-          raw_file: "payloads/hid_consumer_report.bin"
+          - bLength: 7
+            bDescriptorType: 0x05
+            bEndpointAddress: 0x82
+            bmAttributes: 0x03
+            wMaxPacketSize: 8
+            bInterval: 10
+
+# Report descriptor served on its own GET_DESCRIPTOR (wValue 0x2200, wIndex 0).
+# Kept OUTSIDE `configurations` so it is not serialized into the config TLV.
+# Referenced by the flow as $device.report_descriptor.
+report_descriptor:
+  codec: "hid_report"
+  items:
+    - usage_page: "Generic Desktop"
+    - usage: "Keyboard"
+    - collection: "Application"
+    - usage_page: "Key Codes"
+    - usage_minimum: 0xe0
+    - usage_maximum: 0xe7
+    - logical_minimum: 0
+    - logical_maximum: 1
+    - report_size: 1
+    - report_count: 8
+    - input: "Data,Var,Abs"
+    - report_count: 1
+    - report_size: 8
+    - input: "Const,Array,Abs"
+    - end_collection: true

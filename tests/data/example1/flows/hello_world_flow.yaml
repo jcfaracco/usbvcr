@@ -21,7 +21,7 @@ states:
           wValue: 0x2200
           wIndex: 0
         actions:
-          - respond_with: "$device.configurations[0].interfaces[0].report_descriptor"
+          - respond_with: "$device.report_descriptor"
 
       # When the host activates the device configuration, start typing
       - match:

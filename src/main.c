@@ -29,18 +29,6 @@ typedef struct {
     uint64_t seed;
 } GAppConfig;
 
-static gboolean on_version_requested(const gchar *option_name G_GNUC_UNUSED,
-                                     const gchar *value G_GNUC_UNUSED,
-                                     gpointer data G_GNUC_UNUSED,
-                                     GError **error G_GNUC_UNUSED) 
-{
-    // Immediate action logic (e.g., printing version and exiting)
-    // Here we can use printf.
-    g_print("USB VCR version " USB_VCR_VERSION "\n");
-    exit(0);
-    return TRUE;
-}
-
 int main(int argc, char *argv[])
 {
     GOptionContext *context;
@@ -66,8 +54,7 @@ int main(int argc, char *argv[])
         { "port", 'P', 0, G_OPTION_ARG_STRING, &config.port, "port of the host to connect (default=1337).", "PORT" },
         { "yaml", 0, 0, G_OPTION_ARG_FILENAME, &config.yaml, "canonical device project (devices/ flows/ ...).", "FILE" },
         { "pcap", 0, 0, G_OPTION_ARG_FILENAME, &config.pcap, "pcap file to replay USB behaviour.", "FILE" },
-        // Callback argument that triggers an immediate exit
-        { "version", 'V', G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_CALLBACK, (void *)on_version_requested, "Show version and exit.", NULL },
+        { "version", 'V', 0, G_OPTION_ARG_NONE, &config.version, "Show version and exit.", NULL },
         { NULL }
     };
 
@@ -79,6 +66,11 @@ int main(int argc, char *argv[])
         g_print("Error parsing options: %s\n", error->message);
         rc = -1;
         goto end;
+    }
+
+    if (config.version) {
+        g_print("USB VCR version " USB_VCR_VERSION "\n");
+        goto end;   /* rc == 0 */
     }
 
     if (config.debug)

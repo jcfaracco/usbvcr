@@ -99,9 +99,14 @@ static int yb_control(usb_device_t *dev,
         if (target) {
             g_byte_array_set_size(st->desc_buf, 0);
             usb_node_serialize(target, st->desc_buf);
-            *len = st->desc_buf->len;
-            if (*len > 4096) *len = 4096; // USB_VCR_BUF_SIZE max? Data buffer is sized USB_VCR_BUF_SIZE
-            memcpy(data, st->desc_buf->data, *len);
+            uint16_t n = (uint16_t)st->desc_buf->len;
+            /* Honor the host's wLength: standard enumeration probes the
+             * descriptor with a short request (e.g. 8 bytes) before asking
+             * for the full length. Over-serving desyncs the host parser. */
+            if (n > setup->length) n = setup->length;
+            if (n > USB_VCR_BUF_SIZE) n = USB_VCR_BUF_SIZE;
+            memcpy(data, st->desc_buf->data, n);
+            *len = n;
         } else {
             return -1;
         }

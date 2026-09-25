@@ -143,9 +143,9 @@ usb_device_t *yaml_backend_create(const char *path)
     if (!yd)
         return NULL;
 
-    if (current_log_level <= LOG_LEVEL_DEBUG) {
-        fprintf(stderr, USB_DEBUG_PREFIX " loaded descriptor tree for %s:\n", path);
-        usb_node_dump(yd->tree, stderr);
+    if (usb_node_validate(yd->tree, 0) < 0) {
+        LOG_ERR("There are some NULL props in devices for %s (`--debug` shows them).\n", path);
+        return NULL;
     }
 
     yaml_backend_state_t *st = g_new(yaml_backend_state_t, 1);

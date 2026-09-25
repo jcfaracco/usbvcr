@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "transport.h"
 #include "protocol.h"
@@ -45,7 +46,7 @@ int connect_to_server(const char *host, const char *port)
 
     sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (sock < 0) {
-        perror("socket");
+        LOG_ERR("Error type: %s", strerror(errno));
         freeaddrinfo(res);
         return -1;
     }
@@ -55,7 +56,7 @@ int connect_to_server(const char *host, const char *port)
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     if (connect(sock, res->ai_addr, res->ai_addrlen) < 0) {
-        perror("connect");
+        LOG_ERR("Error type: %s", strerror(errno));
         close(sock);
         freeaddrinfo(res);
         return -1;
@@ -92,7 +93,7 @@ int recv_all(int sock, uint8_t *buf, size_t len)
                     return 0;   /* idle at frame boundary */
                 continue;       /* partial frame: wait for the rest */
             }
-            perror("recv");
+            LOG_ERR("Error type: %s", strerror(errno));
             return -1;
         }
         total += (size_t)n;
@@ -158,7 +159,7 @@ int usb_redir_send(int sock, uint32_t type, int64_t id,
     }
 
     if (send(sock, frame, frame_len, 0) < 0) {
-        perror("send");
+        LOG_ERR("Error type: %s", strerror(errno));
         return -1;
     }
     return 0;

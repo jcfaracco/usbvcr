@@ -6,6 +6,7 @@ main_sources = files(
   'fuzz/fuzz.c',
   'fuzz/fuzz_wrap.c',
   'engine/yaml_backend.c',
+  'engine/pcap_backend.c',
 )
 
 engine = include_directories('engine')

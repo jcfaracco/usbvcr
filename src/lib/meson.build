@@ -1,7 +1,8 @@
 lib = include_directories('.')
 
 lib_sources = files(
-  'record.c',
+  'pcap/record.c',
+  'pcap/pcap.c',
   'log.c',
   'utils.c',
   'usb_node.c',

@@ -19,7 +19,8 @@
 
 typedef struct {
     yaml_device_t *dev;
-    GByteArray *desc_buf;
+    GByteArray *desc_buf;    /* scratch for control ($device.*) resolution */
+    GHashTable *desc_bufs;   /* descriptor type -> its own GByteArray */
 } yaml_backend_state_t;
 
 static usb_node_t *find_node_by_name_and_index(usb_node_t *parent, const char *name, int target_index)
@@ -74,11 +75,21 @@ static int yb_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
     if (!target)
         return -1;
 
-    g_byte_array_set_size(st->desc_buf, 0);
-    usb_node_serialize(target, st->desc_buf);
-    
-    if (out) *out = st->desc_buf->data;
-    if (len) *len = st->desc_buf->len;
+    /* Each (type,index) gets its own persistent buffer. announce_device holds
+     * the DEVICE pointer while it then fetches CONFIG; a single shared scratch
+     * buffer would alias them and corrupt the device descriptor. Key by
+     * (type<<8 | index). */
+    guint key = ((guint)type << 8) | index;
+    GByteArray *buf = g_hash_table_lookup(st->desc_bufs, GUINT_TO_POINTER(key));
+    if (!buf) {
+        buf = g_byte_array_new();
+        g_hash_table_insert(st->desc_bufs, GUINT_TO_POINTER(key), buf);
+    }
+    g_byte_array_set_size(buf, 0);
+    usb_node_serialize(target, buf);
+
+    if (out) *out = buf->data;
+    if (len) *len = buf->len;
     return 0;
 }
 
@@ -217,6 +228,8 @@ usb_device_t *yaml_backend_create(const char *path)
     }
     st->dev  = yd;
     st->desc_buf = g_byte_array_new();
+    st->desc_bufs = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                          NULL, (GDestroyNotify)g_byte_array_unref);
     dev->ops = &yaml_ops;
     dev->state = st;
     return dev;

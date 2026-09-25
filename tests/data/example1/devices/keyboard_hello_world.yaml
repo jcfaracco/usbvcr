@@ -41,7 +41,7 @@ configurations:
           bCountryCode: 0
           bNumDescriptors: 1
           bReportDescriptorType: 0x22
-          wDescriptorLength: 63
+          wDescriptorLength: 45   # bytes emitted by report_descriptor below
         endpoints:
           - bLength: 7
             bDescriptorType: 0x05
@@ -60,6 +60,7 @@ report_descriptor:
     - usage_page: "Generic Desktop"
     - usage: "Keyboard"
     - collection: "Application"
+    # Byte 0: 8 modifier bits (LeftCtrl..RightGUI).
     - usage_page: "Key Codes"
     - usage_minimum: 0xe0
     - usage_maximum: 0xe7
@@ -68,7 +69,18 @@ report_descriptor:
     - report_size: 1
     - report_count: 8
     - input: "Data,Var,Abs"
+    # Byte 1: reserved (constant).
     - report_count: 1
     - report_size: 8
     - input: "Const,Array,Abs"
+    # Bytes 2-7: 6-key rollover keycode array. Without this array the host
+    # reads only the modifier byte and no keypresses ever reach it.
+    - report_count: 6
+    - report_size: 8
+    - logical_minimum: 0
+    - logical_maximum: 101
+    - usage_page: "Key Codes"
+    - usage_minimum: 0
+    - usage_maximum: 101
+    - input: "Data,Array,Abs"
     - end_collection: true

@@ -128,10 +128,10 @@ static size_t hdr_wire_size(void)
     return g_id64 ? HDR_SIZE_ID64 : HDR_SIZE_ID32;
 }
 
-int usb_redir_send(int sock, uint32_t type, int64_t id,
-                   const void *payload, size_t len)
+int usb_conn_send(int sock, uint32_t type, int64_t id,
+                  const void *payload, size_t len)
 {
-    uint8_t frame[USB_REDIR_BUF_SIZE];
+    uint8_t frame[USB_VCR_BUF_SIZE];
     size_t hs = hdr_wire_size();
 
     if (hs + len > sizeof(frame)) {
@@ -165,8 +165,8 @@ int usb_redir_send(int sock, uint32_t type, int64_t id,
     return 0;
 }
 
-int usb_redir_recv(int sock, usb_header_t *hdr,
-                   uint8_t *buf, size_t cap, size_t *payload_len)
+int usb_conn_recv(int sock, usb_header_t *hdr,
+                  uint8_t *buf, size_t cap, size_t *payload_len)
 {
     uint8_t hbuf[HDR_SIZE_ID64];
     size_t hs = hdr_wire_size();

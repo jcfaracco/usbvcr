@@ -10,7 +10,7 @@ typedef struct {
     usb_device_t *base;
     fuzz_rng_t    rng;
     fuzz_cfg_t    cfg;
-    uint8_t       scratch[USB_REDIR_BUF_SIZE];  /* mutated descriptor storage */
+    uint8_t       scratch[USB_VCR_BUF_SIZE];  /* mutated descriptor storage */
 } fuzz_state_t;
 
 static int fw_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
@@ -53,7 +53,7 @@ static int fw_control(usb_device_t *dev,
     int rc = fs->base->ops->control(fs->base, setup, data, len);
     if (rc == 0 && fs->cfg.fuzz_control)
         *len = (uint16_t)fuzz_mutate_bytes(&fs->rng, &fs->cfg, data, *len,
-                                           USB_REDIR_BUF_SIZE);
+                                           USB_VCR_BUF_SIZE);
     return rc;
 }
 

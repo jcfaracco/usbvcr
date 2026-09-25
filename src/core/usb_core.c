@@ -7,9 +7,10 @@
 #include "descriptor.h"
 #include "protocol.h"
 #include "bytes.h"
+#include "version.h"
 #include "log.h"
 
-#define HELLO_VERSION "usb_redir_hello 0.1"
+#define HELLO_VERSION "usb_vcr_hello " USB_VCR_VERSION
 
 /* Read a byte / little-endian u16 descriptor field at a named offset. */
 #define DESC_U8(desc, off)  ((desc)[(off)])
@@ -25,9 +26,9 @@ static int send_hello(int sock)
     memset(&h, 0, sizeof(h));
     strncpy(h.version, HELLO_VERSION, sizeof(h.version) - 1);
 
-    h.capabilities[0] = USB_REDIR_OUR_CAPS;
+    h.capabilities[0] = USB_VCR_OUR_CAPS;
 
-    return usb_redir_send(sock, RT_HELLO, 0, &h, sizeof(h));
+    return usb_conn_send(sock, RT_HELLO, 0, &h, sizeof(h));
 }
 
 /* Derive interface_info + ep_info from the device's config descriptor and
@@ -64,15 +65,15 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
      *   max_streams      <- cap_bulk_streams   (NOT a separate cap)
      * Sending the wrong length desyncs its parser. */
     size_t eilen = offsetof(usb_ep_info_header_t, max_packet_size);
-    if (caps & (1u << USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE))
+    if (caps & (1u << USB_VCR_CAP_EP_INFO_MAX_PACKET_SIZE))
         eilen = offsetof(usb_ep_info_header_t, max_streams);
-    if (caps & (1u << USB_REDIR_CAP_BULK_STREAMS))
+    if (caps & (1u << USB_VCR_CAP_BULK_STREAMS))
         eilen = sizeof(usb_ep_info_header_t);   /* includes max_streams */
 
     LOG_DEBUG("announce: negotiated caps=0x%08x ep_info=%zu bytes", caps, eilen);
 
-    if (usb_redir_send(sock, RT_INTERFACE_INFO, 0, &ii, sizeof(ii)) < 0 ||
-        usb_redir_send(sock, RT_EP_INFO, 0, &ei, eilen) < 0)
+    if (usb_conn_send(sock, RT_INTERFACE_INFO, 0, &ii, sizeof(ii)) < 0 ||
+        usb_conn_send(sock, RT_EP_INFO, 0, &ei, eilen) < 0)
         return -1;
 
     /* Pull the connect fields from the device descriptor by named offset. */
@@ -80,7 +81,7 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
     memset(&c, 0, sizeof(c));
     /* bMaxPacketSize0==8 is a full-speed value; announcing HIGH would be
      * inconsistent. TODO: expose speed via the backend. */
-    c.speed              = USB_REDIR_SPEED_FULL;
+    c.speed              = USB_VCR_SPEED_FULL;
     c.device_class       = DESC_U8(dd,  USB_DD_bDeviceClass);
     c.device_subclass    = DESC_U8(dd,  USB_DD_bDeviceSubClass);
     c.device_protocol    = DESC_U8(dd,  USB_DD_bDeviceProtocol);
@@ -94,10 +95,10 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
     /* device_version_bcd is only present when connect_device_version is
      * negotiated; otherwise the peer expects the shorter header. */
     size_t clen = offsetof(usb_device_connect_header_t, device_version_bcd);
-    if (caps & (1u << USB_REDIR_CAP_CONNECT_DEVICE_VERSION))
+    if (caps & (1u << USB_VCR_CAP_CONNECT_DEVICE_VERSION))
         clen = sizeof(usb_device_connect_header_t);
 
-    return usb_redir_send(sock, RT_DEVICE_CONNECT, 0, &c, clen);
+    return usb_conn_send(sock, RT_DEVICE_CONNECT, 0, &c, clen);
 }
 
 /* ------------------------------------------------------------------ *
@@ -108,7 +109,7 @@ static int reply_control(int sock, int64_t id,
                          const usb_control_packet_header_t *setup,
                          uint8_t status, const uint8_t *data, uint16_t n)
 {
-    uint8_t buf[USB_REDIR_BUF_SIZE];
+    uint8_t buf[USB_VCR_BUF_SIZE];
     usb_control_packet_header_t h = *setup;
     h.status = status;
     h.length = n;
@@ -117,7 +118,7 @@ static int reply_control(int sock, int64_t id,
     if (data && n)
         memcpy(buf + sizeof(h), data, n);
 
-    return usb_redir_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n);
+    return usb_conn_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n);
 }
 
 static void handle_control(int sock, usb_device_t *dev, int64_t id,
@@ -155,7 +156,7 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
 
     /* Class/vendor request: hand to the backend. */
     if (dev->ops->control) {
-        uint8_t data[USB_REDIR_BUF_SIZE];
+        uint8_t data[USB_VCR_BUF_SIZE];
         uint16_t n = 0;
         if (dev->ops->control(dev, &setup, data, &n) == 0) {
             reply_control(sock, id, &setup, 0, data, n);
@@ -179,17 +180,17 @@ static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep)
 
     /* Drain whatever the backend wants to send right now. */
     for (;;) {
-        uint8_t data[USB_REDIR_BUF_SIZE];
+        uint8_t data[USB_VCR_BUF_SIZE];
         int n = dev->ops->ep_in(dev, ep, data, sizeof(data));
         if (n <= 0)
             break;
 
-        uint8_t buf[USB_REDIR_BUF_SIZE];
+        uint8_t buf[USB_VCR_BUF_SIZE];
         usb_interrupt_packet_header_t h = { ep, 0, (uint16_t)n };
         memcpy(buf, &h, sizeof(h));
         memcpy(buf + sizeof(h), data, (size_t)n);
 
-        if (usb_redir_send(sock, RT_INTERRUPT_PACKET, 0, buf, sizeof(h) + n) < 0)
+        if (usb_conn_send(sock, RT_INTERRUPT_PACKET, 0, buf, sizeof(h) + n) < 0)
             break;
         LOG_OUT("interrupt report on ep 0x%02x (%d bytes)", ep, n);
     }
@@ -202,12 +203,12 @@ static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep)
 int usb_core_run(int sock, usb_device_t *dev)
 {
     usb_header_t hdr;
-    uint8_t payload[USB_REDIR_BUF_SIZE];
+    uint8_t payload[USB_VCR_BUF_SIZE];
     size_t len;
 
     /* 1. Handshake: peer hello, then ours. Ignore idle timeouts. */
     int r;
-    while ((r = usb_redir_recv(sock, &hdr, payload, sizeof(payload), &len)) == 1)
+    while ((r = usb_conn_recv(sock, &hdr, payload, sizeof(payload), &len)) == 1)
         ;
     if (r < 0)
         return -1;
@@ -223,7 +224,7 @@ int usb_core_run(int sock, usb_device_t *dev)
                               offsetof(usb_hello_header_t, capabilities));
         LOG_DEBUG("peer capabilities[0]=0x%08x", peer_caps);
     }
-    uint32_t caps = USB_REDIR_OUR_CAPS & peer_caps;
+    uint32_t caps = USB_VCR_OUR_CAPS & peer_caps;
 
     if (send_hello(sock) < 0)
         return -1;
@@ -231,7 +232,7 @@ int usb_core_run(int sock, usb_device_t *dev)
     /* From here on the header id width follows the negotiated cap. The hello
      * above went out with the 12-byte header (sent before negotiation), which
      * matches what the peer expects for that first packet. */
-    transport_set_id64(caps & (1u << USB_REDIR_CAP_64BITS_IDS));
+    transport_set_id64(caps & (1u << USB_VCR_CAP_64BITS_IDS));
 
     /* 2. Announce the emulated device using the negotiated capabilities. */
     if (announce_device(sock, dev, caps) < 0)
@@ -243,7 +244,7 @@ int usb_core_run(int sock, usb_device_t *dev)
      * turns an idle wait into a periodic tick, so streaming backends make
      * progress even when no request is pending. */
     for (;;) {
-        int rc = usb_redir_recv(sock, &hdr, payload, sizeof(payload), &len);
+        int rc = usb_conn_recv(sock, &hdr, payload, sizeof(payload), &len);
         if (rc < 0)
             break;              /* EOF / hard error: peer gone */
         if (rc == 1) {          /* idle: no request pending */

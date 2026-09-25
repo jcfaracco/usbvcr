@@ -10,7 +10,7 @@
  * host. On a big-endian host these would need byte swapping.
  */
 
-#define USB_REDIR_BUF_SIZE 4096
+#define USB_VCR_BUF_SIZE 4096
 
 /* In-memory packet header. The `id` is widened to 64 bits so it can hold a
  * 64-bit wire id; the transport layer serializes it as 4 or 8 bytes on the
@@ -45,14 +45,14 @@ enum {
  * of these change wire struct sizes, so what we advertise MUST match the
  * layouts we actually send below. */
 enum {
-    USB_REDIR_CAP_BULK_STREAMS            = 0,  /* also gates ep_info.max_streams */
-    USB_REDIR_CAP_CONNECT_DEVICE_VERSION  = 1,  /* device_connect.device_version_bcd */
-    USB_REDIR_CAP_FILTER                  = 2,
-    USB_REDIR_CAP_DEVICE_DISCONNECT_ACK   = 3,
-    USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE = 4,  /* ep_info.max_packet_size */
-    USB_REDIR_CAP_64BITS_IDS              = 5,
-    USB_REDIR_CAP_32BITS_BULK_LENGTH      = 6,
-    USB_REDIR_CAP_BULK_RECEIVING          = 7,
+    USB_VCR_CAP_BULK_STREAMS            = 0,  /* also gates ep_info.max_streams */
+    USB_VCR_CAP_CONNECT_DEVICE_VERSION  = 1,  /* device_connect.device_version_bcd */
+    USB_VCR_CAP_FILTER                  = 2,
+    USB_VCR_CAP_DEVICE_DISCONNECT_ACK   = 3,
+    USB_VCR_CAP_EP_INFO_MAX_PACKET_SIZE = 4,  /* ep_info.max_packet_size */
+    USB_VCR_CAP_64BITS_IDS              = 5,
+    USB_VCR_CAP_32BITS_BULK_LENGTH      = 6,
+    USB_VCR_CAP_BULK_RECEIVING          = 7,
 };
 
 /* Capabilities we support. The effective set is the intersection with the
@@ -63,22 +63,22 @@ enum {
  * (see usb_do_attach). 64bits_ids widens the post-hello header to 16
  * bytes, which the transport layer handles. bulk_streams gates the
  * ep_info max_streams array (which we serialize, zeroed). */
-#define USB_REDIR_OUR_CAPS \
-    ((1u << USB_REDIR_CAP_BULK_STREAMS)            | \
-     (1u << USB_REDIR_CAP_CONNECT_DEVICE_VERSION)  | \
-     (1u << USB_REDIR_CAP_FILTER)                  | \
-     (1u << USB_REDIR_CAP_DEVICE_DISCONNECT_ACK)   | \
-     (1u << USB_REDIR_CAP_EP_INFO_MAX_PACKET_SIZE) | \
-     (1u << USB_REDIR_CAP_64BITS_IDS)              | \
-     (1u << USB_REDIR_CAP_32BITS_BULK_LENGTH)      | \
-     (1u << USB_REDIR_CAP_BULK_RECEIVING))
+#define USB_VCR_OUR_CAPS \
+    ((1u << USB_VCR_CAP_BULK_STREAMS)            | \
+     (1u << USB_VCR_CAP_CONNECT_DEVICE_VERSION)  | \
+     (1u << USB_VCR_CAP_FILTER)                  | \
+     (1u << USB_VCR_CAP_DEVICE_DISCONNECT_ACK)   | \
+     (1u << USB_VCR_CAP_EP_INFO_MAX_PACKET_SIZE) | \
+     (1u << USB_VCR_CAP_64BITS_IDS)              | \
+     (1u << USB_VCR_CAP_32BITS_BULK_LENGTH)      | \
+     (1u << USB_VCR_CAP_BULK_RECEIVING))
 
 /* Link speeds. */
-#define USB_REDIR_SPEED_LOW     0
-#define USB_REDIR_SPEED_FULL    1
-#define USB_REDIR_SPEED_HIGH    2
-#define USB_REDIR_SPEED_SUPER   3
-#define USB_REDIR_SPEED_UNKNOWN 255
+#define USB_VCR_SPEED_LOW     0
+#define USB_VCR_SPEED_FULL    1
+#define USB_VCR_SPEED_HIGH    2
+#define USB_VCR_SPEED_SUPER   3
+#define USB_VCR_SPEED_UNKNOWN 255
 
 /* Device descriptor field offsets (USB 2.0 spec, table 9-8). */
 #define USB_DD_bDeviceClass     4

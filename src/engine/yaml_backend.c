@@ -38,6 +38,24 @@ static usb_node_t *find_node_by_name_and_index(usb_node_t *parent, const char *n
     return NULL;
 }
 
+/* Like find_node_by_name_and_index but returns the prop itself, so callers can
+ * tell a nested descriptor (USB_PROP_NODE) from a codec-encoded leaf such as
+ * report_descriptor (USB_PROP_ARRAY). */
+static usb_prop_t *find_prop_by_name_and_index(usb_node_t *parent, const char *name, int target_index)
+{
+    if (!parent || !name) return NULL;
+    int current_index = 0;
+    for (GList *l = parent->props; l; l = l->next) {
+        usb_prop_t *p = l->data;
+        if (strcmp(p->name, name) == 0) {
+            if (current_index == target_index)
+                return p;
+            current_index++;
+        }
+    }
+    return NULL;
+}
+
 static int yb_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
                              uint16_t lang, const uint8_t **out, uint16_t *len)
 {
@@ -91,12 +109,16 @@ static int yb_control(usb_device_t *dev,
         memcpy(path, data, *len);
         path[*len] = '\0';
         
-        usb_node_t *target = st->dev->tree;
         char *p = path;
         if (strncmp(p, "$device.", 8) == 0) p += 8;
-        
+
         char **parts = g_strsplit(p, ".", 0);
-        for (int i = 0; parts[i] && target; i++) {
+        int nparts = (int)g_strv_length(parts);
+        usb_node_t *parent = st->dev->tree;
+        const uint8_t *out_bytes = NULL;
+        size_t out_n = 0;
+
+        for (int i = 0; i < nparts && parent; i++) {
             char *name = parts[i];
             char *bracket = strchr(name, '[');
             int idx = 0;
@@ -104,20 +126,40 @@ static int yb_control(usb_device_t *dev,
                 *bracket = '\0';
                 idx = atoi(bracket + 1);
             }
-            target = find_node_by_name_and_index(target, name, idx);
+
+            usb_prop_t *prop = find_prop_by_name_and_index(parent, name, idx);
+            if (!prop) {
+                parent = NULL;
+                break;
+            }
+
+            if (i == nparts - 1) {
+                /* Final component: a node is serialized to its descriptor
+                 * bytes; a codec-encoded leaf (e.g. report_descriptor) is
+                 * already raw bytes and emitted directly. */
+                if (prop->type == USB_PROP_NODE) {
+                    g_byte_array_set_size(st->desc_buf, 0);
+                    usb_node_serialize(prop->val.node, st->desc_buf);
+                    out_bytes = st->desc_buf->data;
+                    out_n = st->desc_buf->len;
+                } else if (prop->type == USB_PROP_ARRAY) {
+                    out_bytes = prop->val.array;
+                    out_n = prop->size;
+                }
+            } else {
+                parent = (prop->type == USB_PROP_NODE) ? prop->val.node : NULL;
+            }
         }
         g_strfreev(parts);
-        
-        if (target) {
-            g_byte_array_set_size(st->desc_buf, 0);
-            usb_node_serialize(target, st->desc_buf);
-            uint16_t n = (uint16_t)st->desc_buf->len;
+
+        if (out_bytes) {
+            uint16_t n = (uint16_t)out_n;
             /* Honor the host's wLength: standard enumeration probes the
              * descriptor with a short request (e.g. 8 bytes) before asking
              * for the full length. Over-serving desyncs the host parser. */
             if (n > setup->length) n = setup->length;
             if (n > USB_VCR_BUF_SIZE) n = USB_VCR_BUF_SIZE;
-            memcpy(data, st->desc_buf->data, n);
+            memcpy(data, out_bytes, n);
             *len = n;
         } else {
             return -1;

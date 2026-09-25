@@ -72,7 +72,19 @@ static int yb_control(usb_device_t *dev,
     if (!st || !st->dev)
         return -1;
     
-    int rc = flow_control(st->dev->flow, (const uint8_t *)setup, data, len);
+    /* flow_control matches on the standard 8-byte USB setup packet layout
+     * (bmRequestType, bRequest, wValue, wIndex, wLength). The wire header
+     * usb_control_packet_header_t stores the same fields in a different order
+     * with a status byte and alignment pad, so marshal to canonical setup
+     * bytes rather than casting the struct. */
+    uint8_t su[8] = {
+        setup->requesttype,
+        setup->request,
+        (uint8_t)(setup->value & 0xff), (uint8_t)(setup->value >> 8),
+        (uint8_t)(setup->index & 0xff), (uint8_t)(setup->index >> 8),
+        (uint8_t)(setup->length & 0xff), (uint8_t)(setup->length >> 8),
+    };
+    int rc = flow_control(st->dev->flow, su, data, len);
     
     if (rc == 0 && *len > 0 && data[0] == '$') {
         char path[1024];

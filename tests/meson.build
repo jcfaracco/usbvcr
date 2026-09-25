@@ -82,6 +82,18 @@ if check_dep.found()
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
   test('descriptor', test_descriptor)
+
+  test_pcap_roundtrip = executable(
+    'test_pcap_roundtrip',
+    'integration/test_pcap_roundtrip.c',
+    files(
+      '../src/lib/pcap/pcap.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib],
+    dependencies : [check_dep, glib_dep],
+  )
+  test('pcap_roundtrip', test_pcap_roundtrip)
 endif
 
 # TODO: canonical-dialect tests (codec / ValidationSuite).

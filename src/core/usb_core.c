@@ -272,6 +272,31 @@ int usb_core_run(int sock, usb_device_t *dev)
             handle_control(sock, dev, hdr.id, payload, len);
             break;
 
+        case RT_SET_CONFIGURATION: {
+            /* usbredir delivers SET_CONFIGURATION as its own message (1-byte
+             * config value), not as a control transfer. Synthesize the standard
+             * setup so flow rules keyed on bRequest=SET_CONFIGURATION fire their
+             * state transitions / on_enter queues, then ack with the status
+             * message the peer waits for before it starts interrupt receiving. */
+            uint8_t cfg = (len >= 1) ? payload[0] : 0;
+            LOG_DEBUG("set configuration %u", cfg);
+
+            if (dev->ops->control) {
+                usb_control_packet_header_t setup;
+                memset(&setup, 0, sizeof(setup));
+                setup.request     = USB_REQ_SET_CONFIGURATION;
+                setup.requesttype = 0x00;
+                setup.value       = cfg;
+                uint8_t data[USB_VCR_BUF_SIZE];
+                uint16_t n = 0;
+                dev->ops->control(dev, &setup, data, &n);  /* drive flow; reply unused */
+            }
+
+            uint8_t status[2] = { 0 /* success */, cfg };
+            usb_conn_send(sock, RT_CONFIGURATION_STATUS, hdr.id, status, sizeof(status));
+            break;
+        }
+
         case RT_START_INTERRUPT_RECEIVING:
             if (len >= 1) {
                 uint8_t ep = payload[0];

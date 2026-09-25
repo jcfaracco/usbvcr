@@ -411,7 +411,26 @@ int flow_ep_in(flow_t *flow, uint8_t ep, uint8_t *buf, size_t cap)
 
 int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
 {
-    (void)flow; (void)ep; (void)buf; (void)len;
+    if (!flow)
+        return -1;
+
+    /* Host-to-device transfer: HID output report (e.g. keyboard LED state via
+     * SET_REPORT) or an interrupt OUT endpoint. The flow schema has no OUT
+     * match/action yet, so the data is consumed and logged for visibility
+     * rather than routed to a rule. */
+    if (buf && len) {
+        char hex[3 * 32 + 4];
+        size_t shown = len < 32 ? len : 32;
+        size_t o = 0;
+        for (size_t i = 0; i < shown; i++)
+            o += snprintf(hex + o, sizeof(hex) - o, "%02x ", buf[i]);
+        if (len > shown)
+            snprintf(hex + o, sizeof(hex) - o, "...");
+        LOG_IN("ep 0x%02x OUT %zu bytes: %s", ep, len, hex);
+    } else {
+        LOG_IN("ep 0x%02x OUT %zu bytes", ep, len);
+    }
+
     return 0;
 }
 

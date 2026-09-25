@@ -79,6 +79,8 @@ void usb_node_merge(usb_node_t *dst, const usb_node_t *src);
 
 void usb_node_serialize(usb_node_t *node, GByteArray *buffer);
 
+int usb_node_validate(const usb_node_t *node, int depth);
+
 /* ── Debug ── */
 
 /* Pretty-print the tree to `out` (e.g. stdout/stderr), one property per line,

@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "usb_node.h"
+#include "log.h"
 
 /* ── Node constructors / destructors ── */
 
@@ -184,47 +185,43 @@ void usb_node_serialize(usb_node_t *node, GByteArray *buffer)
     }
 }
 
-/* ── Debug ── */
-
-static void usb_node_dump_indent(const usb_node_t *node, FILE *out, int depth)
+int usb_node_validate(const usb_node_t *node, int depth)
 {
+    char *indent = g_strnfill(depth, ' ');
+
     for (GList *l = node->props; l; l = l->next) {
         usb_prop_t *p = l->data;
 
-        for (int i = 0; i < depth; i++)
-            fputs("  ", out);
-
         switch (p->type) {
         case USB_PROP_UINT8:
-            fprintf(out, "%s = u8 0x%02x\n", p->name, p->val.u8);
+            LOG_DEBUG("%s%s = (u8) 0x%02x", indent, p->name, p->val.u8);
             break;
         case USB_PROP_UINT16:
-            fprintf(out, "%s = u16 0x%04x\n", p->name, p->val.u16);
+            LOG_DEBUG("%s%s = (u16) 0x%04x", indent, p->name, p->val.u16);
             break;
         case USB_PROP_UINT32:
-            fprintf(out, "%s = u32 0x%08x\n", p->name, p->val.u32);
+            LOG_DEBUG("%s%s = (u32) 0x%04x", indent, p->name, p->val.u32);
             break;
         case USB_PROP_ARRAY:
-            fprintf(out, "%s = array[%zu]\n", p->name, p->size);
+            LOG_DEBUG("%s%s = array[%zu]", indent, p->name, p->size);
             break;
         case USB_PROP_NODE:
-            fprintf(out, "%s = {\n", p->name);
-            usb_node_dump_indent(p->val.node, out, depth + 1);
-            for (int i = 0; i < depth; i++)
-                fputs("  ", out);
-            fputs("}\n", out);
+            LOG_DEBUG("%s%s = {", indent, p->name);
+            if (usb_node_validate(p->val.node, depth + 2) < 0) {
+                g_free(indent);
+                return -1;
+            }
+            LOG_DEBUG("%s}", indent);
             break;
         case USB_PROP_UNKNOWN:
         default:
-            fprintf(out, "%s = null\n", p->name);
-            break;
+            LOG_DEBUG("%s%s = null", indent, p->name);
+            g_free(indent);
+            return -1;
         }
     }
-}
 
-void usb_node_dump(const usb_node_t *node, FILE *out)
-{
-    if (!node || !out)
-        return;
-    usb_node_dump_indent(node, out, 0);
+    g_free(indent);
+
+    return 0;
 }

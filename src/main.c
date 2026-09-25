@@ -8,8 +8,9 @@
 #include "usb_core.h"
 #include "device.h"
 #include "yaml_backend.h"
+#include "pcap_backend.h"
 #include "fuzz_wrap.h"
-#include "record.h"
+#include "pcap/record.h"
 #include "version.h"
 #include "log.h"
 
@@ -85,24 +86,27 @@ int main(int argc, char *argv[])
     }
     LOG_INFO("Connected!");
 
-    /* Replay mode: just resend a recorded run and exit. */
+    /* Pick a backend: a usbmon pcap/pcapng capture (replay a real device) or a
+     * canonical YAML device project (emulate). Both feed the same engine. */
+    usb_device_t *dev = NULL;
     if (config.pcap) {
-        rc = replay_run(sock, config.pcap);
-        close(sock);
-        rc = -1;
-        goto end;
-    }
-
-    if (!config.yaml) {
-        LOG_ERR("no device: pass --yaml <FILE>");
-        close(sock);
-        rc = -1;
-        goto end;
-    }
-
-    usb_device_t *dev = yaml_backend_create(config.yaml);
-    if (!dev) {
-        LOG_ERR("failed to load device project: %s", config.yaml);
+        dev = pcap_backend_create(config.pcap);
+        if (!dev) {
+            LOG_ERR("failed to load pcap capture: %s", config.pcap);
+            close(sock);
+            rc = -1;
+            goto end;
+        }
+    } else if (config.yaml) {
+        dev = yaml_backend_create(config.yaml);
+        if (!dev) {
+            LOG_ERR("failed to load device project: %s", config.yaml);
+            close(sock);
+            rc = -1;
+            goto end;
+        }
+    } else {
+        LOG_ERR("no device: pass --yaml <FILE> or --pcap <FILE>");
         close(sock);
         rc = -1;
         goto end;
@@ -136,7 +140,7 @@ int main(int argc, char *argv[])
         goto end;
     }
 
-    LOG_INFO("Emulating device: %s", config.yaml);
+    LOG_INFO("Running device: %s", config.pcap ? config.pcap : config.yaml);
     rc = usb_core_run(sock, dev);
 
     record_close();

@@ -1,2 +1,0 @@
-Created file file:///home/jcfaracco/.gemini/antigravity-cli/brain/f6d74aa0-8ec7-4420-8fa6-3b2514b15313/plan.md with requested content.
-If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.

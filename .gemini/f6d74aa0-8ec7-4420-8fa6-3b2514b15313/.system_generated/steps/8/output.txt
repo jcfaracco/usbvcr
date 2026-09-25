@@ -1,6 +1,0 @@
-
-The command exited with code 0.
-Output:
-Julio Faracco
-jcfaracco@gmail.com
-

@@ -7,7 +7,7 @@
 
 #include "protocol.h"
 
-/* If set, every frame passed to usb_redir_send is also written to `fp`
+/* If set, every frame passed to usb_conn_send is also written to `fp`
  * (length-prefixed) for later replay. Pass NULL to disable. */
 void transport_set_record(FILE *fp);
 
@@ -26,14 +26,14 @@ int recv_all(int sock, uint8_t *buf, size_t len);
 
 /* Send one usb frame: header (12 or 16 bytes) + payload. Returns 0,
  * or -1. */
-int usb_redir_send(int sock, uint32_t type, int64_t id,
+int usb_conn_send(int sock, uint32_t type, int64_t id,
                    const void *payload, size_t len);
 
 /* Receive one usb frame. Fills `hdr`, copies the payload into `buf`
  * (capacity `cap`) and stores its length in `*payload_len`.
  * Returns 0 on a frame; 1 on an idle timeout (no frame, keep waiting);
  * -1 on error/EOF/oversized payload. */
-int usb_redir_recv(int sock, usb_header_t *hdr,
+int usb_conn_recv(int sock, usb_header_t *hdr,
                    uint8_t *buf, size_t cap, size_t *payload_len);
 
 #endif /* TRANSPORT_H */

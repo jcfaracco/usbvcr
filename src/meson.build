@@ -17,7 +17,7 @@ subdir('fuzz')
 
 # Pure POSIX sockets client — no external library dependencies.
 executable(
-  'usb_redir_hello',
+  'usbvcr',
   main_sources + lib_sources,
   include_directories : [lib, core, fuzz, engine],
   dependencies: [yaml_dep, glib_dep],

@@ -100,7 +100,7 @@ static int yb_control(usb_device_t *dev,
             g_byte_array_set_size(st->desc_buf, 0);
             usb_node_serialize(target, st->desc_buf);
             *len = st->desc_buf->len;
-            if (*len > 4096) *len = 4096; // USB_REDIR_BUF_SIZE max? Data buffer is sized USB_REDIR_BUF_SIZE
+            if (*len > 4096) *len = 4096; // USB_VCR_BUF_SIZE max? Data buffer is sized USB_VCR_BUF_SIZE
             memcpy(data, st->desc_buf->data, *len);
         } else {
             return -1;

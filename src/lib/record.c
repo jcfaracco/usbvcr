@@ -40,7 +40,7 @@ int replay_run(int sock, const char *path)
         return -1;
     }
 
-    uint8_t frame[USB_REDIR_BUF_SIZE];
+    uint8_t frame[USB_VCR_BUF_SIZE];
     uint32_t len;
     size_t count = 0;
 

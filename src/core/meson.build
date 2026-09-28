@@ -1,0 +1,1 @@
+core = include_directories('.')

@@ -1,0 +1,9 @@
+version: "1.0"
+name: "Virtual USB Keyboard"
+vars:
+  - vendor: "Generic"
+  - product: "USB Keyboard"
+
+devices:
+  - device: "devices/keyboard_04d9_1702.yaml"
+    flow: "flows/standard_enumeration.yaml"

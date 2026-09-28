@@ -20,6 +20,41 @@ the old "hello world" client README.
 
 ---
 
+## Build & test
+
+The project builds with **Meson + Ninja**.
+
+Dependencies:
+- C11 compiler (gcc or clang)
+- `meson >= 1.1.0`, `ninja`
+- `glib-2.0`, `libyaml` (`yaml-0.1`) — runtime deps
+- `check` — unit-test framework (optional; tests are skipped if absent)
+
+```sh
+# Configure a build directory (debugoptimized by default)
+meson setup build
+
+# Compile — produces the `usbvcr` binary under build/src/
+ninja -C build
+
+# Run the test suite
+meson test -C build
+```
+
+Useful options:
+
+```sh
+# Coverage build (needs gcovr)
+meson setup build -Denable_coverage=true
+ninja -C build && meson test -C build
+gcovr -r . build               # coverage report
+
+# Reconfigure an existing build dir
+meson setup --reconfigure build
+```
+
+---
+
 ## 1. Goals
 
 1. Describe any USB device in YAML only — no recompilation per device.

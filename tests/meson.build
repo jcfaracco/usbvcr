@@ -83,6 +83,20 @@ if check_dep.found()
   )
   test('descriptor', test_descriptor)
 
+  test_usb_core = executable(
+    'test_usb_core',
+    'core/test_usb_core.c',
+    files(
+      '../src/core/usb_core.c',
+      '../src/core/transport.c',
+      '../src/core/descriptor.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib, core],
+    dependencies : [check_dep, dependency('threads')],
+  )
+  test('usb_core', test_usb_core)
+
   test_pcap_roundtrip = executable(
     'test_pcap_roundtrip',
     'integration/test_pcap_roundtrip.c',

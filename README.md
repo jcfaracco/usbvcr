@@ -1,9 +1,19 @@
-# YAML-Driven USB Device Emulator (usbredir)
+# usbvcr — YAML-Driven USB Device Emulator
 
 A generic USB device emulator and fuzzing harness. Devices are described in
 **human-readable YAML** — descriptors, behavior, and raw payloads — and served
 over the **usbredir** wire protocol to QEMU. No per-device C code: one generic
 engine serializes YAML into binary USB frames and drives the state machine.
+
+## The name
+
+**usbvcr** — USB *video-cassette recorder*. Like a VCR, it **records** USB
+traffic (capture a real device's exchanges to pcap / YAML) and **replays** it
+(serve that description back to a guest). One tape format, two decks: a YAML
+description of any device, played through a generic engine.
+
+> Note: **usbredir** here is the wire protocol/transport spoken to QEMU
+> (`-device usb-redir`), not this project. usbvcr is the emulator that speaks it.
 
 This document is the **architecture and implementation plan**. It supersedes
 the old "hello world" client README.
@@ -85,15 +95,15 @@ deterministic fuzzing):
   (field compare, current state, counters).
 - loops already covered by list payloads (`queue_endpoint_data.payloads`).
 
-## 4. Two YAML dialects — do not mix
+## 4. One YAML dialect (canonical)
 
-- **Canonical** (this doc): `device / schema / flow`.
-- **Legacy pcap-replay**: `packet / USBpcap / USBpcapSetup / Raw`
-  (matches `usb_description_replay.yaml`, parsed today by `src/lib/usb_yaml.c`).
+There is a single dialect: **canonical** — `device / schema / flow`
+(see [docs/yaml_dialect.md](docs/yaml_dialect.md)). The old pcap-replay grammar
+(`packet / USBpcap / USBpcapSetup / Raw`) has been dropped; do not reintroduce a
+second grammar into the loader.
 
-Action: commit to the canonical dialect. Isolate the legacy parser under
-`src/lib/replay/` (or `src/pcap/`). Do not overload one parser with both
-grammars.
+Record/replay of captured traffic is handled at the **pcap layer**
+(`src/lib/pcap/`), not as an alternate YAML dialect.
 
 ## 5. Target source layout
 
@@ -103,8 +113,8 @@ src/lib/            # pure: no socket/engine deps
   yaml_loader.{c,h}   # canonical dialect -> UsbNode tree; imports/templates/override; null autofill
   codec.{c,h}         # generic table-driven item-stream encoder (see §6)
   flow.{c,h}          # states, rules, match, actions, transitions, when: eval, endpoint queues
-  log.{c,h} utils.{c,h} record.{c,h}   # keep
-  replay/             # legacy pcap-replay parser (moved usb_yaml.c + usbpcap_hdr.h)
+  log.{c,h} utils.{c,h}                # keep
+  pcap/               # pcap record/replay (pcap.{c,h}, record.{c,h})
 
 src/core/           # engine — largely unchanged, already generic
   transport.{c,h}     # usbredir framing
@@ -230,9 +240,8 @@ A separate test driver reuses `yaml_loader` plus a raw inject path into
 4. `flow` — states, rules, actions, transitions, bounded `when:`.
 5. `yaml_backend` — `usb_device_ops` adapter over tree + flow.
 6. Wire into `main.c` — `--device-yaml <path>`; keep builtin registry.
-7. Isolate legacy pcap-replay parser under `src/lib/replay/`.
-8. Fix `converter.py` real-hex extraction.
-9. `ValidationSuite` runner.
+7. Fix `converter.py` real-hex extraction.
+8. `ValidationSuite` runner.
 
 ## 10. License
 

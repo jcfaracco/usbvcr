@@ -75,9 +75,9 @@ if check_dep.found()
       '../src/lib/usb_node.c',
       '../src/lib/utils.c',
       '../src/lib/version.c',
-      '../src/engine/yaml_backend.c',
+      '../src/backends/yaml_backend.c',
     ),
-    include_directories : [lib, core, engine],
+    include_directories : [lib, core, backends],
     dependencies : [check_dep, glib_dep, yaml_dep],
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )

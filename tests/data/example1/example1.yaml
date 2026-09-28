@@ -1,0 +1,9 @@
+version: "1.0"
+name: "Hello World Injector Keyboard"
+vars:
+  - vendor: "Generic"
+  - product: "Auto-Typing Keyboard"
+
+devices:
+  - device: "devices/keyboard_hello_world.yaml"
+    flow: "flows/hello_world_flow.yaml"

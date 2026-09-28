@@ -1,0 +1,86 @@
+device_descriptor:
+  - bLength: 18
+    bDescriptorType: 0x01
+    bcdUSB: 0x0200
+    bDeviceClass: 0x00
+    bDeviceSubClass: 0x00
+    bDeviceProtocol: 0x00
+    bMaxPacketSize0: 8
+    idVendor: 0x04d9
+    idProduct: 0x1702
+    bcdDevice: 0x0406
+    iManufacturer: 1
+    iProduct: 2
+    iSerialNumber: 0
+    bNumConfigurations: 1
+
+configurations:
+  - bLength: 9
+    bDescriptorType: 0x02
+    wTotalLength: 34          # 9 (config) + 9 (iface) + 9 (HID) + 7 (ep)
+    bNumInterfaces: 1
+    bConfigurationValue: 1
+    iConfiguration: 0
+    bmAttributes: 0xa0
+    bMaxPower: 50
+    interfaces:
+      - bLength: 9
+        bDescriptorType: 0x04
+        bInterfaceNumber: 0
+        bAlternateSetting: 0
+        bNumEndpoints: 1
+        bInterfaceClass: 0x03      # HID
+        bInterfaceSubClass: 0x01   # Boot
+        bInterfaceProtocol: 0x01   # Keyboard
+        iInterface: 0
+        # HID class descriptor sits between interface and endpoint on the wire.
+        hid_descriptor:
+          bLength: 9
+          bDescriptorType: 0x21
+          bcdHID: 0x0111
+          bCountryCode: 0
+          bNumDescriptors: 1
+          bReportDescriptorType: 0x22
+          wDescriptorLength: 45   # bytes emitted by report_descriptor below
+        endpoints:
+          - bLength: 7
+            bDescriptorType: 0x05
+            bEndpointAddress: 0x81
+            bmAttributes: 0x03       # Interrupt
+            wMaxPacketSize: 8
+            bInterval: 10
+
+# The HID report descriptor is a separate descriptor, served on its own
+# GET_DESCRIPTOR (wValue 0x2200). It lives OUTSIDE `configurations` so it is not
+# serialized into the config TLV stream. Referenced by the flow as
+# $device.report_descriptor.
+report_descriptor:
+  codec: "hid_report"
+  items:
+    - usage_page: "Generic Desktop"
+    - usage: "Keyboard"
+    - collection: "Application"
+    # Byte 0: 8 modifier bits (LeftCtrl..RightGUI).
+    - usage_page: "Key Codes"
+    - usage_minimum: 0xe0
+    - usage_maximum: 0xe7
+    - logical_minimum: 0
+    - logical_maximum: 1
+    - report_size: 1
+    - report_count: 8
+    - input: "Data,Var,Abs"
+    # Byte 1: reserved (constant).
+    - report_count: 1
+    - report_size: 8
+    - input: "Const,Array,Abs"
+    # Bytes 2-7: 6-key rollover keycode array. Without this array the host
+    # reads only the modifier byte and no keypresses ever reach it.
+    - report_count: 6
+    - report_size: 8
+    - logical_minimum: 0
+    - logical_maximum: 101
+    - usage_page: "Key Codes"
+    - usage_minimum: 0
+    - usage_maximum: 101
+    - input: "Data,Array,Abs"
+    - end_collection: true

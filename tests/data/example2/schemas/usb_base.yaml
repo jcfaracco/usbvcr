@@ -1,0 +1,27 @@
+namespace: "usb_base"
+
+device_descriptor:
+  - bLength: 18
+    bDescriptorType: 0x01
+    bcdUSB: 0x0110
+    bDeviceClass: 0x00
+    bDeviceSubClass: 0x00
+    bDeviceProtocol: 0x00
+    bMaxPacketSize0: 8
+    idVendor: null
+    idProduct: null
+    bcdDevice: null
+    iManufacturer: 0
+    iProduct: 0
+    iSerialNumber: 0
+    bNumConfigurations: 1
+
+configuration_descriptor:
+  - bLength: 9
+    bDescriptorType: 0x02
+    wTotalLength: null
+    bNumInterfaces: null
+    bConfigurationValue: 1
+    iConfiguration: 0
+    bmAttributes: 0x80
+    bMaxPower: 50

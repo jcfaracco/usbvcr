@@ -1,0 +1,16 @@
+target_device: "devices/keyboard_04d9_1702.yaml"
+
+test_case:
+  id: "Stress Test"
+  description: "Test guest host bounds checking by supplying oversized wTotalLength"
+  sequence:
+    - inject_packet:
+        direction: "device_to_host"
+        type: "control_response"
+        override_payload:
+          template: "usb_base.configuration_descriptor"
+          wTotalLength: 0xFFFF
+          bNumInterfaces: 2
+    - assert_behavior:
+        kernel_crash: false
+        driver_status: "stalled"

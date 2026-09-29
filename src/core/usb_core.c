@@ -55,15 +55,36 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
     if (desc_parse_config(cd, cdlen, &ii, &ei) < 0)
         return -1;
 
+    /* Link speed and ep0 max packet size both derive from the device
+     * descriptor. bMaxPacketSize0 is a raw byte count for low/full/high speed,
+     * but for SuperSpeed (bcdUSB >= 0x0300) it is a power-of-two *exponent*
+     * (9 -> 512). Announcing a SuperSpeed device as full-speed with maxpacket 9
+     * makes the guest reject it ("Invalid ep0 maxpacket: 9"), and the kernel's
+     * SS endpoint companion parsing (guarded by udev->speed >= SUPER) never
+     * runs. */
+    uint16_t bcd_usb = DESC_U16(dd, USB_DD_bcdUSB);
+    uint8_t  mp0     = DESC_U8(dd, USB_DD_bMaxPacketSize0);
+    uint8_t  speed;
+    uint16_t ep0_mps;
+    if (bcd_usb >= 0x0300) {
+        speed   = USB_VCR_SPEED_SUPER;
+        ep0_mps = (uint16_t)(1u << mp0);   /* exponent -> bytes (9 -> 512) */
+    } else if (bcd_usb >= 0x0200) {
+        speed   = USB_VCR_SPEED_HIGH;
+        ep0_mps = mp0;
+    } else {
+        speed   = USB_VCR_SPEED_FULL;
+        ep0_mps = mp0;
+    }
+
     /* ep0 (control) is implicit: it has no endpoint descriptor in the
-     * config, so fill its ep_info from the device descriptor's
-     * bMaxPacketSize0. Without a nonzero max packet size the peer cannot run
-     * control transfers and enumeration stalls. */
+     * config, so fill its ep_info from the device descriptor. Without a nonzero
+     * max packet size the peer cannot run control transfers and enumeration
+     * stalls. */
     uint8_t ep0_out = usb_ep_index(0x00);
     uint8_t ep0_in  = usb_ep_index(0x80);
     ei.type[ep0_out] = ei.type[ep0_in] = 0;   /* control */
-    ei.max_packet_size[ep0_out] = ei.max_packet_size[ep0_in] =
-        DESC_U8(dd, USB_DD_bMaxPacketSize0);
+    ei.max_packet_size[ep0_out] = ei.max_packet_size[ep0_in] = ep0_mps;
 
     /* Serialize ep_info to the length the *negotiated* caps imply. The peer
      * reads the trailing arrays only for caps both sides advertise:
@@ -85,9 +106,9 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
     /* Pull the connect fields from the device descriptor by named offset. */
     usb_device_connect_header_t c;
     memset(&c, 0, sizeof(c));
-    /* bMaxPacketSize0==8 is a full-speed value; announcing HIGH would be
-     * inconsistent. TODO: expose speed via the backend. */
-    c.speed              = USB_VCR_SPEED_FULL;
+    /* Speed derived from bcdUSB above. TODO: let the backend override it, since
+     * bcdUSB alone cannot distinguish full- from high-speed USB 2.0 devices. */
+    c.speed              = speed;
     c.device_class       = DESC_U8(dd,  USB_DD_bDeviceClass);
     c.device_subclass    = DESC_U8(dd,  USB_DD_bDeviceSubClass);
     c.device_protocol    = DESC_U8(dd,  USB_DD_bDeviceProtocol);

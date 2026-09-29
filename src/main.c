@@ -21,10 +21,8 @@ typedef struct {
     gchar *yaml;
     gchar *pcap;
     gchar *record_path;
-    gchar *replay_path;
     gboolean debug;
     gboolean version;
-    gboolean do_record;
     gboolean do_fuzz;
     gboolean have_seed;
     uint64_t seed;
@@ -41,7 +39,6 @@ int main(int argc, char *argv[])
         .record_path = NULL,
         .debug = FALSE,
         .version = FALSE,
-        .do_record = FALSE,
         .do_fuzz = FALSE,
         .have_seed = FALSE,
         .seed = 0,
@@ -55,6 +52,7 @@ int main(int argc, char *argv[])
         { "port", 'P', 0, G_OPTION_ARG_STRING, &config.port, "port of the host to connect (default=1337).", "PORT" },
         { "yaml", 0, 0, G_OPTION_ARG_FILENAME, &config.yaml, "canonical device project (devices/ flows/ ...).", "FILE" },
         { "pcap", 0, 0, G_OPTION_ARG_FILENAME, &config.pcap, "pcap file to replay USB behaviour.", "FILE" },
+        { "record", 'r', 0, G_OPTION_ARG_FILENAME, &config.record_path, "record live USB transfers to a pcap/pcapng file (format inferred from extension).", "FILE" },
         { "version", 'V', 0, G_OPTION_ARG_NONE, &config.version, "Show version and exit.", NULL },
         { NULL }
     };

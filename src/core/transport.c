@@ -105,13 +105,6 @@ int recv_all(int sock, uint8_t *buf, size_t len)
  * usb frame layer                                                *
  * ------------------------------------------------------------------ */
 
-static FILE *g_record_fp;
-
-void transport_set_record(FILE *fp)
-{
-    g_record_fp = fp;
-}
-
 /* On-wire header id width. 0 = 32-bit id (12-byte header), 1 = 64-bit id
  * (16-byte header). Toggled by transport_set_id64 only after the hello
  * exchange, and only if cap_64bits_ids was negotiated. The hello itself is
@@ -150,14 +143,6 @@ int usb_conn_send(int sock, uint32_t type, int64_t id,
         memcpy(frame + hs, payload, len);
 
     size_t frame_len = hs + len;
-
-    if (g_record_fp) {
-        uint32_t rec = (uint32_t)frame_len;
-        fwrite(&rec, sizeof(rec), 1, g_record_fp);
-        fwrite(frame, 1, frame_len, g_record_fp);
-        fflush(g_record_fp);  /* survive a crash mid-run */
-    }
-
     if (send(sock, frame, frame_len, 0) < 0) {
         LOG_ERR("Error type: %s", strerror(errno));
         return -1;

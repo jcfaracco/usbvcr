@@ -3,13 +3,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include "protocol.h"
-
-/* If set, every frame passed to usb_conn_send is also written to `fp`
- * (length-prefixed) for later replay. Pass NULL to disable. */
-void transport_set_record(FILE *fp);
 
 /* Select the on-wire packet-header width. When enabled the header carries a
  * 64-bit id (16 bytes) instead of a 32-bit id (12 bytes). Must be turned on

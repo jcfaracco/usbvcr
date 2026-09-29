@@ -81,6 +81,7 @@ enum {
 #define USB_VCR_SPEED_UNKNOWN 255
 
 /* Device descriptor field offsets (USB 2.0 spec, table 9-8). */
+#define USB_DD_bcdUSB           2   /* u16 LE */
 #define USB_DD_bDeviceClass     4
 #define USB_DD_bDeviceSubClass  5
 #define USB_DD_bDeviceProtocol  6

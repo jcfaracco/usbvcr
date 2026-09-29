@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <time.h>
 
 #include "usb_core.h"
 #include "transport.h"
@@ -9,8 +10,23 @@
 #include "bytes.h"
 #include "version.h"
 #include "log.h"
+#include "pcap/record.h"
 
 #define HELLO_VERSION "usb_vcr_hello " USB_VCR_VERSION
+
+/* Minimal device context forwarded to recording helpers. */
+typedef struct {
+    uint8_t bus;
+    uint8_t device;
+} usb_record_ctx_t;
+
+/* Current wall-clock time in microseconds. */
+static uint64_t ts_usec(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec / 1000ULL;
+}
 
 /* Read a byte / little-endian u16 descriptor field at a named offset. */
 #define DESC_U8(desc, off)  ((desc)[(off)])
@@ -107,7 +123,8 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
 
 static int reply_control(int sock, int64_t id,
                          const usb_control_packet_header_t *setup,
-                         uint8_t status, const uint8_t *data, uint16_t n)
+                         uint8_t status, const uint8_t *data, uint16_t n,
+                         const usb_record_ctx_t *ctx)
 {
     uint8_t buf[USB_VCR_BUF_SIZE];
     usb_control_packet_header_t h = *setup;
@@ -118,11 +135,30 @@ static int reply_control(int sock, int64_t id,
     if (data && n)
         memcpy(buf + sizeof(h), data, n);
 
-    return usb_conn_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n);
+    int rc = usb_conn_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n);
+
+    if (rc == 0 && ctx) {
+        pcap_packet_t pkt = {
+            .ts_usec    = ts_usec(),
+            .bus        = ctx->bus,
+            .device     = ctx->device,
+            .endpoint   = setup->endpoint,
+            .dir        = (setup->requesttype & USB_DIR_IN) ? PCAP_DIR_IN : PCAP_DIR_OUT,
+            .xfer       = PCAP_XFER_CONTROL,
+            .setup_valid = 1,
+            .data       = data,
+            .data_len   = n,
+        };
+        memcpy(pkt.setup, setup, sizeof(pkt.setup));
+        record_add(&pkt);
+    }
+
+    return rc;
 }
 
 static void handle_control(int sock, usb_device_t *dev, int64_t id,
-                           const uint8_t *payload, size_t len)
+                           const uint8_t *payload, size_t len,
+                           const usb_record_ctx_t *ctx)
 {
     if (len < sizeof(usb_control_packet_header_t)) {
         LOG_WARN("control packet too short (%zu bytes)", len);
@@ -141,7 +177,7 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
         uint8_t data[USB_VCR_BUF_SIZE];
         uint16_t n = 0;
         if (dev->ops->control(dev, &setup, data, &n) == 0) {
-            reply_control(sock, id, &setup, 0, data, n);
+            reply_control(sock, id, &setup, 0, data, n, ctx);
             return;
         }
     }
@@ -158,27 +194,28 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
         if (dev->ops->get_descriptor(dev, dtype, dindex, setup.index,
                                      &desc, &dlen) < 0) {
             LOG_DEBUG("stall: no descriptor type=0x%02x index=%u", dtype, dindex);
-            reply_control(sock, id, &setup, 1, NULL, 0);  /* stall */
+            reply_control(sock, id, &setup, 1, NULL, 0, ctx);  /* stall */
             return;
         }
 
         uint16_t n = dlen < setup.length ? dlen : setup.length;
         LOG_DEBUG("GET_DESCRIPTOR type=0x%02x index=%u -> %u bytes",
                   dtype, dindex, n);
-        reply_control(sock, id, &setup, 0, desc, n);
+        reply_control(sock, id, &setup, 0, desc, n, ctx);
         return;
     }
 
     LOG_DEBUG("stall: unhandled control req=0x%02x type=0x%02x",
               setup.request, setup.requesttype);
-    reply_control(sock, id, &setup, 1, NULL, 0);  /* stall */
+    reply_control(sock, id, &setup, 1, NULL, 0, ctx);  /* stall */
 }
 
 /* ------------------------------------------------------------------ *
  * Interrupt IN production                                             *
  * ------------------------------------------------------------------ */
 
-static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep)
+static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep,
+                                   const usb_record_ctx_t *ctx)
 {
     if (!dev->ops->ep_in)
         return;
@@ -198,6 +235,20 @@ static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep)
         if (usb_conn_send(sock, RT_INTERRUPT_PACKET, 0, buf, sizeof(h) + n) < 0)
             break;
         LOG_OUT("interrupt report on ep 0x%02x (%d bytes)", ep, n);
+
+        if (ctx) {
+            pcap_packet_t pkt = {
+                .ts_usec  = ts_usec(),
+                .bus      = ctx->bus,
+                .device   = ctx->device,
+                .endpoint = ep,
+                .dir      = PCAP_DIR_IN,
+                .xfer     = PCAP_XFER_INT,
+                .data     = data,
+                .data_len = (size_t)n,
+            };
+            record_add(&pkt);
+        }
     }
 }
 
@@ -243,6 +294,10 @@ int usb_core_run(int sock, usb_device_t *dev)
     if (announce_device(sock, dev, caps) < 0)
         return -1;
 
+    /* Build recording context. bus=0 and device=1 are reasonable defaults for
+     * an emulated device; the USB device descriptor carries no bus/devnum. */
+    usb_record_ctx_t ctx = { .bus = 0, .device = 1 };
+
     bool int_ep_active[32] = {false};
 
     /* 3. Serve requests until the peer goes away. The socket recv timeout
@@ -261,7 +316,7 @@ int usb_core_run(int sock, usb_device_t *dev)
                 if (int_ep_active[i]) {
                     /* Reverse of usb_ep_index: reconstruct bEndpointAddress */
                     uint8_t ep = (i & 0x0f) | ((i & 0x10) << 3);
-                    push_interrupt_reports(sock, dev, ep);
+                    push_interrupt_reports(sock, dev, ep, &ctx);
                 }
             }
             continue;
@@ -269,7 +324,7 @@ int usb_core_run(int sock, usb_device_t *dev)
 
         switch (hdr.type) {
         case RT_CONTROL_PACKET:
-            handle_control(sock, dev, hdr.id, payload, len);
+            handle_control(sock, dev, hdr.id, payload, len, &ctx);
             break;
 
         case RT_SET_CONFIGURATION: {
@@ -302,7 +357,7 @@ int usb_core_run(int sock, usb_device_t *dev)
                 uint8_t ep = payload[0];
                 LOG_DEBUG("start interrupt receiving on ep 0x%02x", ep);
                 int_ep_active[usb_ep_index(ep)] = true;
-                push_interrupt_reports(sock, dev, ep);
+                push_interrupt_reports(sock, dev, ep, &ctx);
             }
             break;
 
@@ -336,7 +391,7 @@ int usb_core_run(int sock, usb_device_t *dev)
             if (int_ep_active[i]) {
                 /* Reverse of usb_ep_index: reconstruct bEndpointAddress */
                 uint8_t ep = (i & 0x0f) | ((i & 0x10) << 3);
-                push_interrupt_reports(sock, dev, ep);
+                push_interrupt_reports(sock, dev, ep, &ctx);
             }
         }
     }

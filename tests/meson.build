@@ -68,6 +68,8 @@ if check_dep.found()
       '../src/lib/codec.c',
       '../src/lib/flow.c',
       '../src/lib/log.c',
+      '../src/lib/pcap/pcap.c',
+      '../src/lib/pcap/record.c',
       '../src/lib/schema.c',
       '../src/lib/yaml/loader.c',
       '../src/lib/yaml/tree.c',
@@ -91,9 +93,11 @@ if check_dep.found()
       '../src/core/transport.c',
       '../src/core/descriptor.c',
       '../src/lib/log.c',
+      '../src/lib/pcap/pcap.c',
+      '../src/lib/pcap/record.c',
     ),
     include_directories : [lib, core],
-    dependencies : [check_dep, dependency('threads')],
+    dependencies : [check_dep, glib_dep, dependency('threads')],
   )
   test('usb_core', test_usb_core)
 

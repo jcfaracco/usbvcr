@@ -14,6 +14,7 @@
 #include "protocol.h"
 #include "bytes.h"
 #include "log.h"
+#include "pcap/record.h"
 
 /* On-wire frame header field offsets. id is 4 or 8 bytes (see g_id64), giving
  * a 12- or 16-byte header. */
@@ -122,7 +123,8 @@ static size_t hdr_wire_size(void)
 }
 
 int usb_conn_send(int sock, uint32_t type, int64_t id,
-                  const void *payload, size_t len)
+                  const void *payload, size_t len,
+                  const usb_record_ctx_t *ctx)
 {
     uint8_t frame[USB_VCR_BUF_SIZE];
     size_t hs = hdr_wire_size();
@@ -147,11 +149,14 @@ int usb_conn_send(int sock, uint32_t type, int64_t id,
         LOG_ERR("Error type: %s", strerror(errno));
         return -1;
     }
+    if (ctx)
+        record_conn_send(type, id, payload, len, ctx);
     return 0;
 }
 
 int usb_conn_recv(int sock, usb_header_t *hdr,
-                  uint8_t *buf, size_t cap, size_t *payload_len)
+                  uint8_t *buf, size_t cap, size_t *payload_len,
+                  const usb_record_ctx_t *ctx)
 {
     uint8_t hbuf[HDR_SIZE_ID64];
     size_t hs = hdr_wire_size();
@@ -177,5 +182,7 @@ int usb_conn_recv(int sock, usb_header_t *hdr,
         return -1;
 
     *payload_len = hdr->length;
+    if (ctx)
+        record_conn_recv(hdr, buf, hdr->length, ctx);
     return 0;
 }

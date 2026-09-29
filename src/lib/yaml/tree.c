@@ -126,6 +126,50 @@ static gboolean build_codec_block(yaml_document_t *doc, yaml_node_t *map,
     return TRUE;
 }
 
+/* Handle a raw byte block:
+ *   bos_descriptor:
+ *     hex: "050f16000207100202000000 0a1003000e00010aff00"
+ * Emit the decoded bytes verbatim as one USB_PROP_ARRAY under `key`. This is
+ * the escape hatch (README §3.2) for descriptors whose field widths don't
+ * follow the name-prefix convention (e.g. BOS device-capability bmAttributes is
+ * 4 bytes). Whitespace between bytes is ignored. Returns TRUE if `map` was a
+ * hex block (FALSE if it has no `hex:` field, so the caller falls back to the
+ * generic subtree builder). */
+static gboolean build_raw_block(yaml_document_t *doc, yaml_node_t *map,
+                                usb_node_t *out, const char *key)
+{
+    const char *hex = yaml_scalar(yaml_map_get(doc, map, "hex"));
+    if (!hex)
+        return FALSE;   /* not a raw block */
+
+    GByteArray *bytes = g_byte_array_new();
+    int hi = -1;
+    for (const char *p = hex; *p; p++) {
+        if (g_ascii_isspace(*p))
+            continue;
+        if (!g_ascii_isxdigit(*p)) {
+            LOG_WARN("yaml_tree: non-hex char in '%s' hex block", key);
+            continue;
+        }
+        int nib = g_ascii_xdigit_value(*p);
+        if (hi < 0) {
+            hi = nib;
+        } else {
+            guint8 b = (guint8) ((hi << 4) | nib);
+            g_byte_array_append(bytes, &b, 1);
+            hi = -1;
+        }
+    }
+    if (hi >= 0)
+        LOG_WARN("yaml_tree: '%s' hex block has odd digit count", key);
+
+    if (bytes->len > 0)
+        usb_node_set_prop(out, create_prop_array(key, bytes->data, bytes->len));
+
+    g_byte_array_free(bytes, TRUE);
+    return TRUE;
+}
+
 /* ── Recursive tree builder (libyaml document API) ────────────────────── */
 static void build_map(yaml_document_t *doc, yaml_node_t *map,
                       schema_t *schemas, GHashTable *codecs,
@@ -193,8 +237,10 @@ static void build_value(yaml_document_t *doc, const char *key,
         break;
 
     case YAML_MAPPING_NODE: {
-        /* A `codec:`-tagged block encodes to a single byte array, not a
-         * subtree of per-item nodes. */
+        /* A `hex:` block is raw bytes; a `codec:`-tagged block encodes to a
+         * single byte array. Either becomes one leaf, not a subtree. */
+        if (build_raw_block(doc, v, out, key))
+            break;
         if (build_codec_block(doc, v, codecs, out, key))
             break;
 

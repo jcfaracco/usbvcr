@@ -19,16 +19,25 @@ int connect_to_server(const char *host, const char *port);
  * -1 on error/EOF. */
 int recv_all(int sock, uint8_t *buf, size_t len);
 
+/* Minimal device context forwarded to recording helpers. */
+typedef struct {
+    uint8_t bus;
+    uint8_t device;
+} usb_record_ctx_t;
+
 /* Send one usb frame: header (12 or 16 bytes) + payload. Returns 0,
- * or -1. */
+ * or -1. If ctx is non-NULL, records the outbound transfer. */
 int usb_conn_send(int sock, uint32_t type, int64_t id,
-                   const void *payload, size_t len);
+                  const void *payload, size_t len,
+                  const usb_record_ctx_t *ctx);
 
 /* Receive one usb frame. Fills `hdr`, copies the payload into `buf`
  * (capacity `cap`) and stores its length in `*payload_len`.
  * Returns 0 on a frame; 1 on an idle timeout (no frame, keep waiting);
- * -1 on error/EOF/oversized payload. */
+ * -1 on error/EOF/oversized payload. If ctx is non-NULL, records
+ * the inbound transfer. */
 int usb_conn_recv(int sock, usb_header_t *hdr,
-                   uint8_t *buf, size_t cap, size_t *payload_len);
+                  uint8_t *buf, size_t cap, size_t *payload_len,
+                  const usb_record_ctx_t *ctx);
 
 #endif /* TRANSPORT_H */

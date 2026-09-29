@@ -111,12 +111,15 @@ static void pcap_init_usbmon_header(usbmon_header_t *usb_hdr,
     uint8_t final_ep = p->endpoint & 0x0F; 
     if (p->dir == PCAP_DIR_IN) {
         final_ep |= 0x80;
-        usb_hdr->type = 'C'; /* Callback */
-    } else {
-        usb_hdr->type = 'S'; /* Submit */
     }
 
-    usb_hdr->id        = (uint64_t)(uintptr_t)p;
+    if (p->event_type == 'S' || p->event_type == 'C' || p->event_type == 'E') {
+        usb_hdr->type = (unsigned char)p->event_type;
+    } else {
+        usb_hdr->type = (p->dir == PCAP_DIR_IN) ? 'C' : 'S';
+    }
+
+    usb_hdr->id        = p->urb_id ? p->urb_id : (uint64_t)(uintptr_t)p;
     usb_hdr->xfer_type = (unsigned char)p->xfer;
     usb_hdr->epnum     = final_ep;
     usb_hdr->devnum    = p->device;
@@ -130,6 +133,11 @@ static void pcap_init_usbmon_header(usbmon_header_t *usb_hdr,
     if (p->xfer == PCAP_XFER_CONTROL && p->setup_valid) {
         usb_hdr->flag_setup = '-';
         memcpy(usb_hdr->s.setup, p->setup, 8);
+        if (usb_hdr->type == 'S') {
+            uint16_t wLength = (uint16_t)p->setup[6] | ((uint16_t)p->setup[7] << 8);
+            if (wLength > usb_hdr->length)
+                usb_hdr->length = wLength;
+        }
     } else {
         usb_hdr->flag_setup = 0;
     }

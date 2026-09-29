@@ -141,6 +141,7 @@ typedef struct {
     int fds[2];             /* fds[0] = peer (test), fds[1] = engine */
     fake_state state;
     usb_device_t dev;
+    usb_record_ctx_t ctx;
     pthread_t thread;
 } harness;
 
@@ -158,6 +159,8 @@ static void harness_start(harness *h)
     h->state.set_config_value = -1;
     h->dev.ops = &FAKE_OPS;
     h->dev.state = &h->state;
+    h->ctx.bus = 0;
+    h->ctx.device = 1;
 
     ck_assert_int_eq(socketpair(AF_UNIX, SOCK_STREAM, 0, h->fds), 0);
 
@@ -184,7 +187,7 @@ static void harness_stop(harness *h)
 static int peer_recv(harness *h, usb_header_t *hdr, uint8_t *buf, size_t *len)
 {
     int r;
-    while ((r = usb_conn_recv(h->fds[0], hdr, buf, USB_VCR_BUF_SIZE, len)) == 1)
+    while ((r = usb_conn_recv(h->fds[0], hdr, buf, USB_VCR_BUF_SIZE, len, &h->ctx)) == 1)
         ;
     return r;
 }
@@ -202,7 +205,7 @@ static void peer_handshake(harness *h, usb_device_connect_header_t *connect_out)
     usb_hello_header_t hello;
     memset(&hello, 0, sizeof(hello));
     strncpy(hello.version, "test-peer", sizeof(hello.version) - 1);
-    ck_assert_int_eq(usb_conn_send(h->fds[0], RT_HELLO, 0, &hello, sizeof(hello)), 0);
+    ck_assert_int_eq(usb_conn_send(h->fds[0], RT_HELLO, 0, &hello, sizeof(hello), &h->ctx), 0);
 
     ck_assert_int_eq(peer_recv(h, &hdr, buf, &len), 0);
     ck_assert_uint_eq(hdr.type, RT_HELLO);
@@ -224,7 +227,7 @@ static void peer_send_control(harness *h, int64_t id,
                               const usb_control_packet_header_t *setup)
 {
     ck_assert_int_eq(usb_conn_send(h->fds[0], RT_CONTROL_PACKET, id,
-                                   setup, sizeof(*setup)), 0);
+                                   setup, sizeof(*setup), &h->ctx), 0);
 }
 
 /* ------------------------------------------------------------------ *
@@ -353,7 +356,7 @@ START_TEST(test_control_too_short)
     peer_handshake(&h, NULL);
 
     uint8_t stub[3] = { 1, 2, 3 };
-    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_CONTROL_PACKET, 1, stub, sizeof(stub)), 0);
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_CONTROL_PACKET, 1, stub, sizeof(stub), &h.ctx), 0);
 
     usb_control_packet_header_t setup;
     memset(&setup, 0, sizeof(setup));
@@ -383,7 +386,7 @@ START_TEST(test_set_configuration)
     peer_handshake(&h, NULL);
 
     uint8_t cfg = 1;
-    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_SET_CONFIGURATION, 3, &cfg, 1), 0);
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_SET_CONFIGURATION, 3, &cfg, 1, &h.ctx), 0);
 
     usb_header_t hdr;
     uint8_t buf[USB_VCR_BUF_SIZE];
@@ -414,7 +417,7 @@ START_TEST(test_interrupt_in)
     peer_handshake(&h, NULL);
 
     uint8_t ep = 0x81;
-    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_START_INTERRUPT_RECEIVING, 0, &ep, 1), 0);
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_START_INTERRUPT_RECEIVING, 0, &ep, 1, &h.ctx), 0);
 
     usb_header_t hdr;
     uint8_t buf[USB_VCR_BUF_SIZE];
@@ -443,7 +446,7 @@ START_TEST(test_interrupt_out)
     usb_interrupt_packet_header_t ih = { 0x01, 0, 3 };
     memcpy(frame, &ih, sizeof(ih));
     memcpy(frame + sizeof(ih), "XYZ", 3);
-    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_INTERRUPT_PACKET, 0, frame, sizeof(frame)), 0);
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_INTERRUPT_PACKET, 0, frame, sizeof(frame), &h.ctx), 0);
 
     harness_stop(&h);                      /* join flushes the OUT into ep_out */
 

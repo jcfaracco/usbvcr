@@ -14,20 +14,6 @@
 
 #define HELLO_VERSION "usb_vcr_hello " USB_VCR_VERSION
 
-/* Minimal device context forwarded to recording helpers. */
-typedef struct {
-    uint8_t bus;
-    uint8_t device;
-} usb_record_ctx_t;
-
-/* Current wall-clock time in microseconds. */
-static uint64_t ts_usec(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec / 1000ULL;
-}
-
 /* Read a byte / little-endian u16 descriptor field at a named offset. */
 #define DESC_U8(desc, off)  ((desc)[(off)])
 #define DESC_U16(desc, off) get_u16le((desc) + (off))
@@ -36,7 +22,7 @@ static uint64_t ts_usec(void)
  * Handshake / announcement                                            *
  * ------------------------------------------------------------------ */
 
-static int send_hello(int sock)
+static int send_hello(int sock, const usb_record_ctx_t *ctx)
 {
     usb_hello_header_t h;
     memset(&h, 0, sizeof(h));
@@ -44,12 +30,13 @@ static int send_hello(int sock)
 
     h.capabilities[0] = USB_VCR_OUR_CAPS;
 
-    return usb_conn_send(sock, RT_HELLO, 0, &h, sizeof(h));
+    return usb_conn_send(sock, RT_HELLO, 0, &h, sizeof(h), ctx);
 }
 
 /* Derive interface_info + ep_info from the device's config descriptor and
  * announce the device to the peer. */
-static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
+static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
+                           const usb_record_ctx_t *ctx)
 {
     const uint8_t *dd, *cd;
     uint16_t ddlen, cdlen;
@@ -59,6 +46,9 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
         LOG_ERR("backend missing device/config descriptor");
         return -1;
     }
+
+    if (ctx)
+        record_device_announce(dd, ddlen, cd, cdlen, ctx);
 
     usb_interface_info_header_t ii;
     usb_ep_info_header_t ei;
@@ -88,8 +78,8 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
 
     LOG_DEBUG("announce: negotiated caps=0x%08x ep_info=%zu bytes", caps, eilen);
 
-    if (usb_conn_send(sock, RT_INTERFACE_INFO, 0, &ii, sizeof(ii)) < 0 ||
-        usb_conn_send(sock, RT_EP_INFO, 0, &ei, eilen) < 0)
+    if (usb_conn_send(sock, RT_INTERFACE_INFO, 0, &ii, sizeof(ii), ctx) < 0 ||
+        usb_conn_send(sock, RT_EP_INFO, 0, &ei, eilen, ctx) < 0)
         return -1;
 
     /* Pull the connect fields from the device descriptor by named offset. */
@@ -114,7 +104,7 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps)
     if (caps & (1u << USB_VCR_CAP_CONNECT_DEVICE_VERSION))
         clen = sizeof(usb_device_connect_header_t);
 
-    return usb_conn_send(sock, RT_DEVICE_CONNECT, 0, &c, clen);
+    return usb_conn_send(sock, RT_DEVICE_CONNECT, 0, &c, clen, ctx);
 }
 
 /* ------------------------------------------------------------------ *
@@ -135,25 +125,7 @@ static int reply_control(int sock, int64_t id,
     if (data && n)
         memcpy(buf + sizeof(h), data, n);
 
-    int rc = usb_conn_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n);
-
-    if (rc == 0 && ctx) {
-        pcap_packet_t pkt = {
-            .ts_usec    = ts_usec(),
-            .bus        = ctx->bus,
-            .device     = ctx->device,
-            .endpoint   = setup->endpoint,
-            .dir        = (setup->requesttype & USB_DIR_IN) ? PCAP_DIR_IN : PCAP_DIR_OUT,
-            .xfer       = PCAP_XFER_CONTROL,
-            .setup_valid = 1,
-            .data       = data,
-            .data_len   = n,
-        };
-        memcpy(pkt.setup, setup, sizeof(pkt.setup));
-        record_add(&pkt);
-    }
-
-    return rc;
+    return usb_conn_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n, ctx);
 }
 
 static void handle_control(int sock, usb_device_t *dev, int64_t id,
@@ -232,23 +204,9 @@ static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep,
         memcpy(buf, &h, sizeof(h));
         memcpy(buf + sizeof(h), data, (size_t)n);
 
-        if (usb_conn_send(sock, RT_INTERRUPT_PACKET, 0, buf, sizeof(h) + n) < 0)
+        if (usb_conn_send(sock, RT_INTERRUPT_PACKET, 0, buf, sizeof(h) + n, ctx) < 0)
             break;
         LOG_OUT("interrupt report on ep 0x%02x (%d bytes)", ep, n);
-
-        if (ctx) {
-            pcap_packet_t pkt = {
-                .ts_usec  = ts_usec(),
-                .bus      = ctx->bus,
-                .device   = ctx->device,
-                .endpoint = ep,
-                .dir      = PCAP_DIR_IN,
-                .xfer     = PCAP_XFER_INT,
-                .data     = data,
-                .data_len = (size_t)n,
-            };
-            record_add(&pkt);
-        }
     }
 }
 
@@ -262,9 +220,13 @@ int usb_core_run(int sock, usb_device_t *dev)
     uint8_t payload[USB_VCR_BUF_SIZE];
     size_t len;
 
+    /* Build recording context. bus=0 and device=1 are reasonable defaults for
+     * an emulated device; the USB device descriptor carries no bus/devnum. */
+    usb_record_ctx_t ctx = { .bus = 0, .device = 1 };
+
     /* 1. Handshake: peer hello, then ours. Ignore idle timeouts. */
     int r;
-    while ((r = usb_conn_recv(sock, &hdr, payload, sizeof(payload), &len)) == 1)
+    while ((r = usb_conn_recv(sock, &hdr, payload, sizeof(payload), &len, &ctx)) == 1)
         ;
     if (r < 0)
         return -1;
@@ -282,7 +244,7 @@ int usb_core_run(int sock, usb_device_t *dev)
     }
     uint32_t caps = USB_VCR_OUR_CAPS & peer_caps;
 
-    if (send_hello(sock) < 0)
+    if (send_hello(sock, &ctx) < 0)
         return -1;
 
     /* From here on the header id width follows the negotiated cap. The hello
@@ -291,12 +253,8 @@ int usb_core_run(int sock, usb_device_t *dev)
     transport_set_id64(caps & (1u << USB_VCR_CAP_64BITS_IDS));
 
     /* 2. Announce the emulated device using the negotiated capabilities. */
-    if (announce_device(sock, dev, caps) < 0)
+    if (announce_device(sock, dev, caps, &ctx) < 0)
         return -1;
-
-    /* Build recording context. bus=0 and device=1 are reasonable defaults for
-     * an emulated device; the USB device descriptor carries no bus/devnum. */
-    usb_record_ctx_t ctx = { .bus = 0, .device = 1 };
 
     bool int_ep_active[32] = {false};
 
@@ -304,7 +262,7 @@ int usb_core_run(int sock, usb_device_t *dev)
      * turns an idle wait into a periodic tick, so streaming backends make
      * progress even when no request is pending. */
     for (;;) {
-        int rc = usb_conn_recv(sock, &hdr, payload, sizeof(payload), &len);
+        int rc = usb_conn_recv(sock, &hdr, payload, sizeof(payload), &len, &ctx);
         if (rc < 0)
             break;              /* EOF / hard error: peer gone */
         if (rc == 1) {          /* idle: no request pending */
@@ -348,7 +306,7 @@ int usb_core_run(int sock, usb_device_t *dev)
             }
 
             uint8_t status[2] = { 0 /* success */, cfg };
-            usb_conn_send(sock, RT_CONFIGURATION_STATUS, hdr.id, status, sizeof(status));
+            usb_conn_send(sock, RT_CONFIGURATION_STATUS, hdr.id, status, sizeof(status), &ctx);
             break;
         }
 

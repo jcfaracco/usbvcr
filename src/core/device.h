@@ -40,10 +40,10 @@ typedef struct {
 
     /* Optional: periodic hook for streaming producers. May be NULL. */
     void (*tick)(usb_device_t *dev);
-} usb_device_ops;
+} usb_device_ops_t;
 
 struct usb_device {
-    const usb_device_ops *ops;
+    const usb_device_ops_t *ops;
     void *state;   /* backend-private */
 };
 

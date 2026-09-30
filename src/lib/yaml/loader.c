@@ -28,11 +28,11 @@
 typedef struct {
     const char *name;
     yaml_scope_t scope;
-} scope_entry;
+} yaml_scope_entry_t;
 
 /* Directory name -> scope. The directory is authoritative; the scope is
  * never stated in-file. */
-static const scope_entry scope_by_dir[] = {
+static const yaml_scope_entry_t scope_by_dir[] = {
     { "schemas", YAML_SCOPE_SCHEMAS },
     { "codecs",  YAML_SCOPE_CODECS  },
     { "devices", YAML_SCOPE_DEVICES },

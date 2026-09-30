@@ -84,7 +84,7 @@ static void fw_tick(usb_device_t *dev)
         fs->base->ops->tick(fs->base);
 }
 
-static const usb_device_ops fuzz_ops = {
+static const usb_device_ops_t fuzz_ops = {
     .name           = "fuzz",
     .get_descriptor = fw_get_descriptor,
     .control        = fw_control,

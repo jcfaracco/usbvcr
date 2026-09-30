@@ -21,7 +21,8 @@ Unless specified otherwise by the user, enforce the **GNOME Coding Style**:
 * **Indentation:** 4 spaces (no physical tabs).
 * **Braces:** Opening brace on a new line for functions, control statements (`if`, `while`, `for`), and switches.
 * **Naming:** `snake_case` for functions and variables; `UPPER_CASE` for macros; `typedef` always ends with `_t` (i.e. typedef struct usb_node usb_node_t).
-* **Functions:** Try to keep them simple enough. Use less lines of code you can for each function.
+* **Functions:** Try to keep them simple enough. Use less lines of code you can for each function (for complex functions, 10-30 lines are still acceptable, 50 lines are not acceptable).
+* **Variables:** Always define the variables in the header of the functions. Exceptions: a variable used only inside a `for`/`while` loop.
 * **Object-Orientation:** We are programming in C, but let's try to keep some standard of developing a object-oriented style here with `_ops` when possible.
 
 ## 3. Output Format

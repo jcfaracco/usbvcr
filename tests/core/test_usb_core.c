@@ -124,7 +124,7 @@ static void fake_tick(usb_device_t *dev)
     ((fake_state *)dev->state)->tick_calls++;
 }
 
-static const usb_device_ops FAKE_OPS = {
+static const usb_device_ops_t FAKE_OPS = {
     .name           = "fake",
     .get_descriptor = fake_get_descriptor,
     .control        = fake_control,

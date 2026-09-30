@@ -61,7 +61,7 @@ static void pb_tick(usb_device_t *dev)
     /* TODO: advance replay cursor per capture timing. */
 }
 
-static const usb_device_ops pcap_ops = {
+static const usb_device_ops_t pcap_ops = {
     .name           = "pcap",
     .get_descriptor = pb_get_descriptor,
     .control        = pb_control,

@@ -21,7 +21,7 @@ yaml_versions_enum_t match_version(const char *ver) {
     while (yaml_versions[i].version != YAML_VERSION_INVALID) {
         if (!cmp_versions(ver, yaml_versions[i].str))
             return yaml_versions[i].version;
-	i++;
+        i++;
     }
 
     return YAML_VERSION_INVALID;

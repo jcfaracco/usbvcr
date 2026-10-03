@@ -167,6 +167,28 @@ static GByteArray* parse_hex_string(const char *hex_str) {
     return arr;
 }
 
+static flow_action_t* parse_queue_endpoint_data(yaml_document_t *doc, yaml_node_t *v) {
+    flow_action_t *a = g_new0(flow_action_t, 1);
+    a->type = ACT_QUEUE_ENDPOINT_DATA;
+    a->payloads = g_queue_new();
+
+    yaml_node_t *ep_n = yaml_map_get(doc, v, "endpoint");
+    if (ep_n) a->ep = parse_int(yaml_scalar(ep_n));
+
+    yaml_node_t *pay_n = yaml_map_get(doc, v, "payloads");
+    if (pay_n && pay_n->type == YAML_SEQUENCE_NODE) {
+        for (yaml_node_item_t *pi = pay_n->data.sequence.items.start; pi < pay_n->data.sequence.items.top; pi++) {
+            yaml_node_t *pitem = yaml_document_get_node(doc, *pi);
+            if (pitem && pitem->type == YAML_MAPPING_NODE) {
+                yaml_node_t *hex_n = yaml_map_get(doc, pitem, "hex");
+                if (hex_n)
+                    g_queue_push_tail(a->payloads, parse_hex_string(yaml_scalar(hex_n)));
+            }
+        }
+    }
+    return a;
+}
+
 static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq) {
     GList *list = NULL;
     if (!seq || seq->type != YAML_SEQUENCE_NODE) return NULL;
@@ -174,48 +196,31 @@ static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq) {
     for (yaml_node_item_t *i = seq->data.sequence.items.start; i < seq->data.sequence.items.top; i++) {
         yaml_node_t *item = yaml_document_get_node(doc, *i);
         if (!item || item->type != YAML_MAPPING_NODE) continue;
-        
+
         yaml_node_t *v;
+        flow_action_t *a = NULL;
         if ((v = yaml_map_get(doc, item, "respond_with"))) {
-            flow_action_t *a = g_new0(flow_action_t, 1);
+            a = g_new0(flow_action_t, 1);
             a->type = ACT_RESPOND_WITH;
             a->respond_with = g_strdup(yaml_scalar(v));
-            list = g_list_append(list, a);
         } else if ((v = yaml_map_get(doc, item, "respond_with_status"))) {
-            flow_action_t *a = g_new0(flow_action_t, 1);
+            a = g_new0(flow_action_t, 1);
             a->type = ACT_RESPOND_WITH_STATUS;
             a->respond_with_status = parse_int(yaml_scalar(v));
-            list = g_list_append(list, a);
         } else if ((v = yaml_map_get(doc, item, "transition_state"))) {
-            flow_action_t *a = g_new0(flow_action_t, 1);
+            a = g_new0(flow_action_t, 1);
             a->type = ACT_TRANSITION_STATE;
             a->transition_state = g_strdup(yaml_scalar(v));
-            list = g_list_append(list, a);
         } else if ((v = yaml_map_get(doc, item, "return_nak_if_queue_empty"))) {
-            flow_action_t *a = g_new0(flow_action_t, 1);
+            a = g_new0(flow_action_t, 1);
             a->type = ACT_RETURN_NAK_IF_QUEUE_EMPTY;
             a->return_nak_if_queue_empty = (g_strcmp0(yaml_scalar(v), "true") == 0);
-            list = g_list_append(list, a);
         } else if ((v = yaml_map_get(doc, item, "queue_endpoint_data"))) {
-            flow_action_t *a = g_new0(flow_action_t, 1);
-            a->type = ACT_QUEUE_ENDPOINT_DATA;
-            a->payloads = g_queue_new();
-            yaml_node_t *ep_n = yaml_map_get(doc, v, "endpoint");
-            if (ep_n) a->ep = parse_int(yaml_scalar(ep_n));
-            yaml_node_t *pay_n = yaml_map_get(doc, v, "payloads");
-            if (pay_n && pay_n->type == YAML_SEQUENCE_NODE) {
-                for (yaml_node_item_t *pi = pay_n->data.sequence.items.start; pi < pay_n->data.sequence.items.top; pi++) {
-                    yaml_node_t *pitem = yaml_document_get_node(doc, *pi);
-                    if (pitem && pitem->type == YAML_MAPPING_NODE) {
-                        yaml_node_t *hex_n = yaml_map_get(doc, pitem, "hex");
-                        if (hex_n) {
-                            g_queue_push_tail(a->payloads, parse_hex_string(yaml_scalar(hex_n)));
-                        }
-                    }
-                }
-            }
-            list = g_list_append(list, a);
+            a = parse_queue_endpoint_data(doc, v);
         }
+
+        if (a)
+            list = g_list_append(list, a);
     }
     return list;
 }

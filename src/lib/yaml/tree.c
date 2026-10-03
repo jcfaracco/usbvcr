@@ -301,6 +301,41 @@ static void build_map(yaml_document_t *doc, yaml_node_t *map,
     }
 }
 
+/* Reject oversized input before handing it to libyaml (bounds memory even
+ * for alias-expanded documents). */
+static gboolean yaml_file_size_ok(FILE *fp, const char *path)
+{
+    if (fseek(fp, 0, SEEK_END) != 0)
+        return TRUE;
+
+    long sz = ftell(fp);
+    if (sz > (long) YAML_MAX_FILE_BYTES) {
+        LOG_ERR("yaml_tree: '%s' is %ld bytes, over %u limit",
+                path, sz, YAML_MAX_FILE_BYTES);
+        return FALSE;
+    }
+    rewind(fp);
+    return TRUE;
+}
+
+/* Initialize a libyaml parser over fp and load its single document. */
+static gboolean yaml_parse_document(FILE *fp, yaml_parser_t *parser, yaml_document_t *doc)
+{
+    if (!yaml_parser_initialize(parser))
+        return FALSE;
+    yaml_parser_set_input_file(parser, fp);
+
+    if (!yaml_parser_load(parser, doc)) {
+        LOG_ERR("YAML error(%lu, %lu): %s",
+                (unsigned long) parser->problem_mark.line + 1,
+                (unsigned long) parser->problem_mark.column + 1,
+                parser->problem);
+        yaml_parser_delete(parser);
+        return FALSE;
+    }
+    return TRUE;
+}
+
 usb_node_t *yaml_tree_load(const char *path, schema_t *schemas,
                            GHashTable *codecs, char **ns_out)
 {
@@ -310,33 +345,14 @@ usb_node_t *yaml_tree_load(const char *path, schema_t *schemas,
         return NULL;
     }
 
-    /* Reject oversized input before handing it to libyaml (bounds memory even
-     * for alias-expanded documents). */
-    if (fseek(fp, 0, SEEK_END) == 0) {
-        long sz = ftell(fp);
-        if (sz > (long) YAML_MAX_FILE_BYTES) {
-            LOG_ERR("yaml_tree: '%s' is %ld bytes, over %u limit",
-                    path, sz, YAML_MAX_FILE_BYTES);
-            fclose(fp);
-            return NULL;
-        }
-        rewind(fp);
-    }
-
-    yaml_parser_t parser;
-    if (!yaml_parser_initialize(&parser)) {
+    if (!yaml_file_size_ok(fp, path)) {
         fclose(fp);
         return NULL;
     }
-    yaml_parser_set_input_file(&parser, fp);
 
+    yaml_parser_t parser;
     yaml_document_t doc;
-    if (!yaml_parser_load(&parser, &doc)) {
-        LOG_ERR("YAML error(%lu, %lu): %s",
-                (unsigned long) parser.problem_mark.line + 1,
-                (unsigned long) parser.problem_mark.column + 1,
-                parser.problem);
-        yaml_parser_delete(&parser);
+    if (!yaml_parse_document(fp, &parser, &doc)) {
         fclose(fp);
         return NULL;
     }

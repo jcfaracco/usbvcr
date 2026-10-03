@@ -149,6 +149,30 @@ static int reply_control(int sock, int64_t id,
     return usb_conn_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n, ctx);
 }
 
+/* Fallback: standard GET_DESCRIPTOR served straight from the descriptor
+ * table, for backends that declare no flow rule for it. */
+static void handle_get_descriptor_fallback(int sock, usb_device_t *dev, int64_t id,
+                                           const usb_control_packet_header_t *setup,
+                                           const usb_record_ctx_t *ctx)
+{
+    uint8_t  dtype = (uint8_t)(setup->value >> 8);
+    uint8_t  dindex = (uint8_t)(setup->value & 0xff);
+    const uint8_t *desc;
+    uint16_t dlen;
+
+    if (dev->ops->get_descriptor(dev, dtype, dindex, setup->index,
+                                 &desc, &dlen) < 0) {
+        LOG_DEBUG("stall: no descriptor type=0x%02x index=%u", dtype, dindex);
+        reply_control(sock, id, setup, 1, NULL, 0, ctx);  /* stall */
+        return;
+    }
+
+    uint16_t n = dlen < setup->length ? dlen : setup->length;
+    LOG_DEBUG("GET_DESCRIPTOR type=0x%02x index=%u -> %u bytes",
+              dtype, dindex, n);
+    reply_control(sock, id, setup, 0, desc, n, ctx);
+}
+
 static void handle_control(int sock, usb_device_t *dev, int64_t id,
                            const uint8_t *payload, size_t len,
                            const usb_record_ctx_t *ctx)
@@ -175,26 +199,9 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
         }
     }
 
-    /* Fallback: standard GET_DESCRIPTOR served straight from the descriptor
-     * table, for backends that declare no flow rule for it. */
     if (setup.requesttype == USB_DIR_IN &&
         setup.request == USB_REQ_GET_DESCRIPTOR) {
-        uint8_t  dtype = (uint8_t)(setup.value >> 8);
-        uint8_t  dindex = (uint8_t)(setup.value & 0xff);
-        const uint8_t *desc;
-        uint16_t dlen;
-
-        if (dev->ops->get_descriptor(dev, dtype, dindex, setup.index,
-                                     &desc, &dlen) < 0) {
-            LOG_DEBUG("stall: no descriptor type=0x%02x index=%u", dtype, dindex);
-            reply_control(sock, id, &setup, 1, NULL, 0, ctx);  /* stall */
-            return;
-        }
-
-        uint16_t n = dlen < setup.length ? dlen : setup.length;
-        LOG_DEBUG("GET_DESCRIPTOR type=0x%02x index=%u -> %u bytes",
-                  dtype, dindex, n);
-        reply_control(sock, id, &setup, 0, desc, n, ctx);
+        handle_get_descriptor_fallback(sock, dev, id, &setup, ctx);
         return;
     }
 

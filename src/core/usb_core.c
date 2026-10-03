@@ -337,6 +337,29 @@ int usb_core_run(int sock, usb_device_t *dev)
             break;
         }
 
+        case RT_SET_ALT_SETTING: {
+            /* usb_set_interface() always sends this on the wire, even for an
+             * interface with a single altsetting (USB 2.0 9.4.10 only lets
+             * the *device* skip replying with STALL in that case -- it does
+             * not let the host skip asking). Every interface we serve has
+             * exactly one altsetting, so there is nothing to actually
+             * switch: just echo back success. */
+            usb_set_alt_setting_header_t req;
+            memset(&req, 0, sizeof(req));
+            if (len >= sizeof(req))
+                memcpy(&req, payload, sizeof(req));
+            LOG_DEBUG("set alt setting iface=%u alt=%u", req.interface, req.alt);
+
+            usb_alt_setting_status_header_t rstatus = {
+                .status    = 0,
+                .interface = req.interface,
+                .alt       = req.alt,
+            };
+            usb_conn_send(sock, RT_ALT_SETTING_STATUS, hdr.id,
+                         (uint8_t *)&rstatus, sizeof(rstatus), &ctx);
+            break;
+        }
+
         case RT_START_INTERRUPT_RECEIVING:
             if (len >= 1) {
                 uint8_t ep = payload[0];

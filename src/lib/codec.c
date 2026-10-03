@@ -255,38 +255,44 @@ static int auto_bytes_s(gint64 v)
     return 4;
 }
 
+/* Comma-list of flags OR-folded via the named flagset. */
+static gboolean resolve_flagset_value(codec_t *codec, const codec_token_t *tok,
+                                      const char *key, const char *val,
+                                      guint64 *uv, gint64 *sv)
+{
+    GHashTable *fs = g_hash_table_lookup(codec->flagsets, tok->flagset);
+    if (!fs) {
+        LOG_ERR("codec: token '%s' names unknown flagset '%s'",
+                key, tok->flagset);
+        return FALSE;
+    }
+    guint64 v = 0;
+    gchar **parts = g_strsplit(val, ",", -1);
+    for (gchar **p = parts; *p; p++) {
+        gchar *f = g_strstrip(*p);
+        if (*f == '\0')
+            continue;
+        if (!g_hash_table_contains(fs, f)) {
+            LOG_ERR("codec: unknown flag '%s' for token '%s'", f, key);
+            g_strfreev(parts);
+            return FALSE;
+        }
+        v |= GPOINTER_TO_UINT(g_hash_table_lookup(fs, f));
+    }
+    g_strfreev(parts);
+    *uv = v;
+    *sv = (gint64) v;
+    return TRUE;
+}
+
 /* Resolve one item's value to a raw magnitude. Sets *uv (bytes emitted from
  * this) and *sv (signed view, for auto-width). Returns FALSE on hard error. */
 static gboolean resolve_value(codec_t *codec, const codec_token_t *tok,
                               const char *key, const char *val,
                               guint64 *uv, gint64 *sv)
 {
-    /* Comma-list of flags OR-folded via the named flagset. */
-    if (tok->flagset) {
-        GHashTable *fs = g_hash_table_lookup(codec->flagsets, tok->flagset);
-        if (!fs) {
-            LOG_ERR("codec: token '%s' names unknown flagset '%s'",
-                    key, tok->flagset);
-            return FALSE;
-        }
-        guint64 v = 0;
-        gchar **parts = g_strsplit(val, ",", -1);
-        for (gchar **p = parts; *p; p++) {
-            gchar *f = g_strstrip(*p);
-            if (*f == '\0')
-                continue;
-            if (!g_hash_table_contains(fs, f)) {
-                LOG_ERR("codec: unknown flag '%s' for token '%s'", f, key);
-                g_strfreev(parts);
-                return FALSE;
-            }
-            v |= GPOINTER_TO_UINT(g_hash_table_lookup(fs, f));
-        }
-        g_strfreev(parts);
-        *uv = v;
-        *sv = (gint64) v;
-        return TRUE;
-    }
+    if (tok->flagset)
+        return resolve_flagset_value(codec, tok, key, val, uv, sv);
 
     /* Plain integer (numeric fallback always allowed, README §6.4). */
     char *end = NULL;

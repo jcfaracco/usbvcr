@@ -174,6 +174,10 @@ static gboolean build_raw_block(yaml_document_t *doc, yaml_node_t *map,
 static void build_map(yaml_document_t *doc, yaml_node_t *map,
                       schema_t *schemas, GHashTable *codecs,
                       usb_node_t *out, char **ns, int depth);
+static void build_value(yaml_document_t *doc, const char *key,
+                        yaml_node_t *v, schema_t *schemas,
+                        GHashTable *codecs, usb_node_t *out, char **ns,
+                        int depth);
 
 /* Attach a scalar `key: val` onto `out`, choosing the property kind from the
  * value (namespace / template-ref / null / integer / ignored string). */
@@ -219,6 +223,55 @@ static void build_scalar(schema_t *schemas, usb_node_t *out,
 
 /* Fold the value node of `key` into `out`. `depth` guards against a
  * maliciously deep document exhausting the C stack. */
+/* A `hex:` block is raw bytes; a `codec:`-tagged block encodes to a single
+ * byte array. Either becomes one leaf, not a subtree. Otherwise, reuse an
+ * existing same-named node (e.g. one folded in from a schema template) so
+ * nested fields override into it rather than discarding the template's
+ * other fields. */
+static void build_mapping_value(yaml_document_t *doc, const char *key,
+                                yaml_node_t *v, schema_t *schemas,
+                                GHashTable *codecs, usb_node_t *out,
+                                char **ns, int depth)
+{
+    if (build_raw_block(doc, v, out, key))
+        return;
+    if (build_codec_block(doc, v, codecs, out, key))
+        return;
+
+    usb_prop_t *ex = find_prop(out, key);
+    usb_node_t *child;
+    if (ex && ex->type == USB_PROP_NODE) {
+        child = ex->val.node;
+    } else {
+        child = usb_node_create();
+        usb_node_set_prop(out, create_prop_node(key, child));
+    }
+    build_map(doc, v, schemas, codecs, child, ns, depth + 1);
+}
+
+/* Each item becomes a distinct sibling under the same key. */
+static void build_sequence_value(yaml_document_t *doc, const char *key,
+                                 yaml_node_t *v, schema_t *schemas,
+                                 GHashTable *codecs, usb_node_t *out,
+                                 char **ns, int depth)
+{
+    for (yaml_node_item_t *i = v->data.sequence.items.start;
+         i < v->data.sequence.items.top; i++) {
+        yaml_node_t *item = yaml_document_get_node(doc, *i);
+        if (!item)
+            continue;
+        if (item->type == YAML_MAPPING_NODE) {
+            usb_node_t *child = usb_node_create();
+            out->props = g_list_append(out->props,
+                                       create_prop_node(key, child));
+            build_map(doc, item, schemas, codecs, child, ns, depth + 1);
+        } else {
+            build_value(doc, key, item, schemas, codecs, out, ns,
+                        depth + 1);
+        }
+    }
+}
+
 static void build_value(yaml_document_t *doc, const char *key,
                         yaml_node_t *v, schema_t *schemas,
                         GHashTable *codecs, usb_node_t *out, char **ns,
@@ -235,49 +288,12 @@ static void build_value(yaml_document_t *doc, const char *key,
         build_scalar(schemas, out, key,
                      (const char *) v->data.scalar.value, ns);
         break;
-
-    case YAML_MAPPING_NODE: {
-        /* A `hex:` block is raw bytes; a `codec:`-tagged block encodes to a
-         * single byte array. Either becomes one leaf, not a subtree. */
-        if (build_raw_block(doc, v, out, key))
-            break;
-        if (build_codec_block(doc, v, codecs, out, key))
-            break;
-
-        /* Reuse an existing same-named node (e.g. one folded in from a schema
-         * template) so nested fields override into it rather than discarding
-         * the template's other fields. */
-        usb_prop_t *ex = find_prop(out, key);
-        usb_node_t *child;
-        if (ex && ex->type == USB_PROP_NODE) {
-            child = ex->val.node;
-        } else {
-            child = usb_node_create();
-            usb_node_set_prop(out, create_prop_node(key, child));
-        }
-        build_map(doc, v, schemas, codecs, child, ns, depth + 1);
+    case YAML_MAPPING_NODE:
+        build_mapping_value(doc, key, v, schemas, codecs, out, ns, depth);
         break;
-    }
-
     case YAML_SEQUENCE_NODE:
-        /* Each item becomes a distinct sibling under the same key. */
-        for (yaml_node_item_t *i = v->data.sequence.items.start;
-             i < v->data.sequence.items.top; i++) {
-            yaml_node_t *item = yaml_document_get_node(doc, *i);
-            if (!item)
-                continue;
-            if (item->type == YAML_MAPPING_NODE) {
-                usb_node_t *child = usb_node_create();
-                out->props = g_list_append(out->props,
-                                           create_prop_node(key, child));
-                build_map(doc, item, schemas, codecs, child, ns, depth + 1);
-            } else {
-                build_value(doc, key, item, schemas, codecs, out, ns,
-                            depth + 1);
-            }
-        }
+        build_sequence_value(doc, key, v, schemas, codecs, out, ns, depth);
         break;
-
     default:
         break;
     }

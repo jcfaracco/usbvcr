@@ -10,6 +10,7 @@
 #include "bytes.h"
 #include "version.h"
 #include "log.h"
+#include "pcap/record.h"
 
 #define HELLO_VERSION "usb_vcr_hello " USB_VCR_VERSION
 
@@ -46,7 +47,7 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
         return -1;
     }
 
-    usb_record_announce(dd, ddlen, cd, cdlen, ctx);
+    record_device_announce(dd, ddlen, cd, cdlen, ctx);
 
     usb_interface_info_header_t ii;
     usb_ep_info_header_t ei;

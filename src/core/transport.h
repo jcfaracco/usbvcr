@@ -40,12 +40,4 @@ int usb_conn_recv(int sock, usb_header_t *hdr,
                   uint8_t *buf, size_t cap, size_t *payload_len,
                   const usb_record_ctx_t *ctx);
 
-/* Record the device/config descriptors behind a device announcement. The
- * custom RT_* protocol never frames these as a real GET_DESCRIPTOR packet,
- * so pcap replay needs this separate hook to synthesize that enumeration
- * traffic. If ctx is non-NULL, records it. */
-void usb_record_announce(const uint8_t *device_desc, size_t ddlen,
-                         const uint8_t *config_desc, size_t cdlen,
-                         const usb_record_ctx_t *ctx);
-
 #endif /* TRANSPORT_H */

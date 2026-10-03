@@ -186,11 +186,3 @@ int usb_conn_recv(int sock, usb_header_t *hdr,
         record_conn_recv(hdr, buf, hdr->length, ctx);
     return 0;
 }
-
-void usb_record_announce(const uint8_t *device_desc, size_t ddlen,
-                         const uint8_t *config_desc, size_t cdlen,
-                         const usb_record_ctx_t *ctx)
-{
-    if (ctx)
-        record_device_announce(device_desc, ddlen, config_desc, cdlen, ctx);
-}

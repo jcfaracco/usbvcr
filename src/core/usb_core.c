@@ -68,7 +68,12 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
     if (bcd_usb >= 0x0300) {
         speed   = USB_VCR_SPEED_SUPER;
         ep0_mps = (uint16_t)(1u << mp0);   /* exponent -> bytes (9 -> 512) */
-    } else if (bcd_usb >= 0x0200) {
+    } else if (bcd_usb >= 0x0200 && mp0 == 64) {
+        /* bcdUSB 0x0200 only means "USB 2.0 compliant" - plenty of
+         * Full-Speed-only devices (HID keyboards/mice) declare it for
+         * compatibility. The spec does pin bMaxPacketSize0 == 64 to High
+         * Speed (Full Speed allows 8/16/32/64, Low Speed only 8), so gate
+         * on that instead of bcdUSB alone. */
         speed   = USB_VCR_SPEED_HIGH;
         ep0_mps = mp0;
     } else {
@@ -105,8 +110,9 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
     /* Pull the connect fields from the device descriptor by named offset. */
     usb_device_connect_header_t c;
     memset(&c, 0, sizeof(c));
-    /* Speed derived from bcdUSB above. TODO: let the backend override it, since
-     * bcdUSB alone cannot distinguish full- from high-speed USB 2.0 devices. */
+    /* Speed derived from bcdUSB/bMaxPacketSize0 above. TODO: let the backend
+     * override it outright - the descriptor heuristic still can't catch a
+     * Full-Speed device that happens to use ep0 mp0 == 64. */
     c.speed              = speed;
     c.device_class       = DESC_U8(dd,  USB_DD_bDeviceClass);
     c.device_subclass    = DESC_U8(dd,  USB_DD_bDeviceSubClass);

@@ -1,23 +1,13 @@
 /*
- * pcap.c – usbmon pcap/pcapng read + write. STUB.
+ * pcap.c – usbmon pcap/pcapng read + write.
  *
- * Reader TODO:
- *   - Detect container: classic pcap (magic 0xa1b2c3d4 / 0xd4c3b2a1, plus the
- *     nanosecond variants 0xa1b23c4d) vs pcapng (block type 0x0a0d0d0a).
- *   - Honour byte order from the magic / pcapng byte-order magic.
- *   - Require link type 189 (USB_LINUX) or 220 (USB_LINUX_MMAPPED); reject
- *     anything else so a non-usbmon capture fails loud.
- *   - Per record: parse the usbmon header (48 vs 64 bytes), pull bus/device/
- *     endpoint, xfer type+dir, the SETUP block for control transfers, and the
- *     payload length; copy payload into trace-owned storage.
- *   - pcapng: walk Section Header / Interface Description / Enhanced Packet
- *     blocks; skip everything else.
- *
- * Writer TODO:
- *   - Emit a pcapng Section Header + one Interface Description block with
- *     link type 220 (USB_LINUX_MMAPPED).
- *   - Per pcap_writer_add: synthesize the usbmon header from pcap_packet_t and
- *     wrap payload in an Enhanced Packet Block.
+ * The reader mirrors the writer's own framing exactly (see pcap_writer_add):
+ * container format is inferred from the file extension (pcap_format_get),
+ * each record/block wraps one usbmon_header_t followed by its payload, and
+ * for pcapng the Enhanced Packet Block's cap_packet_len covers header+
+ * payload together. Decoded transfers are copied into trace-owned storage
+ * (GByteArray per packet) so pcap_packet_t.data stays valid until
+ * pcap_trace_free().
  */
 
 #include "pcap.h"
@@ -25,6 +15,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <errno.h>
 #include <glib.h>
 
 struct pcap_trace {
@@ -38,14 +30,180 @@ struct pcap_writer {
     char *path;
 };
 
+/* Defined in the Helpers section below; used by both reader and writer. */
+pcap_format_t pcap_format_get(const char *str);
+
 /* ---- Reader ------------------------------------------------------------ */
+
+static pcap_trace_t *trace_new(void)
+{
+    pcap_trace_t *t = g_new0(pcap_trace_t, 1);
+    t->packets = g_array_new(FALSE, TRUE, sizeof(pcap_packet_t));
+    t->payloads = g_ptr_array_new_with_free_func((GDestroyNotify)g_byte_array_unref);
+    return t;
+}
+
+/* Decode a usbmon header into a pcap_packet_t. data/data_len are filled in
+ * by the caller once the payload has been copied into trace-owned storage. */
+static void pcap_decode_usbmon_header(const usbmon_header_t *h, pcap_packet_t *pkt)
+{
+    memset(pkt, 0, sizeof(*pkt));
+
+    pkt->ts_usec     = (uint64_t)(int64_t)h->ts_sec * 1000000ULL + (uint32_t)h->ts_usec;
+    pkt->urb_id      = h->id;
+    pkt->bus         = (uint8_t)h->busnum;
+    pkt->device      = h->devnum;
+    pkt->endpoint    = h->epnum;
+    pkt->dir         = (h->epnum & 0x80) ? PCAP_DIR_IN : PCAP_DIR_OUT;
+    pkt->xfer        = (pcap_xfer_t)h->xfer_type;
+    pkt->event_type  = (char)h->type;
+
+    if (h->flag_setup == '-') {
+        pkt->setup_valid = 1;
+        memcpy(pkt->setup, h->s.setup, sizeof(pkt->setup));
+    }
+}
+
+/* Append a decoded packet to the trace, copying `payload_len` bytes from
+ * `payload` into trace-owned storage so pkt->data stays valid after the
+ * read buffer is freed. */
+static void trace_append(pcap_trace_t *t, pcap_packet_t pkt,
+                         const uint8_t *payload, size_t payload_len)
+{
+    if (payload_len > 0) {
+        GByteArray *owned = g_byte_array_sized_new((guint)payload_len);
+        g_byte_array_append(owned, payload, (guint)payload_len);
+        g_ptr_array_add(t->payloads, owned);
+        pkt.data     = owned->data;
+        pkt.data_len = payload_len;
+    } else {
+        pkt.data     = NULL;
+        pkt.data_len = 0;
+    }
+    g_array_append_val(t->packets, pkt);
+}
+
+/* Read one usbmon_header_t + its payload (total `incl_len` bytes) and append
+ * the decoded transfer to `t`. Returns 0 on success, -1 on short read. */
+static int trace_read_record(pcap_trace_t *t, FILE *fp, uint32_t incl_len)
+{
+    if (incl_len < sizeof(usbmon_header_t)) {
+        LOG_ERR("pcap: record smaller than usbmon header (%u bytes)", incl_len);
+        return -1;
+    }
+
+    usbmon_header_t uh;
+    if (fread(&uh, sizeof(uh), 1, fp) != 1)
+        return -1;
+
+    size_t payload_len = incl_len - sizeof(uh);
+    uint8_t *payload = NULL;
+    if (payload_len > 0) {
+        payload = g_malloc(payload_len);
+        if (fread(payload, 1, payload_len, fp) != payload_len) {
+            g_free(payload);
+            return -1;
+        }
+    }
+
+    pcap_packet_t pkt;
+    pcap_decode_usbmon_header(&uh, &pkt);
+    trace_append(t, pkt, payload, payload_len);
+    g_free(payload);
+    return 0;
+}
+
+/* Classic legacy pcap: global header, then a stream of
+ * [pcap_rec_header_t][usbmon_header_t][payload] records. */
+static pcap_trace_t *pcap_trace_load_legacy(FILE *fp)
+{
+    pcap_header_t gh;
+    if (fread(&gh, sizeof(gh), 1, fp) != 1) {
+        LOG_ERR("pcap: truncated global header");
+        return NULL;
+    }
+    if (gh.magic_number != PCAP_MAGIC_NUMBER_MS && gh.magic_number != PCAP_MAGIC_NUMBER_NS) {
+        LOG_ERR("pcap: unrecognized magic number 0x%08x", gh.magic_number);
+        return NULL;
+    }
+
+    pcap_trace_t *t = trace_new();
+
+    pcap_rec_header_t rh;
+    while (fread(&rh, sizeof(rh), 1, fp) == 1) {
+        if (trace_read_record(t, fp, rh.incl_len) != 0)
+            break;
+    }
+    return t;
+}
+
+/* pcapng: Section Header + Interface Description, then a stream of Enhanced
+ * Packet Blocks, each [epb header][usbmon_header_t][payload][pad][trailer]. */
+static pcap_trace_t *pcap_trace_load_ng(FILE *fp)
+{
+    pcapng_shb_t shb;
+    uint32_t trailer;
+    if (fread(&shb, sizeof(shb), 1, fp) != 1 || shb.block_type != 0x0A0D0D0A) {
+        LOG_ERR("pcap: missing/invalid pcapng section header block");
+        return NULL;
+    }
+    if (fread(&trailer, sizeof(trailer), 1, fp) != 1) {
+        LOG_ERR("pcap: truncated section header block");
+        return NULL;
+    }
+
+    pcapng_idb_t idb;
+    if (fread(&idb, sizeof(idb), 1, fp) != 1 || idb.block_type != 0x00000001) {
+        LOG_ERR("pcap: missing/invalid pcapng interface description block");
+        return NULL;
+    }
+    if (fread(&trailer, sizeof(trailer), 1, fp) != 1) {
+        LOG_ERR("pcap: truncated interface description block");
+        return NULL;
+    }
+    if (idb.link_type != 189 && idb.link_type != 220) {
+        LOG_ERR("pcap: unsupported link type %u (expected usbmon)", idb.link_type);
+        return NULL;
+    }
+
+    pcap_trace_t *t = trace_new();
+
+    pcapng_epb_t epb;
+    while (fread(&epb, sizeof(epb), 1, fp) == 1) {
+        if (epb.block_type != 0x00000006) {
+            LOG_ERR("pcap: unexpected pcapng block type 0x%08x", epb.block_type);
+            break;
+        }
+
+        if (trace_read_record(t, fp, epb.cap_packet_len) != 0)
+            break;
+
+        size_t padding = (4 - (epb.cap_packet_len % 4)) % 4;
+        if (padding && fseek(fp, (long)padding, SEEK_CUR) != 0)
+            break;
+
+        if (fread(&trailer, sizeof(trailer), 1, fp) != 1 || trailer != epb.block_len) {
+            LOG_ERR("pcap: malformed enhanced packet block trailer");
+            break;
+        }
+    }
+    return t;
+}
 
 pcap_trace_t *pcap_trace_load(const char *path)
 {
-    (void)path;
-    LOG_WARN("pcap: reader not implemented yet (%s)", path);
-    /* TODO: open file, sniff container/byte order, decode usbmon records. */
-    return NULL;
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        LOG_ERR("pcap: failed to open %s: %s", path, strerror(errno));
+        return NULL;
+    }
+
+    pcap_trace_t *t = (pcap_format_get(path) == FORMAT_PCAPNG)
+                     ? pcap_trace_load_ng(fp)
+                     : pcap_trace_load_legacy(fp);
+
+    fclose(fp);
+    return t;
 }
 
 size_t pcap_trace_count(const pcap_trace_t *t)

@@ -112,6 +112,19 @@ if check_dep.found()
     dependencies : [check_dep, glib_dep],
   )
   test('pcap_roundtrip', test_pcap_roundtrip)
+
+  test_record = executable(
+    'test_record',
+    'integration/test_record.c',
+    files(
+      '../src/lib/pcap/pcap.c',
+      '../src/lib/pcap/record.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib, core],
+    dependencies : [check_dep, glib_dep],
+  )
+  test('record', test_record)
 endif
 
 # TODO: canonical-dialect tests (codec / ValidationSuite).

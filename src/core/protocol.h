@@ -33,6 +33,9 @@ enum {
     RT_SET_CONFIGURATION        = 6,
     RT_GET_CONFIGURATION        = 7,
     RT_CONFIGURATION_STATUS     = 8,
+    RT_SET_ALT_SETTING          = 9,
+    RT_GET_ALT_SETTING          = 10,
+    RT_ALT_SETTING_STATUS       = 11,
     RT_START_INTERRUPT_RECEIVING = 15,
     RT_STOP_INTERRUPT_RECEIVING  = 16,
     RT_CONTROL_PACKET           = 100,
@@ -156,6 +159,19 @@ typedef struct {
     uint16_t index;        /* wIndex */
     uint16_t length;       /* wLength */
 } usb_control_packet_header_t;
+
+/* RT_SET_ALT_SETTING payload: the host's usb_set_interface() request. */
+typedef struct {
+    uint8_t interface;
+    uint8_t alt;
+} usb_set_alt_setting_header_t;
+
+/* RT_ALT_SETTING_STATUS reply payload. */
+typedef struct {
+    uint8_t status;      /* 0 = success */
+    uint8_t interface;
+    uint8_t alt;
+} usb_alt_setting_status_header_t;
 
 /* RT_INTERRUPT_PACKET header, followed by report data. */
 typedef struct {

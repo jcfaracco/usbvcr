@@ -198,7 +198,7 @@ static void yb_tick(usb_device_t *dev)
     flow_tick(st->dev->flow);
 }
 
-static const usb_device_ops yaml_ops = {
+static const usb_device_ops_t yaml_ops = {
     .name           = "yaml",
     .get_descriptor = yb_get_descriptor,
     .control        = yb_control,

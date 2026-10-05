@@ -47,8 +47,7 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
         return -1;
     }
 
-    if (ctx)
-        record_device_announce(dd, ddlen, cd, cdlen, ctx);
+    record_device_announce(dd, ddlen, cd, cdlen, ctx);
 
     usb_interface_info_header_t ii;
     usb_ep_info_header_t ei;
@@ -69,7 +68,12 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
     if (bcd_usb >= 0x0300) {
         speed   = USB_VCR_SPEED_SUPER;
         ep0_mps = (uint16_t)(1u << mp0);   /* exponent -> bytes (9 -> 512) */
-    } else if (bcd_usb >= 0x0200) {
+    } else if (bcd_usb >= 0x0200 && mp0 == 64) {
+        /* bcdUSB 0x0200 only means "USB 2.0 compliant" - plenty of
+         * Full-Speed-only devices (HID keyboards/mice) declare it for
+         * compatibility. The spec does pin bMaxPacketSize0 == 64 to High
+         * Speed (Full Speed allows 8/16/32/64, Low Speed only 8), so gate
+         * on that instead of bcdUSB alone. */
         speed   = USB_VCR_SPEED_HIGH;
         ep0_mps = mp0;
     } else {
@@ -106,8 +110,9 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
     /* Pull the connect fields from the device descriptor by named offset. */
     usb_device_connect_header_t c;
     memset(&c, 0, sizeof(c));
-    /* Speed derived from bcdUSB above. TODO: let the backend override it, since
-     * bcdUSB alone cannot distinguish full- from high-speed USB 2.0 devices. */
+    /* Speed derived from bcdUSB/bMaxPacketSize0 above. TODO: let the backend
+     * override it outright - the descriptor heuristic still can't catch a
+     * Full-Speed device that happens to use ep0 mp0 == 64. */
     c.speed              = speed;
     c.device_class       = DESC_U8(dd,  USB_DD_bDeviceClass);
     c.device_subclass    = DESC_U8(dd,  USB_DD_bDeviceSubClass);
@@ -149,6 +154,30 @@ static int reply_control(int sock, int64_t id,
     return usb_conn_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n, ctx);
 }
 
+/* Fallback: standard GET_DESCRIPTOR served straight from the descriptor
+ * table, for backends that declare no flow rule for it. */
+static void handle_get_descriptor_fallback(int sock, usb_device_t *dev, int64_t id,
+                                           const usb_control_packet_header_t *setup,
+                                           const usb_record_ctx_t *ctx)
+{
+    uint8_t  dtype = (uint8_t)(setup->value >> 8);
+    uint8_t  dindex = (uint8_t)(setup->value & 0xff);
+    const uint8_t *desc;
+    uint16_t dlen;
+
+    if (dev->ops->get_descriptor(dev, dtype, dindex, setup->index,
+                                 &desc, &dlen) < 0) {
+        LOG_DEBUG("stall: no descriptor type=0x%02x index=%u", dtype, dindex);
+        reply_control(sock, id, setup, 1, NULL, 0, ctx);  /* stall */
+        return;
+    }
+
+    uint16_t n = dlen < setup->length ? dlen : setup->length;
+    LOG_DEBUG("GET_DESCRIPTOR type=0x%02x index=%u -> %u bytes",
+              dtype, dindex, n);
+    reply_control(sock, id, setup, 0, desc, n, ctx);
+}
+
 static void handle_control(int sock, usb_device_t *dev, int64_t id,
                            const uint8_t *payload, size_t len,
                            const usb_record_ctx_t *ctx)
@@ -175,26 +204,9 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
         }
     }
 
-    /* Fallback: standard GET_DESCRIPTOR served straight from the descriptor
-     * table, for backends that declare no flow rule for it. */
     if (setup.requesttype == USB_DIR_IN &&
         setup.request == USB_REQ_GET_DESCRIPTOR) {
-        uint8_t  dtype = (uint8_t)(setup.value >> 8);
-        uint8_t  dindex = (uint8_t)(setup.value & 0xff);
-        const uint8_t *desc;
-        uint16_t dlen;
-
-        if (dev->ops->get_descriptor(dev, dtype, dindex, setup.index,
-                                     &desc, &dlen) < 0) {
-            LOG_DEBUG("stall: no descriptor type=0x%02x index=%u", dtype, dindex);
-            reply_control(sock, id, &setup, 1, NULL, 0, ctx);  /* stall */
-            return;
-        }
-
-        uint16_t n = dlen < setup.length ? dlen : setup.length;
-        LOG_DEBUG("GET_DESCRIPTOR type=0x%02x index=%u -> %u bytes",
-                  dtype, dindex, n);
-        reply_control(sock, id, &setup, 0, desc, n, ctx);
+        handle_get_descriptor_fallback(sock, dev, id, &setup, ctx);
         return;
     }
 
@@ -328,6 +340,29 @@ int usb_core_run(int sock, usb_device_t *dev)
 
             uint8_t status[2] = { 0 /* success */, cfg };
             usb_conn_send(sock, RT_CONFIGURATION_STATUS, hdr.id, status, sizeof(status), &ctx);
+            break;
+        }
+
+        case RT_SET_ALT_SETTING: {
+            /* usb_set_interface() always sends this on the wire, even for an
+             * interface with a single altsetting (USB 2.0 9.4.10 only lets
+             * the *device* skip replying with STALL in that case -- it does
+             * not let the host skip asking). Every interface we serve has
+             * exactly one altsetting, so there is nothing to actually
+             * switch: just echo back success. */
+            usb_set_alt_setting_header_t req;
+            memset(&req, 0, sizeof(req));
+            if (len >= sizeof(req))
+                memcpy(&req, payload, sizeof(req));
+            LOG_DEBUG("set alt setting iface=%u alt=%u", req.interface, req.alt);
+
+            usb_alt_setting_status_header_t rstatus = {
+                .status    = 0,
+                .interface = req.interface,
+                .alt       = req.alt,
+            };
+            usb_conn_send(sock, RT_ALT_SETTING_STATUS, hdr.id,
+                         (uint8_t *)&rstatus, sizeof(rstatus), &ctx);
             break;
         }
 

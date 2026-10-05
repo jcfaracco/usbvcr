@@ -313,7 +313,10 @@ void pcap_writer_open_legacy_header(FILE *fp)
         .thiszone = 0,
         .sigfigs = 0,
         .snaplen = 65535,
-        .network = 189 /* DLT_USB_LINUX */
+        /* usb_hdr written per-record is the 64-byte usbmon_header_t (id..ndesc),
+         * i.e. the MMAPPED layout - declaring 189 (legacy 48-byte) here makes
+         * Wireshark misparse every record by 16 bytes. */
+        .network = 220 /* DLT_USB_LINUX_MMAPPED */
     };
     fwrite(&global_hdr, sizeof(pcap_header_t), 1, fp);
 }
@@ -337,7 +340,9 @@ void pcap_writer_open_ng_header(FILE *fp)
     pcapng_idb_t idb = {
         .block_type = 0x00000001,
         .block_len = sizeof(pcapng_idb_t) + sizeof(uint32_t),
-        .link_type = 189, /* DLT_USB_LINUX */
+        /* See pcap_writer_open_legacy_header(): must match the 64-byte
+         * usbmon_header_t we actually write per Enhanced Packet Block. */
+        .link_type = 220, /* DLT_USB_LINUX_MMAPPED */
         .reserved = 0,
         .snaplen = 65535
     };

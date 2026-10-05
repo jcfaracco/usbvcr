@@ -83,20 +83,20 @@ void record_device_announce(const uint8_t *device_desc, size_t ddlen,
         init_setup_packet(submit.setup, &setup);
         record_add(&submit);
 
+        /* usbmon only carries the setup packet on the Submit; Complete has
+         * no setup of its own (see pcap_init_usbmon_header). */
         pcap_packet_t complete = {
-            .ts_usec     = ts_usec(),
-            .urb_id      = 1,
-            .bus         = ctx->bus,
-            .device      = ctx->device,
-            .endpoint    = 0x80,
-            .dir         = PCAP_DIR_IN,
-            .xfer        = PCAP_XFER_CONTROL,
-            .event_type  = 'C',
-            .setup_valid = 1,
-            .data        = device_desc,
-            .data_len    = ddlen,
+            .ts_usec    = ts_usec(),
+            .urb_id     = 1,
+            .bus        = ctx->bus,
+            .device     = ctx->device,
+            .endpoint   = 0x80,
+            .dir        = PCAP_DIR_IN,
+            .xfer       = PCAP_XFER_CONTROL,
+            .event_type = 'C',
+            .data       = device_desc,
+            .data_len   = ddlen,
         };
-        init_setup_packet(complete.setup, &setup);
         record_add(&complete);
     }
 
@@ -126,19 +126,17 @@ void record_device_announce(const uint8_t *device_desc, size_t ddlen,
         record_add(&submit);
 
         pcap_packet_t complete = {
-            .ts_usec     = ts_usec(),
-            .urb_id      = 2,
-            .bus         = ctx->bus,
-            .device      = ctx->device,
-            .endpoint    = 0x80,
-            .dir         = PCAP_DIR_IN,
-            .xfer        = PCAP_XFER_CONTROL,
-            .event_type  = 'C',
-            .setup_valid = 1,
-            .data        = config_desc,
-            .data_len    = cdlen,
+            .ts_usec    = ts_usec(),
+            .urb_id     = 2,
+            .bus        = ctx->bus,
+            .device     = ctx->device,
+            .endpoint   = 0x80,
+            .dir        = PCAP_DIR_IN,
+            .xfer       = PCAP_XFER_CONTROL,
+            .event_type = 'C',
+            .data       = config_desc,
+            .data_len   = cdlen,
         };
-        init_setup_packet(complete.setup, &setup);
         record_add(&complete);
     }
 }
@@ -263,8 +261,8 @@ void record_conn_send(uint32_t type, int64_t id, const void *payload, size_t len
             pkt.endpoint    = setup.endpoint;
             pkt.dir         = (setup.requesttype & USB_DIR_IN) ? PCAP_DIR_IN : PCAP_DIR_OUT;
             pkt.xfer        = PCAP_XFER_CONTROL;
-            pkt.setup_valid = 1;
-            init_setup_packet(pkt.setup, &setup);
+            /* This is the Complete/Callback side; usbmon only carries the
+             * setup packet on the Submit (see pcap_init_usbmon_header). */
             if (len > sizeof(setup)) {
                 pkt.data     = (const uint8_t *)payload + sizeof(setup);
                 pkt.data_len = len - sizeof(setup);

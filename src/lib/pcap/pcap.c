@@ -58,7 +58,9 @@ static void pcap_decode_usbmon_header(const usbmon_header_t *h, pcap_packet_t *p
     pkt->xfer        = (pcap_xfer_t)h->xfer_type;
     pkt->event_type  = (char)h->type;
 
-    if (h->flag_setup == '-') {
+    /* usbmon convention: flag_setup == 0 means s.setup holds a real setup
+     * packet (see pcap_init_usbmon_header for how the writer sets it). */
+    if (h->flag_setup == 0) {
         pkt->setup_valid = 1;
         memcpy(pkt->setup, h->s.setup, sizeof(pkt->setup));
     }
@@ -287,8 +289,14 @@ static void pcap_init_usbmon_header(usbmon_header_t *usb_hdr,
     usb_hdr->length    = (uint32_t)p->data_len;
     usb_hdr->len_cap   = (uint32_t)p->data_len;
 
+    /* usbmon convention (verified against holtek_keyboard.pcap/usb_capture.pcap,
+     * both real usbmon captures): flag_setup == 0 means a setup packet is
+     * present in s.setup (only valid for a Control Submit); any other value
+     * ('-' here) means there is none. Getting this backwards makes every
+     * non-control URB claim to carry a setup packet, which is what trips
+     * Wireshark's "Only control URBs may contain setup packet" error. */
     if (p->xfer == PCAP_XFER_CONTROL && p->setup_valid) {
-        usb_hdr->flag_setup = '-';
+        usb_hdr->flag_setup = 0;
         memcpy(usb_hdr->s.setup, p->setup, 8);
         if (usb_hdr->type == 'S') {
             uint16_t wLength = (uint16_t)p->setup[6] | ((uint16_t)p->setup[7] << 8);
@@ -296,9 +304,13 @@ static void pcap_init_usbmon_header(usbmon_header_t *usb_hdr,
                 usb_hdr->length = wLength;
         }
     } else {
-        usb_hdr->flag_setup = 0;
+        usb_hdr->flag_setup = '-';
     }
-    usb_hdr->flag_data = (p->data_len > 0) ? '=' : '0';
+
+    /* Same convention for data: 0 means a payload is actually captured in
+     * this record; otherwise the field holds a direction hint ('<' in,
+     * '>' out) instead of real data. */
+    usb_hdr->flag_data = (p->data_len > 0) ? 0 : ((p->dir == PCAP_DIR_IN) ? '<' : '>');
 }
 
 /* ---- Writer ------------------------------------------------------------ */
@@ -313,7 +325,10 @@ void pcap_writer_open_legacy_header(FILE *fp)
         .thiszone = 0,
         .sigfigs = 0,
         .snaplen = 65535,
-        .network = 189 /* DLT_USB_LINUX */
+        /* usb_hdr written per-record is the 64-byte usbmon_header_t (id..ndesc),
+         * i.e. the MMAPPED layout - declaring 189 (legacy 48-byte) here makes
+         * Wireshark misparse every record by 16 bytes. */
+        .network = 220 /* DLT_USB_LINUX_MMAPPED */
     };
     fwrite(&global_hdr, sizeof(pcap_header_t), 1, fp);
 }
@@ -337,7 +352,9 @@ void pcap_writer_open_ng_header(FILE *fp)
     pcapng_idb_t idb = {
         .block_type = 0x00000001,
         .block_len = sizeof(pcapng_idb_t) + sizeof(uint32_t),
-        .link_type = 189, /* DLT_USB_LINUX */
+        /* See pcap_writer_open_legacy_header(): must match the 64-byte
+         * usbmon_header_t we actually write per Enhanced Packet Block. */
+        .link_type = 220, /* DLT_USB_LINUX_MMAPPED */
         .reserved = 0,
         .snaplen = 65535
     };

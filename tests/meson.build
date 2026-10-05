@@ -125,6 +125,19 @@ if check_dep.found()
     dependencies : [check_dep, glib_dep],
   )
   test('record', test_record)
+
+  test_pcap_hid_capture = executable(
+    'test_pcap_hid_capture',
+    'integration/test_pcap_hid_capture.c',
+    files(
+      '../src/lib/pcap/pcap.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib],
+    dependencies : [check_dep, glib_dep],
+    c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+  )
+  test('pcap_hid_capture', test_pcap_hid_capture)
 endif
 
 # TODO: canonical-dialect tests (codec / ValidationSuite).

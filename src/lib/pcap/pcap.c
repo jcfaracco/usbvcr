@@ -87,29 +87,28 @@ static void trace_append(pcap_trace_t *t, pcap_packet_t pkt,
  * the decoded transfer to `t`. Returns 0 on success, -1 on short read. */
 static int trace_read_record(pcap_trace_t *t, FILE *fp, uint32_t incl_len)
 {
+    g_autofree uint8_t *payload = NULL;
+    usbmon_header_t uh;
+    pcap_packet_t pkt;
+    size_t payload_len;
+
     if (incl_len < sizeof(usbmon_header_t)) {
         LOG_ERR("pcap: record smaller than usbmon header (%u bytes)", incl_len);
         return -1;
     }
 
-    usbmon_header_t uh;
     if (fread(&uh, sizeof(uh), 1, fp) != 1)
         return -1;
 
-    size_t payload_len = incl_len - sizeof(uh);
-    uint8_t *payload = NULL;
+    payload_len = incl_len - sizeof(uh);
     if (payload_len > 0) {
         payload = g_malloc(payload_len);
-        if (fread(payload, 1, payload_len, fp) != payload_len) {
-            g_free(payload);
+        if (fread(payload, 1, payload_len, fp) != payload_len)
             return -1;
-        }
     }
 
-    pcap_packet_t pkt;
     pcap_decode_usbmon_header(&uh, &pkt);
     trace_append(t, pkt, payload, payload_len);
-    g_free(payload);
     return 0;
 }
 

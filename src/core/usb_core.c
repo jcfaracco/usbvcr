@@ -133,6 +133,44 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
     return usb_conn_send(sock, RT_DEVICE_CONNECT, 0, &c, clen, ctx);
 }
 
+/* Exchange hello frames and negotiate capabilities. On success *caps_out is
+ * the capability set both sides support, and the wire header id width is
+ * already switched to match it. */
+static int do_handshake(int sock, const usb_record_ctx_t *ctx, uint32_t *caps_out)
+{
+    usb_header_t hdr;
+    uint8_t payload[USB_VCR_BUF_SIZE];
+    size_t len;
+    uint32_t peer_caps = 0;
+    int r;
+
+    while ((r = usb_conn_recv(sock, &hdr, payload, sizeof(payload), &len, ctx)) == 1)
+        ;
+    if (r < 0)
+        return -1;
+    if (hdr.type != RT_HELLO) {
+        LOG_WARN("expected hello, got type %u", hdr.type);
+        return -1;
+    }
+    LOG_INFO("Peer hello: \"%.63s\"", (char *)payload);
+
+    if (len >= sizeof(usb_hello_header_t)) {
+        peer_caps = get_u32le(payload +
+                              offsetof(usb_hello_header_t, capabilities));
+        LOG_DEBUG("peer capabilities[0]=0x%08x", peer_caps);
+    }
+    *caps_out = USB_VCR_OUR_CAPS & peer_caps;
+
+    if (send_hello(sock, ctx) < 0)
+        return -1;
+
+    /* From here on the header id width follows the negotiated cap. The hello
+     * above went out with the 12-byte header (sent before negotiation), which
+     * matches what the peer expects for that first packet. */
+    transport_set_id64(*caps_out & (1u << USB_VCR_CAP_64BITS_IDS));
+    return 0;
+}
+
 /* ------------------------------------------------------------------ *
  * Control transfers                                                   *
  * ------------------------------------------------------------------ */
@@ -243,171 +281,160 @@ static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep,
     }
 }
 
+/* Poll every endpoint the peer has armed with RT_START_INTERRUPT_RECEIVING
+ * and push whatever the backend has queued for it. */
+static void poll_interrupt_endpoints(int sock, usb_device_t *dev,
+                                     const bool *active,
+                                     const usb_record_ctx_t *ctx)
+{
+    for (int i = 0; i < 32; i++) {
+        if (!active[i])
+            continue;
+        /* Reverse of usb_ep_index: reconstruct bEndpointAddress. */
+        uint8_t ep = (i & 0x0f) | ((i & 0x10) << 3);
+        push_interrupt_reports(sock, dev, ep, ctx);
+    }
+}
+
+/* ------------------------------------------------------------------ *
+ * Standalone configuration / interface requests                       *
+ * ------------------------------------------------------------------ */
+
+/* usbredir delivers SET_CONFIGURATION as its own message (1-byte config
+ * value), not as a control transfer. Synthesize the standard setup so flow
+ * rules keyed on bRequest=SET_CONFIGURATION fire their state transitions /
+ * on_enter queues, then ack with the status message the peer waits for
+ * before it starts interrupt receiving. */
+static void handle_set_configuration(int sock, usb_device_t *dev, int64_t id,
+                                     const uint8_t *payload, size_t len,
+                                     const usb_record_ctx_t *ctx)
+{
+    uint8_t cfg = (len >= 1) ? payload[0] : 0;
+    LOG_DEBUG("set configuration %u", cfg);
+
+    if (dev->ops->control) {
+        usb_control_packet_header_t setup;
+        memset(&setup, 0, sizeof(setup));
+        setup.request     = USB_REQ_SET_CONFIGURATION;
+        setup.requesttype = 0x00;
+        setup.value       = cfg;
+        uint8_t data[USB_VCR_BUF_SIZE];
+        uint16_t n = 0;
+        dev->ops->control(dev, &setup, data, &n);  /* drive flow; reply unused */
+    }
+
+    uint8_t status[2] = { 0 /* success */, cfg };
+    usb_conn_send(sock, RT_CONFIGURATION_STATUS, id, status, sizeof(status), ctx);
+}
+
+/* usb_set_interface() always sends this on the wire, even for an interface
+ * with a single altsetting (USB 2.0 9.4.10 only lets the *device* skip
+ * replying with STALL in that case -- it does not let the host skip
+ * asking). Every interface we serve has exactly one altsetting, so there is
+ * nothing to actually switch: just echo back success. */
+static void handle_set_alt_setting(int sock, int64_t id,
+                                   const uint8_t *payload, size_t len,
+                                   const usb_record_ctx_t *ctx)
+{
+    usb_set_alt_setting_header_t req;
+    memset(&req, 0, sizeof(req));
+    if (len >= sizeof(req))
+        memcpy(&req, payload, sizeof(req));
+    LOG_DEBUG("set alt setting iface=%u alt=%u", req.interface, req.alt);
+
+    usb_alt_setting_status_header_t rstatus = {
+        .status    = 0,
+        .interface = req.interface,
+        .alt       = req.alt,
+    };
+    usb_conn_send(sock, RT_ALT_SETTING_STATUS, id,
+                 (uint8_t *)&rstatus, sizeof(rstatus), ctx);
+}
+
 /* ------------------------------------------------------------------ *
  * Main dispatch loop                                                  *
  * ------------------------------------------------------------------ */
+
+/* Dispatch one received, non-idle packet to its handler. */
+static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr,
+                            const uint8_t *payload, size_t len,
+                            bool *int_ep_active, const usb_record_ctx_t *ctx)
+{
+    switch (hdr->type) {
+    case RT_CONTROL_PACKET:
+        handle_control(sock, dev, hdr->id, payload, len, ctx);
+        break;
+
+    case RT_SET_CONFIGURATION:
+        handle_set_configuration(sock, dev, hdr->id, payload, len, ctx);
+        break;
+
+    case RT_SET_ALT_SETTING:
+        handle_set_alt_setting(sock, hdr->id, payload, len, ctx);
+        break;
+
+    case RT_START_INTERRUPT_RECEIVING:
+        if (len >= 1) {
+            uint8_t ep = payload[0];
+            LOG_DEBUG("start interrupt receiving on ep 0x%02x", ep);
+            int_ep_active[usb_ep_index(ep)] = true;
+            push_interrupt_reports(sock, dev, ep, ctx);
+        }
+        break;
+
+    case RT_STOP_INTERRUPT_RECEIVING:
+        if (len >= 1) {
+            uint8_t ep = payload[0];
+            LOG_DEBUG("stop interrupt receiving on ep 0x%02x", ep);
+            int_ep_active[usb_ep_index(ep)] = false;
+        }
+        break;
+
+    case RT_INTERRUPT_PACKET:  /* OUT (e.g. keyboard LEDs) */
+        if (dev->ops->ep_out && len > sizeof(usb_interrupt_packet_header_t)) {
+            usb_interrupt_packet_header_t h;
+            memcpy(&h, payload, sizeof(h));
+            dev->ops->ep_out(dev, h.endpoint, payload + sizeof(h), len - sizeof(h));
+        }
+        break;
+
+    default:
+        LOG_DEBUG("unhandled packet type=%u len=%zu", hdr->type, len);
+        break;
+    }
+}
 
 int usb_core_run(int sock, usb_device_t *dev)
 {
     usb_header_t hdr;
     uint8_t payload[USB_VCR_BUF_SIZE];
     size_t len;
+    uint32_t caps;
+    bool int_ep_active[32] = {false};
 
     /* Build recording context. bus=0 and device=1 are reasonable defaults for
      * an emulated device; the USB device descriptor carries no bus/devnum. */
     usb_record_ctx_t ctx = { .bus = 0, .device = 1 };
 
-    /* 1. Handshake: peer hello, then ours. Ignore idle timeouts. */
-    int r;
-    while ((r = usb_conn_recv(sock, &hdr, payload, sizeof(payload), &len, &ctx)) == 1)
-        ;
-    if (r < 0)
-        return -1;
-    if (hdr.type != RT_HELLO) {
-        LOG_WARN("expected hello, got type %u", hdr.type);
-        return -1;
-    }
-    LOG_INFO("Peer hello: \"%.63s\"", (char *)payload);
-
-    uint32_t peer_caps = 0;
-    if (len >= sizeof(usb_hello_header_t)) {
-        peer_caps = get_u32le(payload +
-                              offsetof(usb_hello_header_t, capabilities));
-        LOG_DEBUG("peer capabilities[0]=0x%08x", peer_caps);
-    }
-    uint32_t caps = USB_VCR_OUR_CAPS & peer_caps;
-
-    if (send_hello(sock, &ctx) < 0)
+    if (do_handshake(sock, &ctx, &caps) < 0)
         return -1;
 
-    /* From here on the header id width follows the negotiated cap. The hello
-     * above went out with the 12-byte header (sent before negotiation), which
-     * matches what the peer expects for that first packet. */
-    transport_set_id64(caps & (1u << USB_VCR_CAP_64BITS_IDS));
-
-    /* 2. Announce the emulated device using the negotiated capabilities. */
     if (announce_device(sock, dev, caps, &ctx) < 0)
         return -1;
 
-    bool int_ep_active[32] = {false};
-
-    /* 3. Serve requests until the peer goes away. The socket recv timeout
-     * turns an idle wait into a periodic tick, so streaming backends make
-     * progress even when no request is pending. */
+    /* Serve requests until the peer goes away. The socket recv timeout turns
+     * an idle wait into a periodic tick, so streaming backends make progress
+     * even when no request is pending. */
     for (;;) {
         int rc = usb_conn_recv(sock, &hdr, payload, sizeof(payload), &len, &ctx);
         if (rc < 0)
             break;              /* EOF / hard error: peer gone */
-        if (rc == 1) {          /* idle: no request pending */
-            if (dev->ops->tick)
-                dev->ops->tick(dev);
-
-            /* Poll all active interrupt endpoints to push queued data */
-            for (int i = 0; i < 32; i++) {
-                if (int_ep_active[i]) {
-                    /* Reverse of usb_ep_index: reconstruct bEndpointAddress */
-                    uint8_t ep = (i & 0x0f) | ((i & 0x10) << 3);
-                    push_interrupt_reports(sock, dev, ep, &ctx);
-                }
-            }
-            continue;
-        }
-
-        switch (hdr.type) {
-        case RT_CONTROL_PACKET:
-            handle_control(sock, dev, hdr.id, payload, len, &ctx);
-            break;
-
-        case RT_SET_CONFIGURATION: {
-            /* usbredir delivers SET_CONFIGURATION as its own message (1-byte
-             * config value), not as a control transfer. Synthesize the standard
-             * setup so flow rules keyed on bRequest=SET_CONFIGURATION fire their
-             * state transitions / on_enter queues, then ack with the status
-             * message the peer waits for before it starts interrupt receiving. */
-            uint8_t cfg = (len >= 1) ? payload[0] : 0;
-            LOG_DEBUG("set configuration %u", cfg);
-
-            if (dev->ops->control) {
-                usb_control_packet_header_t setup;
-                memset(&setup, 0, sizeof(setup));
-                setup.request     = USB_REQ_SET_CONFIGURATION;
-                setup.requesttype = 0x00;
-                setup.value       = cfg;
-                uint8_t data[USB_VCR_BUF_SIZE];
-                uint16_t n = 0;
-                dev->ops->control(dev, &setup, data, &n);  /* drive flow; reply unused */
-            }
-
-            uint8_t status[2] = { 0 /* success */, cfg };
-            usb_conn_send(sock, RT_CONFIGURATION_STATUS, hdr.id, status, sizeof(status), &ctx);
-            break;
-        }
-
-        case RT_SET_ALT_SETTING: {
-            /* usb_set_interface() always sends this on the wire, even for an
-             * interface with a single altsetting (USB 2.0 9.4.10 only lets
-             * the *device* skip replying with STALL in that case -- it does
-             * not let the host skip asking). Every interface we serve has
-             * exactly one altsetting, so there is nothing to actually
-             * switch: just echo back success. */
-            usb_set_alt_setting_header_t req;
-            memset(&req, 0, sizeof(req));
-            if (len >= sizeof(req))
-                memcpy(&req, payload, sizeof(req));
-            LOG_DEBUG("set alt setting iface=%u alt=%u", req.interface, req.alt);
-
-            usb_alt_setting_status_header_t rstatus = {
-                .status    = 0,
-                .interface = req.interface,
-                .alt       = req.alt,
-            };
-            usb_conn_send(sock, RT_ALT_SETTING_STATUS, hdr.id,
-                         (uint8_t *)&rstatus, sizeof(rstatus), &ctx);
-            break;
-        }
-
-        case RT_START_INTERRUPT_RECEIVING:
-            if (len >= 1) {
-                uint8_t ep = payload[0];
-                LOG_DEBUG("start interrupt receiving on ep 0x%02x", ep);
-                int_ep_active[usb_ep_index(ep)] = true;
-                push_interrupt_reports(sock, dev, ep, &ctx);
-            }
-            break;
-
-        case RT_STOP_INTERRUPT_RECEIVING:
-            if (len >= 1) {
-                uint8_t ep = payload[0];
-                LOG_DEBUG("stop interrupt receiving on ep 0x%02x", ep);
-                int_ep_active[usb_ep_index(ep)] = false;
-            }
-            break;
-
-        case RT_INTERRUPT_PACKET:  /* OUT (e.g. keyboard LEDs) */
-            if (dev->ops->ep_out && len > sizeof(usb_interrupt_packet_header_t)) {
-                usb_interrupt_packet_header_t h;
-                memcpy(&h, payload, sizeof(h));
-                dev->ops->ep_out(dev, h.endpoint,
-                                 payload + sizeof(h), len - sizeof(h));
-            }
-            break;
-
-        default:
-            LOG_DEBUG("unhandled packet type=%u len=%zu", hdr.type, len);
-            break;
-        }
+        if (rc == 0)            /* got a request: rc == 1 means idle */
+            dispatch_packet(sock, dev, &hdr, payload, len, int_ep_active, &ctx);
 
         if (dev->ops->tick)
             dev->ops->tick(dev);
-
-        /* Poll all active interrupt endpoints to push queued data */
-        for (int i = 0; i < 32; i++) {
-            if (int_ep_active[i]) {
-                /* Reverse of usb_ep_index: reconstruct bEndpointAddress */
-                uint8_t ep = (i & 0x0f) | ((i & 0x10) << 3);
-                push_interrupt_reports(sock, dev, ep, &ctx);
-            }
-        }
+        poll_interrupt_endpoints(sock, dev, int_ep_active, &ctx);
     }
 
     return 0;

@@ -61,6 +61,11 @@ int main(int argc, char *argv[])
     context = g_option_context_new("- USB VCR: emulate or replay USB device behaviours");
     g_option_context_add_main_entries(context, entries, NULL);
 
+    /* Pick a backend: a usbmon pcap/pcapng capture (replay a real device) or a
+     * canonical YAML device project (emulate). Both feed the same engine. */
+    usb_device_t *dev = NULL;
+    usb_device_t *pcap_dev = NULL;
+
     if (!g_option_context_parse(context, &argc, &argv, &error)) {
         g_print("Error parsing options: %s\n", error->message);
         rc = -1;
@@ -84,9 +89,6 @@ int main(int argc, char *argv[])
     }
     LOG_INFO("Connected!");
 
-    /* Pick a backend: a usbmon pcap/pcapng capture (replay a real device) or a
-     * canonical YAML device project (emulate). Both feed the same engine. */
-    usb_device_t *dev = NULL;
     if (config.pcap) {
         dev = pcap_backend_create(config.pcap);
         if (!dev) {
@@ -95,6 +97,7 @@ int main(int argc, char *argv[])
             rc = -1;
             goto end;
         }
+        pcap_dev = dev;
     } else if (config.yaml) {
         dev = yaml_backend_create(config.yaml);
         if (!dev) {
@@ -146,6 +149,8 @@ int main(int argc, char *argv[])
     LOG_INFO("Session ended (rc=%d)", rc);
 
 end:
+    if (pcap_dev)
+        pcap_backend_destroy(pcap_dev);
     if (error)
         g_clear_error(&error);
     if (context)

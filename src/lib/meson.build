@@ -13,6 +13,7 @@ lib_sources = files(
   'codec.c',
   'flow.c',
   'version.c',
+  'ffs/ffs.c',
 )
 
 glib_dep = dependency('glib-2.0')

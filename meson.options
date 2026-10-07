@@ -1,5 +1,11 @@
-option('enable_coverage', 
-  type: 'boolean', 
-  value: false, 
+option('enable_coverage',
+  type: 'boolean',
+  value: false,
   description: 'Enable code coverage instrumentation (gcovr)'
+)
+
+option('enable_local_engine',
+  type: 'boolean',
+  value: true,
+  description: 'Build the local FunctionFS/ConfigFS USB gadget engine (Linux-only; ignored elsewhere)'
 )

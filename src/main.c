@@ -15,7 +15,9 @@
 #include "version.h"
 #include "log.h"
 #include "qemu_engine.h"
+#ifdef USBVCR_HAVE_LOCAL_ENGINE
 #include "local_engine.h"
+#endif
 
 
 typedef struct {
@@ -171,9 +173,15 @@ int main(int argc, char *argv[])
     LOG_INFO("Running device: %s", config.pcap ? config.pcap : config.yaml);
 
     if (config.local) {
+#ifdef USBVCR_HAVE_LOCAL_ENGINE
         LOG_INFO("Running locally on UDC %s (gadget name '%s')",
                  config.udc ? config.udc : "(auto-detect)", local_name);
         rc = local_engine_run(dev, local_name, config.udc);
+#else
+        LOG_ERR("--local: local engine not built in this binary "
+                "(configure with -Denable_local_engine=true on Linux)");
+        rc = -1;
+#endif
     } else {
         LOG_DEBUG("Connecting to %s:%s ...", config.host, config.port);
         sock = connect_to_server(config.host, config.port);

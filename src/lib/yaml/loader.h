@@ -42,6 +42,7 @@ typedef struct {
 /* Loaded project: the `devices:` manifest (device+flow pairs) plus the shared
  * schema templates and codec tables they resolve against. */
 typedef struct {
+    char       *name;       /* project `name:` field, or NULL if unset */
     GList      *devices;    /* yaml_dev_entry_t* — all manifest entries */
     schema_t   *schemas;    /* schema base templates (schemas/ registry) */
     GHashTable *codecs;     /* "codec name" -> codec_t* (codecs/ tables) */

@@ -203,30 +203,220 @@ static void pcap_backend_index_trace(pcap_backend_state_t *st)
     g_hash_table_destroy(pending_submits);
 }
 
+static GByteArray *lookup_cached_descriptor(GHashTable *descriptors,
+                                            uint16_t value)
+{
+    uint8_t dtype;
+    uint8_t dindex;
+    guint desc_key;
+
+    dtype = (uint8_t)(value >> 8);
+    dindex = (uint8_t)(value & 0xff);
+    desc_key = ((guint)dtype << 8) | dindex;
+
+    return g_hash_table_lookup(descriptors, GUINT_TO_POINTER(desc_key));
+}
+
+static pcap_control_txn_t *pop_matching_control_txn(GQueue *queue,
+                                                    const usb_control_packet_header_t *setup)
+{
+    GList *l;
+
+    for (l = queue->head; l != NULL; l = l->next)
+    {
+        pcap_control_txn_t *cand;
+
+        cand = (pcap_control_txn_t *)l->data;
+        if (cand->setup[0] == setup->requesttype &&
+            cand->setup[1] == setup->request &&
+            ((uint16_t)cand->setup[2] | ((uint16_t)cand->setup[3] << 8)) == setup->value &&
+            ((uint16_t)cand->setup[4] | ((uint16_t)cand->setup[5] << 8)) == setup->index)
+        {
+            g_queue_delete_link(queue, l);
+            return cand;
+        }
+    }
+    return NULL;
+}
+
 static int pb_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
                              uint16_t lang, const uint8_t **out, uint16_t *len)
 {
-    (void)dev; (void)type; (void)index; (void)lang; (void)out; (void)len;
-    return -1;
+    pcap_backend_state_t *st;
+    GByteArray *buf;
+    guint key;
+
+    (void)lang;
+    if (dev == NULL || dev->state == NULL)
+    {
+        return -1;
+    }
+
+    st = (pcap_backend_state_t *)dev->state;
+    key = ((guint)type << 8) | index;
+    buf = g_hash_table_lookup(st->descriptors, GUINT_TO_POINTER(key));
+    if (buf == NULL)
+    {
+        LOG_DEBUG("pcap_backend: descriptor not found type=0x%02x index=%u", type, index);
+        return -1;
+    }
+
+    if (out != NULL)
+    {
+        *out = buf->data;
+    }
+    if (len != NULL)
+    {
+        *len = (uint16_t)buf->len;
+    }
+    return 0;
+}
+
+static int handle_control_get_descriptor(pcap_backend_state_t *st,
+                                         const usb_control_packet_header_t *setup,
+                                         uint8_t *data,
+                                         uint16_t *len)
+{
+    GByteArray *desc_buf;
+    uint16_t copy_len;
+
+    desc_buf = lookup_cached_descriptor(st->descriptors, setup->value);
+    if (desc_buf == NULL)
+    {
+        return -1;
+    }
+
+    copy_len = (desc_buf->len < setup->length) ? (uint16_t)desc_buf->len : setup->length;
+    if (copy_len > USB_VCR_BUF_SIZE)
+    {
+        copy_len = USB_VCR_BUF_SIZE;
+    }
+    if (data != NULL && copy_len > 0)
+    {
+        memcpy(data, desc_buf->data, copy_len);
+    }
+    if (len != NULL)
+    {
+        *len = copy_len;
+    }
+    return 0;
 }
 
 static int pb_control(usb_device_t *dev,
                       const usb_control_packet_header_t *setup,
                       uint8_t *data, uint16_t *len)
 {
-    (void)dev; (void)setup; (void)data; (void)len;
-    return -1;
+    pcap_backend_state_t *st;
+    pcap_control_txn_t *txn;
+    uint16_t copy_len;
+
+    if (dev == NULL || dev->state == NULL || setup == NULL)
+    {
+        return -1;
+    }
+
+    st = (pcap_backend_state_t *)dev->state;
+    if (setup->request == USB_REQ_GET_DESCRIPTOR)
+    {
+        if (handle_control_get_descriptor(st, setup, data, len) == 0)
+        {
+            return 0;
+        }
+    }
+
+    txn = pop_matching_control_txn(st->control_queue, setup);
+    if (txn == NULL)
+    {
+        LOG_DEBUG("pcap_backend: unhandled control setup req=0x%02x type=0x%02x val=0x%04x idx=0x%04x",
+                  setup->request, setup->requesttype, setup->value, setup->index);
+        return -1;
+    }
+
+    copy_len = 0;
+    if (txn->reply_data != NULL && txn->reply_data->len > 0)
+    {
+        copy_len = (txn->reply_data->len < setup->length)
+                     ? (uint16_t)txn->reply_data->len
+                     : setup->length;
+        if (copy_len > USB_VCR_BUF_SIZE)
+        {
+            copy_len = USB_VCR_BUF_SIZE;
+        }
+        if (data != NULL && copy_len > 0)
+        {
+            memcpy(data, txn->reply_data->data, copy_len);
+        }
+    }
+
+    if (len != NULL)
+    {
+        *len = copy_len;
+    }
+
+    pcap_control_txn_free(txn);
+    return 0;
 }
 
 static int pb_ep_in(usb_device_t *dev, uint8_t ep, uint8_t *buf, size_t cap)
 {
-    (void)dev; (void)ep; (void)buf; (void)cap;
-    return 0;   /* NAK */
+    pcap_backend_state_t *st;
+    GQueue *q;
+    GByteArray *arr;
+    size_t copy_len;
+
+    if (dev == NULL || dev->state == NULL)
+    {
+        return -1;
+    }
+
+    st = (pcap_backend_state_t *)dev->state;
+    q = g_hash_table_lookup(st->ep_in_queues, GUINT_TO_POINTER((guint)ep));
+    if (q == NULL || g_queue_is_empty(q))
+    {
+        return 0;   /* NAK */
+    }
+
+    arr = (GByteArray *)g_queue_pop_head(q);
+    copy_len = (arr->len < cap) ? arr->len : cap;
+    if (buf != NULL && copy_len > 0)
+    {
+        memcpy(buf, arr->data, copy_len);
+    }
+    g_byte_array_unref(arr);
+
+    return (int)copy_len;
 }
 
 static int pb_ep_out(usb_device_t *dev, uint8_t ep, const uint8_t *buf, size_t len)
 {
-    (void)dev; (void)ep; (void)buf; (void)len;
+    pcap_backend_state_t *st;
+    GQueue *q;
+    GByteArray *expected;
+
+    if (dev == NULL || dev->state == NULL)
+    {
+        return -1;
+    }
+
+    st = (pcap_backend_state_t *)dev->state;
+    q = g_hash_table_lookup(st->ep_out_queues, GUINT_TO_POINTER((guint)ep));
+    if (q == NULL || g_queue_is_empty(q))
+    {
+        LOG_WARN("pcap_backend: unexpected OUT packet on ep 0x%02x (%zu bytes)", ep, len);
+        return -1;
+    }
+
+    expected = (GByteArray *)g_queue_pop_head(q);
+    if (len != expected->len || memcmp(buf, expected->data, len) != 0)
+    {
+        LOG_ERR("pcap_backend: OUT mismatch on ep 0x%02x: expected %u bytes, got %zu bytes",
+                ep, expected->len, len);
+        g_byte_array_unref(expected);
+        return -1;
+    }
+
+    LOG_DEBUG("pcap_backend: OUT payload matched on ep 0x%02x (%zu bytes)", ep, len);
+    g_byte_array_unref(expected);
     return 0;
 }
 

@@ -17,4 +17,7 @@
  * (pcap or pcapng). Returns NULL on error. */
 usb_device_t *pcap_backend_create(const char *path);
 
+/* Destroy and free all memory allocated by pcap_backend. */
+void pcap_backend_destroy(usb_device_t *dev);
+
 #endif /* PCAP_BACKEND_H */

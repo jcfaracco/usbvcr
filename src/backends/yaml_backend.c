@@ -234,3 +234,9 @@ usb_device_t *yaml_backend_create(const char *path)
     dev->state = st;
     return dev;
 }
+
+const char *yaml_backend_get_name(usb_device_t *dev)
+{
+    yaml_backend_state_t *st = dev->state;
+    return st->dev->name;
+}

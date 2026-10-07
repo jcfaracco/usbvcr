@@ -7,9 +7,12 @@ main_sources = files(
   'fuzz/fuzz_wrap.c',
   'backends/yaml_backend.c',
   'backends/pcap_backend.c',
+  'engine/qemu_engine.c',
+  'engine/local_engine.c',
 )
 
 backends = include_directories('backends')
+engine = include_directories('engine')
 
 # Go into individual module directories
 subdir('core')
@@ -20,7 +23,7 @@ subdir('fuzz')
 executable(
   'usbvcr',
   main_sources + lib_sources,
-  include_directories : [lib, core, fuzz, backends],
+  include_directories : [lib, core, fuzz, backends, engine],
   dependencies: [yaml_dep, glib_dep],
   install : true,
 )

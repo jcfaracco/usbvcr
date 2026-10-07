@@ -13,8 +13,11 @@ lib_sources = files(
   'codec.c',
   'flow.c',
   'version.c',
-  'ffs/ffs.c',
 )
+
+if have_local_engine
+  lib_sources += files('ffs/ffs.c')
+endif
 
 glib_dep = dependency('glib-2.0')
 if not glib_dep.found()

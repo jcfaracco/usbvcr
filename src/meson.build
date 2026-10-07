@@ -8,8 +8,11 @@ main_sources = files(
   'backends/yaml_backend.c',
   'backends/pcap_backend.c',
   'engine/qemu_engine.c',
-  'engine/local_engine.c',
 )
+
+if have_local_engine
+  main_sources += files('engine/local_engine.c')
+endif
 
 backends = include_directories('backends')
 engine = include_directories('engine')

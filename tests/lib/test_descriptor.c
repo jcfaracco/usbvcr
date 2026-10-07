@@ -62,6 +62,18 @@ START_TEST(test_desc_parse_config_2)
 }
 END_TEST
 
+START_TEST(test_yaml_backend_get_name)
+{
+    usb_device_t *dev = yaml_backend_create(TEST_DATA_DIR "/example1/example1.yaml");
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_str_eq(yaml_backend_get_name(dev), "Hello World Injector Keyboard");
+
+    dev = yaml_backend_create(TEST_DATA_DIR "/example2/example2.yaml");
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_str_eq(yaml_backend_get_name(dev), "Virtual USB Keyboard");
+}
+END_TEST
+
 
 static Suite *descriptor_suite(void)
 {
@@ -71,6 +83,7 @@ static Suite *descriptor_suite(void)
     tcase_add_test(tc, test_desc_parse_config_simple);
     tcase_add_test(tc, test_desc_parse_config_1);
     tcase_add_test(tc, test_desc_parse_config_2);
+    tcase_add_test(tc, test_yaml_backend_get_name);
     suite_add_tcase(s, tc);
     return s;
 }

@@ -164,6 +164,8 @@ static int parse_main(const char *path, yaml_device_t *dev)
 
     /* Fallback version check. */
     version = yaml_scalar(yaml_map_get(&doc, root, "version"));
+    g_free(dev->name);
+    dev->name = g_strdup(yaml_scalar(yaml_map_get(&doc, root, "name")));
     if (match_version(version) == YAML_VERSION_INVALID) {
         LOG_ERR("Mismatch version '%s'", version);
         g_free(dir);
@@ -322,6 +324,7 @@ void yaml_device_free(yaml_device_t *dev)
 {
     if (!dev)
         return;
+    g_free(dev->name);
     /* Entries own their trees/flows; dev->tree/flow are just aliases. */
     g_list_free_full(dev->devices, dev_entry_free);
     schema_free(dev->schemas);

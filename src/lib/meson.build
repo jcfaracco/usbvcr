@@ -15,6 +15,10 @@ lib_sources = files(
   'version.c',
 )
 
+if have_local_engine
+  lib_sources += files('ffs/ffs.c')
+endif
+
 glib_dep = dependency('glib-2.0')
 if not glib_dep.found()
   cc = meson.get_compiler('c')

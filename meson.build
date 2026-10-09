@@ -26,5 +26,15 @@ endif
 # Expose POSIX APIs (getaddrinfo, struct timeval, send, close, ...) under -std=c11.
 add_project_arguments('-D_DEFAULT_SOURCE -Wpedantic', language : 'c')
 
+# local_engine/ffs use FunctionFS + ConfigFS (/sys/kernel/config, sys/mount.h):
+# Linux-only, and only built when requested.
+have_local_engine = get_option('enable_local_engine') and host_machine.system() == 'linux'
+if get_option('enable_local_engine') and not have_local_engine
+    message('local engine disabled: FunctionFS/ConfigFS requires Linux')
+endif
+if have_local_engine
+    add_project_arguments('-DUSBVCR_HAVE_LOCAL_ENGINE=1', language : 'c')
+endif
+
 subdir('src')
 subdir('tests')

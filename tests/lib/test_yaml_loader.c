@@ -8,6 +8,8 @@
 
 #include <stdlib.h>
 #include <check.h>
+#include <glib.h>
+#include <glib/gstdio.h>
 
 #include "yaml/loader.h"
 
@@ -102,7 +104,26 @@ START_TEST(test_parse_from_file_example1)
         yaml_parse_from_file(TEST_DATA_DIR "/example1/example1.yaml");
     ck_assert_ptr_nonnull(dev);
     ck_assert_ptr_nonnull(dev->tree);
+    ck_assert_str_eq(dev->name, "Hello World Injector Keyboard");
     yaml_device_free(dev);
+}
+END_TEST
+
+START_TEST(test_parse_from_file_no_name)
+{
+    /* `name:` is optional — a project without one loads fine, dev->name
+     * stays NULL (main.c's --local path falls back to "usbvcr"). */
+    g_autofree char *dir = g_dir_make_tmp("usbvcr_noname_XXXXXX", NULL);
+    g_autofree char *path = g_build_filename(dir, "project.yaml", NULL);
+    ck_assert(g_file_set_contents(path, "version: \"1.0\"\n", -1, NULL));
+
+    yaml_device_t *dev = yaml_parse_from_file(path);
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_ptr_null(dev->name);
+    yaml_device_free(dev);
+
+    g_remove(path);
+    g_rmdir(dir);
 }
 END_TEST
 
@@ -124,6 +145,7 @@ static Suite *yaml_loader_suite(void)
     tcase_add_test(tc_load, test_parse_from_file_missing_dir);
     tcase_add_test(tc_load, test_device_free_null);
     tcase_add_test(tc_load, test_parse_from_file_example1);
+    tcase_add_test(tc_load, test_parse_from_file_no_name);
     suite_add_tcase(s, tc_load);
 
     return s;

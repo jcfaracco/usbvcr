@@ -10,11 +10,10 @@
  * pcapng, selected by file extension).
  *
  * This only exercises the pcap module itself (see tests/meson.build: this
- * binary links pcap.c alone). The full engine-level golden test described
- * in the module's original design - YAML-emulated device recorded to a
- * capture, replayed via pcap_backend, and compared transfer-for-transfer
- * against the live emulation - is still blocked on pcap_backend's replay
- * logic, which is a separate TODO.
+ * binary links pcap.c alone). The recording round-trip through
+ * pcap_backend itself - record a session, replay it, and assert the
+ * backend reproduces the exact payload bytes - lives in
+ * tests/integration/test_pcap_backend.c.
  */
 
 #include <stdio.h>

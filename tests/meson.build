@@ -139,8 +139,8 @@ if check_dep.found()
   )
   test('pcap_hid_capture', test_pcap_hid_capture)
 
-  test_pcap_backend = executable(
-    'test_pcap_backend',
+  test_pcap_backend_record = executable(
+    'test_pcap_backend_record',
     'integration/test_pcap_backend.c',
     files(
       '../src/backends/pcap_backend.c',
@@ -149,9 +149,22 @@ if check_dep.found()
     ),
     include_directories : [lib, core, backends],
     dependencies : [check_dep, glib_dep],
-    c_args : ['-DTEST_PCAPNG_PATH="' + meson.current_source_dir() + '/../test.pcapng"'],
   )
-  test('pcap_backend', test_pcap_backend)
+  test('pcap_backend_record', test_pcap_backend_record)
+
+  test_pcap_backend_hid_capture = executable(
+    'test_pcap_backend_hid_capture',
+    'backends/test_pcap_backend.c',
+    files(
+      '../src/backends/pcap_backend.c',
+      '../src/lib/pcap/pcap.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib, core, backends],
+    dependencies : [check_dep, glib_dep],
+    c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+  )
+  test('pcap_backend_hid_capture', test_pcap_backend_hid_capture)
 endif
 
 # TODO: canonical-dialect tests (codec / ValidationSuite).

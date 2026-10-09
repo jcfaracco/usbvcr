@@ -1,58 +1,149 @@
 /*
- * test_pcap_backend.c – Integration test validating pcap_backend against test.pcapng.
+ * test_pcap_backend.c - Integration test: record a session with pcap_writer,
+ * then replay it through pcap_backend and assert every op reproduces the
+ * exact payload bytes that were recorded.
  *
- * Simulates host submissions (like in Wireshark) and validates that the backend:
- *   1. Serves device and config descriptors via get_descriptor.
- *   2. Replays GET_DESCRIPTOR, SET_CONFIGURATION, and SET_IDLE via control().
- *   3. Replays Interrupt IN reports via ep_in() matching "Hello world".
- *   4. Handles NAK and teardown cleanly.
+ * This is the "recording round-trip" golden test flagged as a TODO in
+ * tests/integration/test_pcap_roundtrip.c: pcap_writer_* and pcap_backend
+ * are the write and replay halves of the same usbmon capture. A synthetic
+ * session is written here (no external fixture) covering:
+ *   - GET_DESCRIPTOR(DEVICE) and GET_DESCRIPTOR(CONFIG) control pairs
+ *     (exercises both get_descriptor() and control()'s cached-descriptor
+ *     path, which key off the submit's wValue regardless of recipient).
+ *   - SET_CONFIGURATION, replayed from the generic control-txn queue.
+ *   - Interrupt IN completions replayed byte-for-byte via ep_in().
+ *   - Interrupt OUT submissions validated byte-for-byte via ep_out(),
+ *     including the mismatch path.
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <stdbool.h>
-#include <ctype.h>
 #include <check.h>
 
 #include "pcap_backend.h"
+#include "pcap/pcap.h"
 
-#ifndef TEST_PCAPNG_PATH
-#define TEST_PCAPNG_PATH "test.pcapng"
-#endif
+#define CAPTURE_PATH "/tmp/usbvcr_pcap_backend_record.pcapng"
 
-/* Expected device descriptor for test.pcapng (18 bytes).
- * Vendor 0x04d9, Product 0x1702 (Holtek USB Keyboard). */
-static const uint8_t EXPECTED_DEVICE_DESC[18] = {
+static const uint8_t DEVICE_DESC_SETUP[8] = {
+    0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x12, 0x00
+};
+static const uint8_t DEVICE_DESC[18] = {
     0x12, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x08,
     0xd9, 0x04, 0x02, 0x17, 0x06, 0x04, 0x01, 0x02,
-    0x00, 0x01
+    0x00, 0x01,
 };
 
-/* Expected configuration descriptor (34 bytes total). */
-static const uint8_t EXPECTED_CONFIG_DESC[34] = {
-    0x09, 0x02, 0x22, 0x00, 0x01, 0x01, 0x00, 0xa0,
-    0x32, 0x09, 0x04, 0x00, 0x00, 0x01, 0x03, 0x01,
-    0x01, 0x00, 0x09, 0x21, 0x11, 0x01, 0x00, 0x01,
-    0x22, 0x2d, 0x00, 0x07, 0x05, 0x81, 0x03, 0x08,
-    0x00, 0x0a
+static const uint8_t CONFIG_DESC_SETUP[8] = {
+    0x80, 0x06, 0x00, 0x02, 0x00, 0x00, 0x09, 0x00
+};
+static const uint8_t CONFIG_DESC[9] = {
+    0x09, 0x02, 0x22, 0x00, 0x01, 0x01, 0x00, 0x80, 0x32
 };
 
-static char hid_keycode_to_char(uint8_t code)
+static const uint8_t SET_CONFIGURATION_SETUP[8] = {
+    0x00, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+static const uint8_t EP_IN_REPORT_1[8] = { 0x00, 0x00, 0x0b, 0x00, 0x00, 0x00, 0x00, 0x00 };
+static const uint8_t EP_IN_REPORT_2[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+
+static const uint8_t EP_OUT_LED_ON[1]  = { 0x02 };
+static const uint8_t EP_OUT_LED_OFF[1] = { 0x00 };
+
+/* Record a representative session: enumeration (two descriptors +
+ * SET_CONFIGURATION), two interrupt IN reports, two interrupt OUT
+ * submissions. Mirrors a real usbmon capture's shape closely enough to
+ * exercise every pcap_backend op. */
+static void record_session(const char *path)
 {
-    switch (code)
-    {
-    case 0x0b: return 'h';
-    case 0x08: return 'e';
-    case 0x0f: return 'l';
-    case 0x12: return 'o';
-    case 0x2c: return ' ';
-    case 0x1a: return 'w';
-    case 0x15: return 'r';
-    case 0x07: return 'd';
-    default:   return '?';
-    }
+    pcap_writer_t *w;
+    pcap_packet_t pkt;
+
+    remove(path);
+    w = pcap_writer_open(path);
+    ck_assert_ptr_nonnull(w);
+
+    /* GET_DESCRIPTOR(DEVICE) */
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.urb_id = 1; pkt.bus = 2; pkt.device = 5;
+    pkt.endpoint = 0x80; pkt.dir = PCAP_DIR_IN;
+    pkt.xfer = PCAP_XFER_CONTROL; pkt.event_type = 'S';
+    pkt.setup_valid = 1;
+    memcpy(pkt.setup, DEVICE_DESC_SETUP, 8);
+    pcap_writer_add(w, &pkt);
+
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.urb_id = 1; pkt.bus = 2; pkt.device = 5;
+    pkt.endpoint = 0x80; pkt.dir = PCAP_DIR_IN;
+    pkt.xfer = PCAP_XFER_CONTROL; pkt.event_type = 'C';
+    pkt.data = DEVICE_DESC; pkt.data_len = sizeof(DEVICE_DESC);
+    pcap_writer_add(w, &pkt);
+
+    /* GET_DESCRIPTOR(CONFIG) */
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.urb_id = 2; pkt.bus = 2; pkt.device = 5;
+    pkt.endpoint = 0x80; pkt.dir = PCAP_DIR_IN;
+    pkt.xfer = PCAP_XFER_CONTROL; pkt.event_type = 'S';
+    pkt.setup_valid = 1;
+    memcpy(pkt.setup, CONFIG_DESC_SETUP, 8);
+    pcap_writer_add(w, &pkt);
+
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.urb_id = 2; pkt.bus = 2; pkt.device = 5;
+    pkt.endpoint = 0x80; pkt.dir = PCAP_DIR_IN;
+    pkt.xfer = PCAP_XFER_CONTROL; pkt.event_type = 'C';
+    pkt.data = CONFIG_DESC; pkt.data_len = sizeof(CONFIG_DESC);
+    pcap_writer_add(w, &pkt);
+
+    /* SET_CONFIGURATION(1) */
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.urb_id = 3; pkt.bus = 2; pkt.device = 5;
+    pkt.endpoint = 0x00; pkt.dir = PCAP_DIR_OUT;
+    pkt.xfer = PCAP_XFER_CONTROL; pkt.event_type = 'S';
+    pkt.setup_valid = 1;
+    memcpy(pkt.setup, SET_CONFIGURATION_SETUP, 8);
+    pcap_writer_add(w, &pkt);
+
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.urb_id = 3; pkt.bus = 2; pkt.device = 5;
+    pkt.endpoint = 0x00; pkt.dir = PCAP_DIR_OUT;
+    pkt.xfer = PCAP_XFER_CONTROL; pkt.event_type = 'C';
+    pcap_writer_add(w, &pkt);
+
+    /* Interrupt IN completions, ep 0x81 */
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.urb_id = 10; pkt.bus = 2; pkt.device = 5;
+    pkt.endpoint = 0x81; pkt.dir = PCAP_DIR_IN;
+    pkt.xfer = PCAP_XFER_INT; pkt.event_type = 'C';
+    pkt.data = EP_IN_REPORT_1; pkt.data_len = sizeof(EP_IN_REPORT_1);
+    pcap_writer_add(w, &pkt);
+
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.urb_id = 11; pkt.bus = 2; pkt.device = 5;
+    pkt.endpoint = 0x81; pkt.dir = PCAP_DIR_IN;
+    pkt.xfer = PCAP_XFER_INT; pkt.event_type = 'C';
+    pkt.data = EP_IN_REPORT_2; pkt.data_len = sizeof(EP_IN_REPORT_2);
+    pcap_writer_add(w, &pkt);
+
+    /* Interrupt OUT submissions, ep 0x01 (LED state) */
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.urb_id = 20; pkt.bus = 2; pkt.device = 5;
+    pkt.endpoint = 0x01; pkt.dir = PCAP_DIR_OUT;
+    pkt.xfer = PCAP_XFER_INT; pkt.event_type = 'S';
+    pkt.data = EP_OUT_LED_ON; pkt.data_len = sizeof(EP_OUT_LED_ON);
+    pcap_writer_add(w, &pkt);
+
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.urb_id = 21; pkt.bus = 2; pkt.device = 5;
+    pkt.endpoint = 0x01; pkt.dir = PCAP_DIR_OUT;
+    pkt.xfer = PCAP_XFER_INT; pkt.event_type = 'S';
+    pkt.data = EP_OUT_LED_OFF; pkt.data_len = sizeof(EP_OUT_LED_OFF);
+    pcap_writer_add(w, &pkt);
+
+    pcap_writer_close(w);
 }
 
 START_TEST(test_pcap_backend_lifecycle)
@@ -62,49 +153,45 @@ START_TEST(test_pcap_backend_lifecycle)
     dev = pcap_backend_create("/nonexistent/path/capture.pcapng");
     ck_assert_ptr_null(dev);
 
-    dev = pcap_backend_create(TEST_PCAPNG_PATH);
+    record_session(CAPTURE_PATH);
+    dev = pcap_backend_create(CAPTURE_PATH);
     ck_assert_ptr_nonnull(dev);
     ck_assert_str_eq(dev->ops->name, "pcap");
 
     pcap_backend_destroy(dev);
+    remove(CAPTURE_PATH);
 }
 END_TEST
 
-START_TEST(test_pcap_backend_get_descriptor)
+START_TEST(test_pcap_backend_get_descriptor_matches_recording)
 {
     usb_device_t *dev;
     const uint8_t *desc;
     uint16_t len;
     int rc;
 
-    dev = pcap_backend_create(TEST_PCAPNG_PATH);
+    record_session(CAPTURE_PATH);
+    dev = pcap_backend_create(CAPTURE_PATH);
     ck_assert_ptr_nonnull(dev);
 
-    /* Query device descriptor */
-    desc = NULL;
-    len = 0;
+    desc = NULL; len = 0;
     rc = dev->ops->get_descriptor(dev, USB_DESC_DEVICE, 0, 0, &desc, &len);
     ck_assert_int_eq(rc, 0);
-    ck_assert_uint_eq(len, sizeof(EXPECTED_DEVICE_DESC));
-    ck_assert_mem_eq(desc, EXPECTED_DEVICE_DESC, sizeof(EXPECTED_DEVICE_DESC));
+    ck_assert_uint_eq(len, sizeof(DEVICE_DESC));
+    ck_assert_mem_eq(desc, DEVICE_DESC, sizeof(DEVICE_DESC));
 
-    /* Query config descriptor */
-    desc = NULL;
-    len = 0;
+    desc = NULL; len = 0;
     rc = dev->ops->get_descriptor(dev, USB_DESC_CONFIG, 0, 0, &desc, &len);
     ck_assert_int_eq(rc, 0);
-    ck_assert_uint_eq(len, sizeof(EXPECTED_CONFIG_DESC));
-    ck_assert_mem_eq(desc, EXPECTED_CONFIG_DESC, sizeof(EXPECTED_CONFIG_DESC));
-
-    /* Unknown descriptor type stalls */
-    rc = dev->ops->get_descriptor(dev, 0xfe, 0, 0, &desc, &len);
-    ck_assert_int_eq(rc, -1);
+    ck_assert_uint_eq(len, sizeof(CONFIG_DESC));
+    ck_assert_mem_eq(desc, CONFIG_DESC, sizeof(CONFIG_DESC));
 
     pcap_backend_destroy(dev);
+    remove(CAPTURE_PATH);
 }
 END_TEST
 
-START_TEST(test_pcap_backend_control_submissions)
+START_TEST(test_pcap_backend_control_matches_recording)
 {
     usb_device_t *dev;
     usb_control_packet_header_t setup;
@@ -112,117 +199,94 @@ START_TEST(test_pcap_backend_control_submissions)
     uint16_t len;
     int rc;
 
-    dev = pcap_backend_create(TEST_PCAPNG_PATH);
+    record_session(CAPTURE_PATH);
+    dev = pcap_backend_create(CAPTURE_PATH);
     ck_assert_ptr_nonnull(dev);
 
-    /* 1. GET_DESCRIPTOR (Device) */
+    /* GET_DESCRIPTOR(DEVICE) replayed through control() must match the
+     * exact bytes recorded in the capture's completion packet. */
     memset(&setup, 0, sizeof(setup));
-    setup.requesttype = 0x80;
-    setup.request     = 0x06;
-    setup.value       = 0x0100;
-    setup.index       = 0;
-    setup.length      = 18;
+    setup.requesttype = DEVICE_DESC_SETUP[0];
+    setup.request     = DEVICE_DESC_SETUP[1];
+    setup.value       = (uint16_t)DEVICE_DESC_SETUP[2] | ((uint16_t)DEVICE_DESC_SETUP[3] << 8);
+    setup.index       = (uint16_t)DEVICE_DESC_SETUP[4] | ((uint16_t)DEVICE_DESC_SETUP[5] << 8);
+    setup.length      = (uint16_t)DEVICE_DESC_SETUP[6] | ((uint16_t)DEVICE_DESC_SETUP[7] << 8);
     len = 0;
     rc = dev->ops->control(dev, &setup, data, &len);
     ck_assert_int_eq(rc, 0);
-    ck_assert_uint_eq(len, 18);
-    ck_assert_mem_eq(data, EXPECTED_DEVICE_DESC, 18);
+    ck_assert_uint_eq(len, sizeof(DEVICE_DESC));
+    ck_assert_mem_eq(data, DEVICE_DESC, sizeof(DEVICE_DESC));
 
-    /* 2. GET_DESCRIPTOR (HID Report Descriptor, 0x2200) */
+    /* SET_CONFIGURATION(1) replayed through the generic control-txn queue:
+     * recorded with a zero-length completion, so the replay must be ACKed
+     * with len 0 too. */
     memset(&setup, 0, sizeof(setup));
-    setup.requesttype = 0x81;
-    setup.request     = 0x06;
-    setup.value       = 0x2200;
-    setup.index       = 0;
-    setup.length      = 45;
-    len = 0;
+    setup.requesttype = SET_CONFIGURATION_SETUP[0];
+    setup.request     = SET_CONFIGURATION_SETUP[1];
+    setup.value       = (uint16_t)SET_CONFIGURATION_SETUP[2] | ((uint16_t)SET_CONFIGURATION_SETUP[3] << 8);
+    setup.index       = (uint16_t)SET_CONFIGURATION_SETUP[4] | ((uint16_t)SET_CONFIGURATION_SETUP[5] << 8);
+    setup.length      = (uint16_t)SET_CONFIGURATION_SETUP[6] | ((uint16_t)SET_CONFIGURATION_SETUP[7] << 8);
+    len = 0xffff;
     rc = dev->ops->control(dev, &setup, data, &len);
     ck_assert_int_eq(rc, 0);
-    ck_assert_uint_eq(len, 45);
-
-    /* 3. SET_CONFIGURATION (Value 1) */
-    memset(&setup, 0, sizeof(setup));
-    setup.requesttype = 0x00;
-    setup.request     = 0x09;
-    setup.value       = 1;
-    setup.index       = 0;
-    setup.length      = 0;
-    len = 0;
-    rc = dev->ops->control(dev, &setup, data, &len);
-    ck_assert_int_eq(rc, 0);
-
-    /* 4. SET_IDLE */
-    memset(&setup, 0, sizeof(setup));
-    setup.requesttype = 0x21;
-    setup.request     = 0x0a;
-    setup.value       = 0;
-    setup.index       = 0;
-    setup.length      = 0;
-    len = 0;
-    rc = dev->ops->control(dev, &setup, data, &len);
-    ck_assert_int_eq(rc, 0);
+    ck_assert_uint_eq(len, 0);
 
     pcap_backend_destroy(dev);
+    remove(CAPTURE_PATH);
 }
 END_TEST
 
-START_TEST(test_pcap_backend_ep_in_hello_world)
+START_TEST(test_pcap_backend_ep_in_matches_recording)
 {
     usb_device_t *dev;
     uint8_t buf[64];
-    char typed[64];
-    size_t typed_len;
     int n;
 
-    dev = pcap_backend_create(TEST_PCAPNG_PATH);
+    record_session(CAPTURE_PATH);
+    dev = pcap_backend_create(CAPTURE_PATH);
     ck_assert_ptr_nonnull(dev);
 
-    typed_len = 0;
+    /* Reports must replay in recording order, byte-for-byte. */
+    n = dev->ops->ep_in(dev, 0x81, buf, sizeof(buf));
+    ck_assert_int_eq(n, sizeof(EP_IN_REPORT_1));
+    ck_assert_mem_eq(buf, EP_IN_REPORT_1, sizeof(EP_IN_REPORT_1));
 
-    /* Drain all interrupt reports on ep 0x81 */
-    while ((n = dev->ops->ep_in(dev, 0x81, buf, sizeof(buf))) > 0)
-    {
-        ck_assert_int_ge(n, 3);
-        uint8_t modifiers = buf[0];
-        uint8_t keycode = buf[2];
+    n = dev->ops->ep_in(dev, 0x81, buf, sizeof(buf));
+    ck_assert_int_eq(n, sizeof(EP_IN_REPORT_2));
+    ck_assert_mem_eq(buf, EP_IN_REPORT_2, sizeof(EP_IN_REPORT_2));
 
-        if (keycode != 0)
-        {
-            char ch = hid_keycode_to_char(keycode);
-            if (modifiers & 0x02)
-            {
-                ch = (char)toupper((unsigned char)ch);
-            }
-            ck_assert_uint_lt(typed_len, sizeof(typed) - 1);
-            typed[typed_len++] = ch;
-        }
-    }
-    typed[typed_len] = '\0';
-
-    ck_assert_str_eq(typed, "Hello world");
-
-    /* Drained queue returns 0 (NAK) */
+    /* Drained queue NAKs. */
     n = dev->ops->ep_in(dev, 0x81, buf, sizeof(buf));
     ck_assert_int_eq(n, 0);
 
     pcap_backend_destroy(dev);
+    remove(CAPTURE_PATH);
 }
 END_TEST
 
-START_TEST(test_pcap_backend_ep_out_validation)
+START_TEST(test_pcap_backend_ep_out_matches_recording)
 {
     usb_device_t *dev;
-    uint8_t dummy[1] = { 0x02 };
     int rc;
 
-    dev = pcap_backend_create(TEST_PCAPNG_PATH);
+    record_session(CAPTURE_PATH);
+    dev = pcap_backend_create(CAPTURE_PATH);
     ck_assert_ptr_nonnull(dev);
 
-    /* When no OUT packet is queued for ep 0x01, returns -1 */
-    rc = dev->ops->ep_out(dev, 0x01, dummy, sizeof(dummy));
+    /* First recorded OUT payload replayed back verbatim: matches. */
+    rc = dev->ops->ep_out(dev, 0x01, EP_OUT_LED_ON, sizeof(EP_OUT_LED_ON));
+    ck_assert_int_eq(rc, 0);
+
+    /* Second recorded OUT payload, fed the wrong bytes: mismatch detected. */
+    rc = dev->ops->ep_out(dev, 0x01, EP_OUT_LED_ON, sizeof(EP_OUT_LED_ON));
+    ck_assert_int_eq(rc, -1);
+
+    /* Queue now drained: unexpected OUT. */
+    rc = dev->ops->ep_out(dev, 0x01, EP_OUT_LED_OFF, sizeof(EP_OUT_LED_OFF));
     ck_assert_int_eq(rc, -1);
 
     pcap_backend_destroy(dev);
+    remove(CAPTURE_PATH);
 }
 END_TEST
 
@@ -231,14 +295,14 @@ static Suite *pcap_backend_suite(void)
     Suite *s;
     TCase *tc;
 
-    s = suite_create("pcap_backend");
+    s = suite_create("pcap_backend_record");
     tc = tcase_create("core");
 
     tcase_add_test(tc, test_pcap_backend_lifecycle);
-    tcase_add_test(tc, test_pcap_backend_get_descriptor);
-    tcase_add_test(tc, test_pcap_backend_control_submissions);
-    tcase_add_test(tc, test_pcap_backend_ep_in_hello_world);
-    tcase_add_test(tc, test_pcap_backend_ep_out_validation);
+    tcase_add_test(tc, test_pcap_backend_get_descriptor_matches_recording);
+    tcase_add_test(tc, test_pcap_backend_control_matches_recording);
+    tcase_add_test(tc, test_pcap_backend_ep_in_matches_recording);
+    tcase_add_test(tc, test_pcap_backend_ep_out_matches_recording);
 
     suite_add_tcase(s, tc);
     return s;

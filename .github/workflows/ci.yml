@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libglib2.0-dev \
+            libyaml-dev \
+            libsubunit-dev \
+            check \
+            gcovr
+
+      - name: Install meson + ninja
+        run: python3 -m pip install --upgrade meson ninja
+
+      - name: Configure (coverage build)
+        run: meson setup build -Denable_coverage=true
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Run test suite
+        run: meson test -C build --print-errorlogs
+
+      - name: Upload test log on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: meson-testlog
+          path: build/meson-logs/testlog.txt
+          retention-days: 7
+
+      - name: Generate coverage report
+        run: |
+          mkdir -p coverage
+          gcovr -r . build \
+            --exclude 'tests/.*' \
+            --xml-pretty --output coverage/coverage.xml \
+            --html-details --output coverage/index.html \
+            --print-summary | tee coverage/summary.txt
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          {
+            echo "## Coverage summary"
+            echo
+            echo '```'
+            cat coverage/summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14

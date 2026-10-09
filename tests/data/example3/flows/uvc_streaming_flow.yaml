@@ -1,0 +1,126 @@
+states:
+  # Single operational state (same reasoning as example1/hello_world_flow:
+  # the host keeps issuing class control requests - PROBE/COMMIT, selector
+  # input - after SET_INTERFACE, so every rule must stay live rather than
+  # being dropped on a transition). Streaming is armed by queueing synthetic
+  # isochronous payloads directly in the SET_INTERFACE(alt=1) rule, the same
+  # pattern hello_world_flow uses for SET_CONFIGURATION.
+  - name: "operational"
+    rules:
+      # GET_DESCRIPTOR (device)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0100
+        actions:
+          - respond_with: "$device.device_descriptor"
+
+      # GET_DESCRIPTOR (configuration)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0200
+        actions:
+          - respond_with: "$device.configurations[0]"
+
+      # SET_CONFIGURATION(1): ACK enumeration.
+      - match:
+          bmRequestType: 0x00
+          bRequest: 9           # SET_CONFIGURATION
+          wValue: 1
+        actions:
+          - respond_with_status: 0
+
+      # VS PROBE_CONTROL (cs=0x01) GET_CUR/GET_MIN/GET_MAX/GET_DEF on
+      # interface 1: the skeleton exposes one fixed format, so every GET_*
+      # variant answers with the same negotiated block. Only GET_CUR (0x81)
+      # is modeled here; see dev-uvc.c's usb_uvc_handle_control for the full
+      # request set this flow is standing in for.
+      - match:
+          bmRequestType: 0x81  # IN, class, interface
+          bRequest: 0x81       # UVC_GET_CUR
+          wValue: 0x0100       # cs=UVC_VS_PROBE_CONTROL, idx=0
+          wIndex: 0x0001       # interface 1
+        actions:
+          - respond_with: "$device.probe_commit_response"
+
+      # VS COMMIT_CONTROL (cs=0x02) GET_CUR: same negotiated block.
+      - match:
+          bmRequestType: 0x81
+          bRequest: 0x81
+          wValue: 0x0200
+          wIndex: 0x0001
+        actions:
+          - respond_with: "$device.probe_commit_response"
+
+      # PROBE/COMMIT SET_CUR: ACK. The skeleton has only one supported
+      # config, so there is nothing to actually latch.
+      - match:
+          bmRequestType: 0x21  # OUT, class, interface
+          bRequest: 0x01       # UVC_SET_CUR
+          wValue: 0x0100
+          wIndex: 0x0001
+        actions:
+          - respond_with_status: 0
+      - match:
+          bmRequestType: 0x21
+          bRequest: 0x01
+          wValue: 0x0200
+          wIndex: 0x0001
+        actions:
+          - respond_with_status: 0
+
+      # SU4 selector unit input select: GET_CUR returns a canned "camera"
+      # (input 1); SET_CUR is ACKed without changing the canned reply
+      # (deterministic replay, no mutable device state - README §3.3).
+      - match:
+          bmRequestType: 0x81
+          bRequest: 0x81       # UVC_GET_CUR
+          wValue: 0x0100       # cs=0x01, idx=0
+          wIndex: 0x0004       # unit 4 (SU4), iface 0
+        actions:
+          - respond_with: "$device.selector_input_response"
+      - match:
+          bmRequestType: 0x21
+          bRequest: 0x01       # UVC_SET_CUR
+          wValue: 0x0100
+          wIndex: 0x0004
+        actions:
+          - respond_with_status: 0
+
+      # SET_INTERFACE(VS iface=1, alt=1): host arms streaming. ACK, then
+      # queue a couple of isochronous payloads on EP 0x82 so ep_in has
+      # something to replay. Each payload is the 2-byte UVC header
+      # (bHeaderLength, bmHeaderInfo FID/EOF) followed by 8 bytes of the
+      # device's blank YUYV frame (Y=0, U/V=128 repeating, per
+      # generate_blank_frame in dev-uvc.c) - a stand-in for the real
+      # 1280x960 (2,457,600-byte) frame, which is far past the loader's
+      # 1 MiB file-size cap and not useful to hand-author anyway.
+      - match:
+          bmRequestType: 0x01  # Host-to-device, Standard, Interface
+          bRequest: 0x0b       # SET_INTERFACE
+          wValue: 1            # alternate setting 1 (active)
+          wIndex: 1            # interface 1 (VideoStreaming)
+        actions:
+          - respond_with_status: 0
+          - queue_endpoint_data:
+              endpoint: 0x82
+              payloads:
+                - hex: "02020080008000800080"  # frame 0: FID=0, EOF=1
+                - hex: "02030080008000800080"  # frame 1: FID=1, EOF=1
+
+      # SET_INTERFACE(VS iface=1, alt=0): back to zero-bandwidth idle. ACK
+      # only - this replay is static, so there is no re-arming to undo.
+      - match:
+          bmRequestType: 0x01
+          bRequest: 0x0b
+          wValue: 0
+          wIndex: 1
+        actions:
+          - respond_with_status: 0
+
+      # Isochronous video IN polling: NAK once the queued frames are drained.
+      - match:
+          endpoint_poll: 0x82
+        actions:
+          - return_nak_if_queue_empty: true

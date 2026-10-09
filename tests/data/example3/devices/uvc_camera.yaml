@@ -1,0 +1,164 @@
+device_descriptor:
+  - bLength: 18
+    bDescriptorType: 0x01
+    bcdUSB: 0x0200
+    bDeviceClass: 0xef        # Miscellaneous: IAD-compliant composite device
+    bDeviceSubClass: 0x02
+    bDeviceProtocol: 0x01
+    bMaxPacketSize0: 64
+    idVendor: 0x046d          # Logitech
+    idProduct: 0x082d         # C920 HD Pro Webcam
+    bcdDevice: 0x0000
+    iManufacturer: 1
+    iProduct: 2
+    iSerialNumber: 3
+    bNumConfigurations: 1
+
+configurations:
+  - bLength: 9
+    bDescriptorType: 0x02
+    # 9 (config) + 8 (IAD)
+    # + [9 iface0 + 66 VC class-specific + 7 ep1 + 5 CS-endpoint] = 87
+    # + [9 iface1/alt0 + 79 VS class-specific] = 88
+    # + [9 iface1/alt1 + 7 ep2] = 16
+    # = 208
+    wTotalLength: 208
+    bNumInterfaces: 2
+    bConfigurationValue: 1
+    iConfiguration: 4
+    bmAttributes: 0xc0        # USB_CFG_ATT_ONE | USB_CFG_ATT_SELFPOWER
+    bMaxPower: 250            # 0xfa, 500 mA
+
+    # Interface Association Descriptor: groups VideoControl (0) and
+    # VideoStreaming (1) under one USB Video Class function. Sits right after
+    # the configuration descriptor, before the first interface.
+    interface_association:
+      bLength: 8
+      bDescriptorType: 0x0b   # USB_DT_INTERFACE_ASSOCIATION
+      bFirstInterface: 0
+      bInterfaceCount: 2
+      bFunctionClass: 0x0e    # USB_CLASS_VIDEO
+      bFunctionSubClass: 0x03 # SC_VIDEO_INTERFACE_COLLECTION
+      bFunctionProtocol: 0x00
+      iFunction: 5
+
+    interfaces:
+      # Interface 0: VideoControl
+      - bLength: 9
+        bDescriptorType: 0x04
+        bInterfaceNumber: 0
+        bAlternateSetting: 0
+        bNumEndpoints: 1
+        bInterfaceClass: 0x0e      # USB_CLASS_VIDEO
+        bInterfaceSubClass: 0x01   # USB_SUBCLASS_VIDEO_CONTROL
+        bInterfaceProtocol: 0x00
+        iInterface: 5
+
+        # VC class-specific descriptors (UVC 1.0 s3.7). Field widths here
+        # don't follow the bcd/id/w-prefix convention (dwClockFrequency is
+        # 4 bytes, GUIDs are 16), so each one goes through the raw hex escape
+        # hatch (docs/yaml_dialect.md "payloads/", README §3.2) instead of
+        # named fields.
+        vc_interface_header:
+          # bLength=0x0D, CS_INTERFACE, VC_HEADER, bcdUVC=0x0100,
+          # wTotalLength=0x0042 (sum of the 6 class-specific descriptors in
+          # this interface), dwClockFrequency=6000000, bInCollection=1,
+          # baInterfaceNr[0]=1
+          hex: "0D240100014200808D5B000101"
+
+        vc_input_terminal_camera:
+          # IT1: Camera Terminal (wTerminalType 0x0201), no optical controls.
+          hex: "1124020101020000000000000000020000"
+
+        vc_input_terminal_composite:
+          # IT2: Composite external video terminal (wTerminalType 0x0401).
+          hex: "0824020201040000"
+
+        vc_output_terminal:
+          # OT3: USB streaming output terminal, sourced from SU4.
+          hex: "092403030101000500"
+
+        vc_selector_unit:
+          # SU4: selects between IT1 (camera) and IT2 (composite).
+          hex: "0824040402010200"
+
+        vc_processing_unit:
+          # PU5: no controls implemented yet (bmControls all zero).
+          hex: "0B24050504000002000000"
+
+        endpoints:
+          # EP1: VideoControl status interrupt. The skeleton device never
+          # raises events, so polls on this endpoint are always NAKed.
+          - bLength: 7
+            bDescriptorType: 0x05
+            bEndpointAddress: 0x81
+            bmAttributes: 0x03       # Interrupt
+            wMaxPacketSize: 8
+            bInterval: 0xff
+
+        vc_cs_endpoint:
+          # Class-specific (interrupt) endpoint descriptor, immediately after
+          # the standard EP1 descriptor on the wire.
+          hex: "0525030800"
+
+      # Interface 1, Alt 0: VideoStreaming, zero-bandwidth (idle)
+      - bLength: 9
+        bDescriptorType: 0x04
+        bInterfaceNumber: 1
+        bAlternateSetting: 0
+        bNumEndpoints: 0
+        bInterfaceClass: 0x0e
+        bInterfaceSubClass: 0x02    # USB_SUBCLASS_VIDEO_STREAMING
+        bInterfaceProtocol: 0x00
+        iInterface: 6
+
+        vs_input_header:
+          # bNumFormats=1, wTotalLength=0x004F (14+27+38 below),
+          # bEndpointAddress=0x82, bTerminalLink=OT3.
+          hex: "0E2401014F008200030000000100"
+
+        vs_format_uncompressed:
+          # Single format: YUY2 (YUYV), 16 bits/pixel.
+          # guidFormat = {32595559-0000-0010-8000-00AA00389B71}
+          hex: "1B240401015955593200001000800000AA00389B71100100000000"
+
+        vs_frame_uncompressed:
+          # 1280x960, dwFrameInterval 666666 (100ns units) ~= 15fps,
+          # continuous (bFrameIntervalType 0).
+          hex: "26240501000005C0030000941100009411008025002A2C0A00002A2C0A002A2C0A0000000000"
+
+      # Interface 1, Alt 1: VideoStreaming, active (isochronous video data)
+      - bLength: 9
+        bDescriptorType: 0x04
+        bInterfaceNumber: 1
+        bAlternateSetting: 1
+        bNumEndpoints: 1
+        bInterfaceClass: 0x0e
+        bInterfaceSubClass: 0x02
+        bInterfaceProtocol: 0x00
+        iInterface: 6
+
+        endpoints:
+          # EP2: isochronous video IN, 1023 bytes/microframe (legal at both
+          # full and high speed, so the same tree backs either).
+          - bLength: 7
+            bDescriptorType: 0x05
+            bEndpointAddress: 0x82
+            bmAttributes: 0x05       # Isochronous, asynchronous
+            wMaxPacketSize: 1023
+            bInterval: 1
+
+# UVC class-specific control replies that aren't part of the GET_DESCRIPTOR
+# tree (negotiated at runtime via SET_CUR/GET_CUR, not read by descriptor
+# index). Kept OUTSIDE `configurations` like report_descriptor in the HID
+# examples, and referenced by the flow as $device.<name> - the same raw hex
+# escape hatch used for the class-specific descriptors above.
+probe_commit_response:
+  # 26-byte Video Probe/Commit Control (UVC 1.0 s4.3.1.1): bFormatIndex=1,
+  # bFrameIndex=1, dwFrameInterval=666666, wCompWindowSize=1, wDelay=32,
+  # dwMaxVideoFrameSize=2457600 (1280x960 YUYV), dwMaxPayloadTransferSize=1023.
+  hex: "000001012A2C0A000000000000000100200000802500FF030000"
+
+selector_input_response:
+  # SU4 current input (1 byte): canned reply selecting the camera input (1).
+  hex: "01"

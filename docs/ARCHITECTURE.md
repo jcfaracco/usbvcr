@@ -208,19 +208,15 @@ data, not per-class C.
   `logical_minimum`).
 - Unknown token → hard error, not silent skip (fuzzing needs determinism).
 
-## 7. converter.py (pcap → project)
+## 7. scripts/pcap_to_yaml.py (pcap → project)
 
-Extracts a device+flow project from a Wireshark JSON export. Current state is a
-usable skeleton with known gaps to fix:
-- Report-descriptor path writes a placeholder byte instead of real hex —
-  extract actual bytes from the packet frame.
-- `wValue` fallback concatenation is fragile — harden.
-- Emits canonical-dialect `devices/` + `flows/` YAML.
-
-`scripts/pcap_to_yaml.py` does the same job directly from a usbmon
-pcap/pcapng capture (the same framing `src/lib/pcap/pcap.c` reads/writes),
-with a raw-payload fallback whenever the heuristics can't confidently produce
-symbolic dialect fields.
+Extracts a device+flow project directly from a usbmon pcap/pcapng capture
+(the same framing `src/lib/pcap/pcap.c` reads/writes — see
+[docs/yaml_dialect.md](yaml_dialect.md)), emitting canonical-dialect
+`devices/` + `flows/` (+ `codecs/` when the HID report descriptor decompiles
+cleanly) YAML. Anything the heuristics can't confidently turn into symbolic
+dialect fields falls back to a raw payload file, so the emitted project still
+reproduces the capture byte-for-byte.
 
 ## 8. Validation / CVE tests
 
@@ -238,5 +234,5 @@ A separate test driver reuses `yaml_loader` plus a raw inject path into
 4. `flow` — states, rules, actions, transitions, bounded `when:`.
 5. `yaml_backend` — `usb_device_ops` adapter over tree + flow.
 6. Wire into `main.c` — `--yaml <path>`; keep the pcap-replay backend.
-7. Fix `converter.py` real-hex extraction.
+7. `scripts/pcap_to_yaml.py` — pcap capture to canonical-dialect project.
 8. `ValidationSuite` runner.

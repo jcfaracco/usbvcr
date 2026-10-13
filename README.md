@@ -129,7 +129,7 @@ reference.
 | `src/fuzz/`       | A `usb_device_ops` wrapper that mutates traffic for any backend. |
 | `tests/`          | `check`-based unit/integration tests + example YAML projects. |
 | `docs/`           | Architecture deep-dive and the full YAML dialect reference. |
-| `scripts/`, `tools/` | pcap → YAML project converters. |
+| `scripts/`          | pcap → YAML project converter (`pcap_to_yaml.py`). |
 
 ## Testing
 

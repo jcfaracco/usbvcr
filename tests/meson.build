@@ -112,6 +112,20 @@ if check_dep.found()
   )
   test('usb_core', test_usb_core)
 
+  test_transport = executable(
+    'test_transport',
+    'core/test_transport.c',
+    files(
+      '../src/core/transport.c',
+      '../src/lib/log.c',
+      '../src/lib/pcap/pcap.c',
+      '../src/lib/pcap/record.c',
+    ),
+    include_directories : [lib, core],
+    dependencies : [check_dep, glib_dep, dependency('threads')],
+  )
+  test('transport', test_transport)
+
   test_pcap_roundtrip = executable(
     'test_pcap_roundtrip',
     'integration/test_pcap_roundtrip.c',

@@ -17,6 +17,17 @@ if check_dep.found()
   )
   test('version', test_version)
 
+  test_utils = executable(
+    'test_utils',
+    'lib/test_utils.c',
+    files(
+      '../src/lib/utils.c',
+    ),
+    include_directories : [lib],
+    dependencies : [check_dep],
+  )
+  test('utils', test_utils)
+
   test_yaml_loader = executable(
     'test_yaml_loader',
     'lib/test_yaml_loader.c',
@@ -100,6 +111,20 @@ if check_dep.found()
     dependencies : [check_dep, glib_dep, dependency('threads')],
   )
   test('usb_core', test_usb_core)
+
+  test_transport = executable(
+    'test_transport',
+    'core/test_transport.c',
+    files(
+      '../src/core/transport.c',
+      '../src/lib/log.c',
+      '../src/lib/pcap/pcap.c',
+      '../src/lib/pcap/record.c',
+    ),
+    include_directories : [lib, core],
+    dependencies : [check_dep, glib_dep, dependency('threads')],
+  )
+  test('transport', test_transport)
 
   test_pcap_roundtrip = executable(
     'test_pcap_roundtrip',

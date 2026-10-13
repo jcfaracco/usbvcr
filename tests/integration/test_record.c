@@ -214,6 +214,112 @@ START_TEST(test_record_skips_without_ctx)
 }
 END_TEST
 
+/* record_open() on an unwritable path reports failure instead of crashing. */
+START_TEST(test_record_open_failure)
+{
+    ck_assert_int_lt(record_open("/nonexistent-dir/does/not/exist.pcapng"), 0);
+    record_close();   /* safe even though open failed */
+}
+END_TEST
+
+/* RT_BULK_PACKET and RT_START_INTERRUPT_RECEIVING / RT_SET_CONFIGURATION on
+ * the recv side, plus RT_BULK_PACKET / RT_CONFIGURATION_STATUS on the send
+ * side, and a control recv that carries trailing OUT data. */
+START_TEST(test_record_bulk_and_control_paths)
+{
+    const char *path = "/tmp/usbvcr_test_record_bulk.pcapng";
+    remove(path);
+    ck_assert_int_eq(record_open(path), 0);
+
+    usb_record_ctx_t ctx = { .bus = 0, .device = 1 };
+
+    /* 1. Host -> device control SETUP with trailing OUT data (recv side). */
+    usb_control_packet_header_t setup = {
+        .endpoint = 0, .request = USB_REQ_SET_CONFIGURATION,
+        .requesttype = 0, /* OUT */ .status = 0,
+        .value = 0, .index = 0, .length = 2,
+    };
+    uint8_t ctl_frame[sizeof(setup) + 2];
+    memcpy(ctl_frame, &setup, sizeof(setup));
+    ctl_frame[sizeof(setup)]     = 0xAB;
+    ctl_frame[sizeof(setup) + 1] = 0xCD;
+    usb_header_t ctl_hdr = { .type = RT_CONTROL_PACKET, .length = sizeof(ctl_frame), .id = 1 };
+    record_conn_recv(&ctl_hdr, ctl_frame, sizeof(ctl_frame), &ctx);
+
+    /* 2. Host -> device bulk OUT, ep 0x02 (recv side). */
+    usb_interrupt_packet_header_t bulk_out_hdr = { .endpoint = 0x02, .status = 0, .length = 2 };
+    uint8_t bulk_out[sizeof(bulk_out_hdr) + 2];
+    memcpy(bulk_out, &bulk_out_hdr, sizeof(bulk_out_hdr));
+    bulk_out[sizeof(bulk_out_hdr)]     = 0x01;
+    bulk_out[sizeof(bulk_out_hdr) + 1] = 0x02;
+    usb_header_t hdr_bulk_out = { .type = RT_BULK_PACKET, .length = sizeof(bulk_out), .id = 2 };
+    record_conn_recv(&hdr_bulk_out, bulk_out, sizeof(bulk_out), &ctx);
+
+    /* 3. Device -> host bulk IN, ep 0x02 (send side). */
+    usb_interrupt_packet_header_t bulk_in_hdr = { .endpoint = 0x02, .status = 0, .length = 3 };
+    uint8_t bulk_in[sizeof(bulk_in_hdr) + 3];
+    memcpy(bulk_in, &bulk_in_hdr, sizeof(bulk_in_hdr));
+    memset(bulk_in + sizeof(bulk_in_hdr), 0x99, 3);
+    record_conn_send(RT_BULK_PACKET, 2, bulk_in, sizeof(bulk_in), &ctx);
+
+    /* 4. Host asks to start interrupt receiving on ep 0x03 (recv side). */
+    uint8_t ep = 0x03;
+    usb_header_t hdr_start = { .type = RT_START_INTERRUPT_RECEIVING, .length = 1, .id = 0 };
+    record_conn_recv(&hdr_start, &ep, 1, &ctx);
+
+    /* 5. Host sets configuration 1 (recv side, RT_SET_CONFIGURATION). */
+    uint8_t cfg = 1;
+    usb_header_t hdr_setcfg = { .type = RT_SET_CONFIGURATION, .length = 1, .id = 3 };
+    record_conn_recv(&hdr_setcfg, &cfg, 1, &ctx);
+
+    /* 6. Device acks the configuration change (send side). */
+    uint8_t status[2] = { 0, 1 };
+    record_conn_send(RT_CONFIGURATION_STATUS, 3, status, sizeof(status), &ctx);
+
+    record_close();
+
+    decoded_epb_t epbs[8];
+    size_t n = read_epbs(path, epbs, 8);
+    ck_assert_uint_eq(n, 6);
+
+    /* (1) control recv with trailing OUT data. */
+    ck_assert_int_eq(epbs[0].hdr.type, 'S');
+    ck_assert_uint_eq(epbs[0].hdr.xfer_type, PCAP_XFER_CONTROL);
+    ck_assert_uint_eq(epbs[0].payload_len, 2);
+    ck_assert_uint_eq(epbs[0].payload[0], 0xAB);
+    ck_assert_uint_eq(epbs[0].payload[1], 0xCD);
+
+    /* (2) bulk OUT recv. */
+    ck_assert_int_eq(epbs[1].hdr.type, 'S');
+    ck_assert_uint_eq(epbs[1].hdr.xfer_type, PCAP_XFER_BULK);
+    ck_assert_uint_eq(epbs[1].hdr.epnum, 0x02);
+    ck_assert_uint_eq(epbs[1].payload_len, 2);
+
+    /* (3) bulk IN send. */
+    ck_assert_int_eq(epbs[2].hdr.type, 'C');
+    ck_assert_uint_eq(epbs[2].hdr.xfer_type, PCAP_XFER_BULK);
+    ck_assert_uint_eq(epbs[2].hdr.epnum, 0x82);
+    ck_assert_uint_eq(epbs[2].payload_len, 3);
+
+    /* (4) start interrupt receiving. */
+    ck_assert_int_eq(epbs[3].hdr.type, 'S');
+    ck_assert_uint_eq(epbs[3].hdr.xfer_type, PCAP_XFER_INT);
+    ck_assert_uint_eq(epbs[3].hdr.epnum, 0x83);
+
+    /* (5) set configuration recv. */
+    ck_assert_int_eq(epbs[4].hdr.type, 'S');
+    ck_assert_uint_eq(epbs[4].hdr.xfer_type, PCAP_XFER_CONTROL);
+    ck_assert_int_eq(epbs[4].hdr.s.setup[1], USB_REQ_SET_CONFIGURATION);
+    ck_assert_int_eq(epbs[4].hdr.s.setup[2], 1);
+
+    /* (6) configuration status send. */
+    ck_assert_int_eq(epbs[5].hdr.type, 'C');
+    ck_assert_uint_eq(epbs[5].hdr.xfer_type, PCAP_XFER_CONTROL);
+
+    remove(path);
+}
+END_TEST
+
 static Suite *record_suite(void)
 {
     Suite *s = suite_create("record");
@@ -222,6 +328,8 @@ static Suite *record_suite(void)
     tcase_add_test(tc, test_record_device_announce_writes_four_packets);
     tcase_add_test(tc, test_record_conn_send_recv_writes_packets);
     tcase_add_test(tc, test_record_skips_without_ctx);
+    tcase_add_test(tc, test_record_open_failure);
+    tcase_add_test(tc, test_record_bulk_and_control_paths);
 
     suite_add_tcase(s, tc);
     return s;

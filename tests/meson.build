@@ -17,6 +17,17 @@ if check_dep.found()
   )
   test('version', test_version)
 
+  test_utils = executable(
+    'test_utils',
+    'lib/test_utils.c',
+    files(
+      '../src/lib/utils.c',
+    ),
+    include_directories : [lib],
+    dependencies : [check_dep],
+  )
+  test('utils', test_utils)
+
   test_yaml_loader = executable(
     'test_yaml_loader',
     'lib/test_yaml_loader.c',

@@ -1,30 +1,35 @@
-# usbvcr — YAML-Driven USB Device Emulator
+# usbvcr
 
-A generic USB device emulator and fuzzing harness. Devices are described in
-**human-readable YAML** — descriptors, behavior, and raw payloads — and served
-over the **usbredir** wire protocol to QEMU. No per-device C code: one generic
-engine serializes YAML into binary USB frames and drives the state machine.
+**YAML in, real USB traffic out.** Describe a USB device — descriptors,
+behavior, raw payloads — in human-readable YAML, and usbvcr serves it live to
+QEMU (or a real Linux USB gadget) over the wire. No per-device C code, no
+recompiling: one generic engine turns a YAML project into binary USB frames
+and drives the state machine.
 
-## The name
+[![CI](https://github.com/jcfaracco/usbvcr/actions/workflows/ci.yml/badge.svg)](https://github.com/jcfaracco/usbvcr/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![C11](https://img.shields.io/badge/C-11-00599C.svg)](src)
+[![Build: Meson](https://img.shields.io/badge/build-meson%20%2B%20ninja-informational.svg)](meson.build)
 
-**usbvcr** — USB *video-cassette recorder*. Like a VCR, it **records** USB
-traffic (capture a real device's exchanges to pcap / YAML) and **replays** it
-(serve that description back to a guest). One tape format, two decks: a YAML
-description of any device, played through a generic engine.
+## Why usbvcr?
 
-> Note: **usbredir** here is the wire protocol/transport spoken to QEMU
-> (`-device usb-redir`), not this project. usbvcr is the emulator that speaks it.
+- 🎛️ **Device-as-data** — a device is a directory of YAML, not a C file.
+  Schemas, instances, and behavior are cleanly separated.
+- 🧩 **Two authoring modes** — named descriptor fields for structured
+  devices, raw `hex` / file payloads for everything else.
+- 🔁 **Record *and* replay** — capture a real device's USB traffic to
+  pcap/pcapng and play it straight back to a guest.
+- 🧠 **Declarative behavior** — flows are a small, Ansible-flavored state
+  machine (`match` → `actions` → `transition_state`), not callback soup.
+- 🧪 **Fuzz-friendly by design** — every field is overridable and every
+  transfer can be mutated; built for finding guest USB-stack bugs.
+- 🐧 **Two engines** — speak usbredir to QEMU, or drive a real Linux
+  FunctionFS/ConfigFS gadget with the exact same device description.
 
-This document is the **architecture and implementation plan**. It supersedes
-the old "hello world" client README.
+## Quick start
 
----
+**Dependencies**
 
-## Build & test
-
-The project builds with **Meson + Ninja**.
-
-Dependencies:
 - C11 compiler (gcc or clang)
 - `meson >= 1.1.0`, `ninja`
 - `glib-2.0`, `libyaml` (`yaml-0.1`) — runtime deps
@@ -41,243 +46,117 @@ ninja -C build
 meson test -C build
 ```
 
-Useful options:
+**Run it**
 
 ```sh
-# Coverage build (needs gcovr)
+# Emulate a YAML-described device, served to QEMU over usbredir
+./build/src/usbvcr --yaml path/to/device-project --host localhost --port 1337
+
+# Replay a captured pcap/pcapng trace instead
+./build/src/usbvcr --pcap capture.pcapng
+
+# Record every transfer of a live session to pcapng
+./build/src/usbvcr --yaml path/to/device-project --record session.pcapng
+
+# Skip QEMU entirely: drive a real Linux USB gadget (FunctionFS/ConfigFS)
+./build/src/usbvcr --yaml path/to/device-project --local
+```
+
+Then on the QEMU side: `-device usb-redir,chardev=usbvcr -chardev socket,id=usbvcr,host=localhost,port=1337`.
+
+**Coverage build**
+
+```sh
 meson setup build -Denable_coverage=true
 ninja -C build && meson test -C build
-gcovr -r . build               # coverage report
-
-# Reconfigure an existing build dir
-meson setup --reconfigure build
+gcovr -r . build
 ```
 
----
-
-## 1. Goals
-
-1. Describe any USB device in YAML only — no recompilation per device.
-2. Two authoring modes, both first-class:
-   - **Schema mode** — named descriptor fields, serialized to raw packets.
-   - **Raw mode** — opaque `hex` / `raw_file` payloads when no schema exists.
-3. Behavior as a declarative **flow / state machine** (Ansible-like:
-   `match`, `actions`, `transition_state`, bounded `when:` conditionals).
-4. Fuzz-friendly: every field overridable, malformed values injectable.
-5. Extensible to new device classes by **data** (codec tables), not new C.
-
-## 2. Data flow
+## How it works
 
 ```
-YAML files
-  (schemas / devices / flows / payloads / codecs / tests)
-        │
-        ▼  src/lib/yaml_loader
-UsbNode descriptor tree  +  flow model
-        │
-        ▼  src/backends/yaml_backend  (implements usb_device_ops)
-        │
-        ▼  src/core/usb_core  (hello handshake, announce, dispatch)
-        │
-        ▼  src/core/transport  (usbredir wire framing)
-        │
-        ▼  usbredir socket ──▶ QEMU (-device usb-redir)
+YAML project                         canonical dialect: schemas/ devices/ flows/ payloads/ codecs/
+     │
+     ▼  src/lib/yaml_loader + codec + flow
+UsbNode descriptor tree  +  flow state machine
+     │
+     ▼  src/backends/yaml_backend          (implements usb_device_ops)
+     ▼  src/core/usb_core                  (hello handshake, announce, dispatch)
+     ▼  src/core/transport                 (usbredir wire framing)
+     ▼  src/engine/{qemu,local}_engine ──▶  QEMU usbredir  or  Linux USB gadget
 ```
 
-YAML never reaches QEMU. It is a device *description*; C serializes it to the
-binary usbredir frames QEMU speaks. One translation layer.
+YAML never reaches the wire directly — it's a device *description*; C
+serializes it into the binary frames QEMU (or the kernel gadget stack)
+expects. One translation layer, one engine, any device.
 
-## 3. YAML dialect (canonical)
+## A device in YAML
 
-The `tests/data/example{1,2}` layout is the canonical format. Separation of
-concerns:
-
-| Directory   | Role                                                        |
-|-------------|-------------------------------------------------------------|
-| `schemas/`  | Reusable descriptor **templates** (namespaced), with `null` placeholders for auto-computed fields. |
-| `devices/`  | Concrete device instances: `import` schemas, apply `template`, override fields. |
-| `flows/`    | Behavior: states, `match`/`actions` rules, transitions, endpoint queues. |
-| `payloads/` | Opaque binary blobs (`raw_file`), for raw mode.             |
-| `codecs/`   | Symbolic item-stream tables (e.g. HID report). See §6.      |
-| `tests/`    | `ValidationSuite` cases: inject packets, assert behavior.   |
-
-### 3.1 Auto-computed fields
-Templates leave length/count fields `null`; the loader fills them after the
-tree is built:
-`bLength`, `wTotalLength`, `bNumInterfaces`, `bNumEndpoints`,
-`wDescriptorLength`. Any of these may be **explicitly overridden** — this is
-how fuzz/CVE cases inject bad values (e.g. `wTotalLength: 0xFFFF`).
-
-### 3.2 Raw escape hatch
-When no schema fits, bytes go through directly:
 ```yaml
-report_descriptor:
-  raw_file: "payloads/hid_consumer_report.bin"
-# or
-actions:
-  - respond_raw: { file: "payloads/opaque_firmware_blob.bin" }
-# or inline
-payloads:
-  - hex: "02000B0000000000"
+# devices/keyboard.yaml
+name: "Example Keyboard"
+imports: ["schemas/usb_base.yaml"]
+device_descriptor:
+  template: "usb_base.device_descriptor"
+  idVendor: 0x04d9
+  idProduct: 0x1702
 ```
 
-### 3.3 Ansible-like behavior (bounded)
-Flows already express implicit conditions via `match:` + `transition_state`.
-Planned additions, kept **bounded** (no arbitrary expression eval — safety +
-deterministic fuzzing):
-- `vars:` block + `{{ var }}` interpolation.
-- `when:` guards on rules/actions using a limited vocabulary
-  (field compare, current state, counters).
-- loops already covered by list payloads (`queue_endpoint_data.payloads`).
-
-## 4. One YAML dialect (canonical)
-
-There is a single dialect: **canonical** — `device / schema / flow`
-(see [docs/yaml_dialect.md](docs/yaml_dialect.md)). The old pcap-replay grammar
-(`packet / USBpcap / USBpcapSetup / Raw`) has been dropped; do not reintroduce a
-second grammar into the loader.
-
-Record/replay of captured traffic is handled at the **pcap layer**
-(`src/lib/pcap/`), not as an alternate YAML dialect.
-
-## 5. Target source layout
-
-```
-src/lib/            # pure: no socket/engine deps
-  usb_node.{c,h}      # UsbProp/UsbNode model + serializer (from glib.c; fix type-name bugs)
-  yaml_loader.{c,h}   # canonical dialect -> UsbNode tree; imports/templates/override; null autofill
-  codec.{c,h}         # generic table-driven item-stream encoder (see §6)
-  flow.{c,h}          # states, rules, match, actions, transitions, when: eval, endpoint queues
-  log.{c,h} utils.{c,h}                # keep
-  pcap/               # pcap record/replay (pcap.{c,h}, record.{c,h})
-
-src/core/           # engine — largely unchanged, already generic
-  transport.{c,h}     # usbredir framing
-  protocol.h          # wire structs / caps / constants
-  usb_core.{c,h}      # handshake, announce, dispatch loop
-  descriptor.{c,h}    # desc_parse_config: consumes serialized config bytes (reused as-is)
-  device.h            # usb_device_ops — the backend seam
-
-src/backends/
-  yaml_backend.{c,h}  # ONE generic ops backend driven by loaded tree + flow
-  hid_keyboard.c      # demote to demo, or delete
-
-src/fuzz/           # unchanged — fuzz_wrap wraps any usb_device_ops (incl. yaml_backend)
-```
-
-**Layering rule:** `lib` knows nothing of sockets/engine; `core` knows nothing
-of YAML; `backends` bridges. Keeps `fuzz_wrap` working for free.
-
-### 5.1 yaml_backend → usb_device_ops mapping
-- `get_descriptor` — serialize requested node (device / config / string /
-  hid_report) from the tree; cache bytes.
-- `control` — run flow `match` rules → `respond_with` / `respond_raw` /
-  `respond_with_status`.
-- `ep_in` — drain current state's `queue_endpoint_data`.
-- `ep_out` — feed OUT data to flow (e.g. keyboard LEDs).
-- `tick` — run `on_enter`, advance transitions.
-- `state` — current flow state + per-endpoint queues.
-
-### 5.2 Reuse note
-`yaml_loader` emits serialized config bytes; the existing
-`descriptor.c:desc_parse_config` already walks that blob to build
-`interface_info` / `ep_info`. So `usb_core` needs **no change** — the only new
-seam is swapping the hardcoded backend for `yaml_backend`.
-
-## 6. Generic codec tables (replaces HID special-casing)
-
-Symbolic descriptors (HID report items, etc.) are **not** hardcoded in C. They
-are resolved through a data table imported like a schema. C keeps one generic
-encoder; new device classes = new table, zero new code.
-
-```
-report_descriptor (symbolic)  +  codecs/hid_report.yaml  ──▶  codec encoder  ──▶  bytes
-```
-
-### 6.1 Table schema (HID example)
 ```yaml
-version: "1.0"
-codec: "hid_report"
-# HID short item prefix byte = bTag<<4 | bType<<2 | bSize
-item_types: { main: 0, global: 1, local: 2 }
-
-tokens:
-  usage_page:      { type: global, tag: 0x0, width: auto }
-  logical_minimum: { type: global, tag: 0x1, width: auto }
-  logical_maximum: { type: global, tag: 0x2, width: auto }
-  report_size:     { type: global, tag: 0x7, width: auto }
-  report_count:    { type: global, tag: 0x9, width: auto }
-  usage:           { type: local,  tag: 0x0, width: auto }
-  usage_minimum:   { type: local,  tag: 0x1, width: auto }
-  usage_maximum:   { type: local,  tag: 0x2, width: auto }
-  collection:      { type: main,   tag: 0xA, width: 1 }
-  end_collection:  { type: main,   tag: 0xC, width: 0 }
-  input:           { type: main,   tag: 0x8, width: 1, flagset: io }
-  output:          { type: main,   tag: 0x9, width: 1, flagset: io }
-
-symbols:
-  usage_page: { "Generic Desktop": 0x01, "Key Codes": 0x07 }
-  usage:      { "Keyboard": 0x06 }
-  collection: { "Application": 0x01, "Physical": 0x00 }
-
-flagsets:
-  io: { Data: 0, Const: 1, Array: 0, Var: 2, Abs: 0, Rel: 4 }
+# flows/hello_world_flow.yaml
+states:
+  idle:
+    on_enter: []
+    rules:
+      - match: { request: "GET_DESCRIPTOR" }
+        actions: [respond_with: "device_descriptor"]
 ```
 
-### 6.2 Encoder contract (table-driven, no HID knowledge in C)
-1. For each `{key: value}` item, look up `key` in `tokens` →
-   `(type, tag, width, symbol-map, flagset)`.
-2. Resolve value: number as-is; string via `symbols[key]`; comma-list
-   (`"Data,Var,Abs"`) OR-folded via `flagsets`.
-3. `width: auto` → pick 0/1/2/4 bytes by magnitude → `bSize` code.
-4. Emit prefix `tag<<4 | type<<2 | bSize`, then operand little-endian.
+Raw payloads (firmware blobs, opaque reports) drop straight into either file
+with `hex: "..."` or `raw_file: "payloads/blob.bin"` — no schema required.
+See [`tests/data/example1`](tests/data/example1) for a complete minimal
+project and [`docs/yaml_dialect.md`](docs/yaml_dialect.md) for the full key
+reference.
 
-HID report is a flat byte stream — `collection` / `end_collection` are just
-tokens; no nesting/recursion required.
+## Project layout
 
-### 6.3 Generalization
-Other symbolic descriptors get their own table
-(`codecs/audio_class.yaml`, `codecs/vendor_tlv.yaml`), dispatched by the
-`codec:` field. If a class needs different framing (fixed TLV, length-prefixed),
-add an `encoding:` mode field to the table and branch in the encoder — still
-data, not per-class C.
+| Path              | What lives there                                          |
+|-------------------|-------------------------------------------------------------|
+| `src/lib/`        | Pure logic: YAML loader, codec tables, flow engine, pcap record/replay. No sockets. |
+| `src/core/`       | The generic USB engine: wire transport, protocol, handshake/dispatch. |
+| `src/backends/`   | `usb_device_ops` implementations — YAML-driven and pcap-replay. |
+| `src/engine/`     | Transports: usbredir-to-QEMU, and the local FunctionFS/ConfigFS gadget. |
+| `src/fuzz/`       | A `usb_device_ops` wrapper that mutates traffic for any backend. |
+| `tests/`          | `check`-based unit/integration tests + example YAML projects. |
+| `docs/`           | Architecture deep-dive and the full YAML dialect reference. |
+| `scripts/`          | pcap → YAML project converter (`pcap_to_yaml.py`). |
 
-### 6.4 Notes
-- HID usage tables are huge — ship a curated subset; numeric fallback always
-  allowed (`usage: 0x06`).
-- Pin the `width: auto` magnitude rule (signed vs unsigned matters for
-  `logical_minimum`).
-- Unknown token → hard error, not silent skip (fuzzing needs determinism).
+## Testing
 
-## 7. converter.py (pcap → project)
+Unit and integration tests use [libcheck](https://libcheck.github.io/check/)
+and run via Meson:
 
-Extracts a device+flow project from a Wireshark JSON export. Current state is a
-usable skeleton with known gaps to fix:
-- Report-descriptor path writes a placeholder byte instead of real hex —
-  extract actual bytes from the packet frame.
-- `wValue` fallback concatenation is fragile — harden.
-- Emits canonical-dialect `devices/` + `flows/` YAML.
+```sh
+meson test -C build --print-errorlogs
+```
 
-## 8. Validation / CVE tests
+Coverage is tracked with `gcovr` (see the Coverage build above) and enforced
+in CI — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-`tests/*/tests/*.yaml` (scope inferred from the `tests/` directory): inject crafted packets
-(`inject_packet`, `override_payload`) and assert guest behavior
-(`assert_behavior: { kernel_crash: false, driver_status: stalled }`).
-A separate test driver reuses `yaml_loader` plus a raw inject path into
-`transport`. Landing module: `src/harness/` or `src/tests/`.
+## Fuzzing
 
-## 9. Build order
+`src/fuzz/` wraps any `usb_device_ops` backend with mutation of descriptors,
+IN endpoint data, and (optionally) control transfers. `harness/run_fuzz.sh`
+drives a QEMU guest (ideally KASAN/UBSAN-instrumented) with incrementing
+seeds and saves a reproducer on crash.
 
-1. `usb_node` — adopt `glib.c`, fix type-name bugs (`UsbNode`/`UsbProp`
-   typedefs, add `create_prop_u32`).
-2. `yaml_loader` — imports, templates, override, null-length autofill.
-3. `codec` — generic table encoder + `codecs/hid_report.yaml`.
-4. `flow` — states, rules, actions, transitions, bounded `when:`.
-5. `yaml_backend` — `usb_device_ops` adapter over tree + flow.
-6. Wire into `main.c` — `--device-yaml <path>`; keep builtin registry.
-7. Fix `converter.py` real-hex extraction.
-8. `ValidationSuite` runner.
+## Documentation
 
-## 10. License
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design goals, data flow,
+  source layout, the generic codec system, build order.
+- [`docs/yaml_dialect.md`](docs/yaml_dialect.md) — canonical YAML directory
+  and key reference.
 
-MIT.
+## License
+
+MIT — see [LICENSE](LICENSE).

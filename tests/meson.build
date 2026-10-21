@@ -69,6 +69,18 @@ if check_dep.found()
   )
   test('flow', test_flow)
 
+  test_usb_node = executable(
+    'test_usb_node',
+    'lib/test_usb_node.c',
+    files(
+      '../src/lib/usb_node.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib],
+    dependencies : [check_dep, glib_dep],
+  )
+  test('usb_node', test_usb_node)
+
   test_descriptor = executable(
     'test_descriptor',
     'lib/test_descriptor.c',

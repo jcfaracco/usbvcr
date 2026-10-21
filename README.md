@@ -46,24 +46,6 @@ ninja -C build
 meson test -C build
 ```
 
-**Run it**
-
-```sh
-# Emulate a YAML-described device, served to QEMU over usbredir
-./build/src/usbvcr --yaml path/to/device-project --host localhost --port 1337
-
-# Replay a captured pcap/pcapng trace instead
-./build/src/usbvcr --pcap capture.pcapng
-
-# Record every transfer of a live session to pcapng
-./build/src/usbvcr --yaml path/to/device-project --record session.pcapng
-
-# Skip QEMU entirely: drive a real Linux USB gadget (FunctionFS/ConfigFS)
-./build/src/usbvcr --yaml path/to/device-project --local
-```
-
-Then on the QEMU side: `-device usb-redir,chardev=usbvcr -chardev socket,id=usbvcr,host=localhost,port=1337`.
-
 **Coverage build**
 
 ```sh
@@ -71,6 +53,83 @@ meson setup build -Denable_coverage=true
 ninja -C build && meson test -C build
 gcovr -r . build
 ```
+
+## Running with QEMU
+
+`usbvcr` can act as a USB-over-network device for virtual machines using QEMU's native `usb-redir` device.
+
+### 1. Start usbvcr
+
+Run `usbvcr` pointing to a YAML project (or a recorded pcap/pcapng trace) and specify the TCP port to listen on:
+
+```sh
+# Emulate a YAML device project
+./build/src/usbvcr --yaml tests/data/example1 --host localhost --port 1337
+
+# Or replay a captured pcap/pcapng trace
+./build/src/usbvcr --pcap capture.pcapng --host localhost --port 1337
+
+# Optionally record live transfers during the session
+./build/src/usbvcr --yaml tests/data/example1 --record session.pcapng
+```
+
+### 2. Connect QEMU
+
+In your QEMU command line, connect a `chardev` socket to `usbvcr` and attach the `usb-redir` device:
+
+```sh
+qemu-system-x86_64 \
+  -enable-kvm -m 2G -cpu host \
+  -drive file=guest.qcow2,format=qcow2 \
+  -chardev socket,id=usbvcr,host=127.0.0.1,port=1337 \
+  -device usb-redir,chardev=usbvcr
+```
+
+When QEMU powers on, the virtual machine will see the USB device enumerate exactly as defined in your YAML specification or pcap trace.
+
+## Running Locally with Linux USB Gadget (FunctionFS / ConfigFS)
+
+On Linux systems supporting USB gadgets (e.g. Raspberry Pi, USB OTG controller, or virtual UDC driver like `dummy_hcd`), `usbvcr` can expose the emulated device directly to the local kernel using **FunctionFS** and **ConfigFS** (`--local`).
+
+### 1. Prerequisites (Setup dummy_hcd or Hardware UDC)
+
+To test locally without physical USB OTG hardware, load the Linux virtual USB controller (`dummy_hcd`):
+
+```sh
+# Ensure ConfigFS is mounted
+sudo mount -t configfs none /sys/kernel/config
+
+# Load dummy_hcd kernel module (creates a virtual USB Host Controller + UDC)
+sudo modprobe dummy_hcd
+```
+
+Verify that a UDC appears under `/sys/class/udc/`:
+```sh
+ls /sys/class/udc/
+# Output will display a device such as dummy_udc.0
+```
+
+### 2. Run usbvcr Locally
+
+Run `usbvcr` as `root` (required for ConfigFS configuration and FunctionFS mounting):
+
+```sh
+# Auto-detects the first available UDC
+sudo ./build/src/usbvcr --yaml tests/data/example1 --local
+
+# Or explicitly specify the target UDC
+sudo ./build/src/usbvcr --yaml tests/data/example1 --local --udc dummy_udc.0
+```
+
+`usbvcr` will:
+1. Create gadget entries in `/sys/kernel/config/usb_gadget/<name>`.
+2. Configure VID, PID, serial number, and product strings.
+3. Mount a FunctionFS filesystem at `/dev/ffs-<name>`.
+4. Serialize and write the FunctionFS v2 descriptors and strings to `/dev/ffs-<name>/ep0`.
+5. Bind the gadget to the UDC (`dummy_udc.0` or specified hardware UDC).
+6. Listen for host setup requests, servicing control and endpoint IN/OUT transfers directly from the YAML flow engine.
+
+Press `Ctrl+C` to cleanly unbind the UDC, unmount FunctionFS, and tear down the ConfigFS hierarchy.
 
 ## How it works
 

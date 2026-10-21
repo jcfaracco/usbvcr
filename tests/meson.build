@@ -212,6 +212,31 @@ if check_dep.found()
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
   test('yaml_backend', test_yaml_backend)
+
+  if have_local_engine
+    test_ffs = executable(
+      'test_ffs',
+      'lib/test_ffs.c',
+      files(
+        '../src/lib/ffs/ffs.c',
+        '../src/lib/log.c',
+        '../src/backends/yaml_backend.c',
+        '../src/lib/yaml/loader.c',
+        '../src/lib/yaml/tree.c',
+        '../src/lib/yaml/util.c',
+        '../src/lib/schema.c',
+        '../src/lib/flow.c',
+        '../src/lib/usb_node.c',
+        '../src/lib/codec.c',
+        '../src/lib/version.c',
+        '../src/lib/utils.c',
+      ),
+      include_directories : [lib, core, backends],
+      dependencies : [check_dep, glib_dep, yaml_dep],
+      c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+    )
+    test('ffs', test_ffs)
+  endif
 endif
 
 # TODO: canonical-dialect tests (codec / ValidationSuite).

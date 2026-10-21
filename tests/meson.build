@@ -163,6 +163,19 @@ if check_dep.found()
   )
   test('record', test_record)
 
+  test_record_ext = executable(
+    'test_record_ext',
+    'integration/test_record_ext.c',
+    files(
+      '../src/lib/pcap/pcap.c',
+      '../src/lib/pcap/record.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib, core],
+    dependencies : [check_dep, glib_dep],
+  )
+  test('record_ext', test_record_ext)
+
   test_pcap_hid_capture = executable(
     'test_pcap_hid_capture',
     'integration/test_pcap_hid_capture.c',

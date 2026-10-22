@@ -146,6 +146,100 @@ void usb_node_merge(usb_node_t *dst, const usb_node_t *src)
         usb_node_set_prop(dst, usb_prop_clone(l->data));
 }
 
+/* ── Canonical field ordering ── */
+
+typedef struct {
+    const char *kind;
+    const char *const *fields;
+    size_t n;
+} canonical_kind_t;
+
+/* USB 2.0 spec field order, table 9-8. */
+static const char *const DEVICE_DESCRIPTOR_FIELDS[] = {
+    "bLength", "bDescriptorType", "bcdUSB", "bDeviceClass", "bDeviceSubClass",
+    "bDeviceProtocol", "bMaxPacketSize0", "idVendor", "idProduct", "bcdDevice",
+    "iManufacturer", "iProduct", "iSerialNumber", "bNumConfigurations",
+};
+/* USB 2.0 spec field order, table 9-10. */
+static const char *const CONFIG_DESCRIPTOR_FIELDS[] = {
+    "bLength", "bDescriptorType", "wTotalLength", "bNumInterfaces",
+    "bConfigurationValue", "iConfiguration", "bmAttributes", "bMaxPower",
+};
+/* USB 2.0 spec field order, table 9-12. */
+static const char *const INTERFACE_DESCRIPTOR_FIELDS[] = {
+    "bLength", "bDescriptorType", "bInterfaceNumber", "bAlternateSetting",
+    "bNumEndpoints", "bInterfaceClass", "bInterfaceSubClass",
+    "bInterfaceProtocol", "iInterface",
+};
+/* USB 2.0 spec field order, table 9-13. */
+static const char *const ENDPOINT_DESCRIPTOR_FIELDS[] = {
+    "bLength", "bDescriptorType", "bEndpointAddress", "bmAttributes",
+    "wMaxPacketSize", "bInterval",
+};
+/* USB HID 1.11 spec field order, section 6.2.1. */
+static const char *const HID_DESCRIPTOR_FIELDS[] = {
+    "bLength", "bDescriptorType", "bcdHID", "bCountryCode", "bNumDescriptors",
+    "bReportDescriptorType", "wDescriptorLength",
+};
+/* USB IAD ECN field order. */
+static const char *const INTERFACE_ASSOCIATION_FIELDS[] = {
+    "bLength", "bDescriptorType", "bFirstInterface", "bInterfaceCount",
+    "bFunctionClass", "bFunctionSubClass", "bFunctionProtocol", "iFunction",
+};
+
+#define CANON(kind_name, arr) { kind_name, arr, G_N_ELEMENTS(arr) }
+
+/* Keyed by the YAML prop name a descriptor of that kind is nested under.
+ * Singular aliases (configuration_descriptor, interface_descriptor) cover
+ * the name schema template files (schemas/) use for the same kind. */
+static const canonical_kind_t CANONICAL_KINDS[] = {
+    CANON("device_descriptor",        DEVICE_DESCRIPTOR_FIELDS),
+    CANON("configurations",           CONFIG_DESCRIPTOR_FIELDS),
+    CANON("configuration_descriptor", CONFIG_DESCRIPTOR_FIELDS),
+    CANON("interfaces",               INTERFACE_DESCRIPTOR_FIELDS),
+    CANON("interface_descriptor",     INTERFACE_DESCRIPTOR_FIELDS),
+    CANON("endpoints",                ENDPOINT_DESCRIPTOR_FIELDS),
+    CANON("hid_descriptor",           HID_DESCRIPTOR_FIELDS),
+    CANON("interface_association",    INTERFACE_ASSOCIATION_FIELDS),
+};
+
+#undef CANON
+
+void usb_node_canonicalize_order(usb_node_t *node, const char *kind)
+{
+    if (!node || !kind)
+        return;
+
+    const canonical_kind_t *ck = NULL;
+    for (size_t i = 0; i < G_N_ELEMENTS(CANONICAL_KINDS); i++) {
+        if (strcmp(CANONICAL_KINDS[i].kind, kind) == 0) {
+            ck = &CANONICAL_KINDS[i];
+            break;
+        }
+    }
+    if (!ck)
+        return;   /* unknown kind: no canonical order, leave file order be */
+
+    GList *remaining = node->props;
+    GList *ordered = NULL;
+
+    for (size_t i = 0; i < ck->n; i++) {
+        for (GList *l = remaining; l; l = l->next) {
+            usb_prop_t *p = l->data;
+            if (strcmp(p->name, ck->fields[i]) == 0) {
+                remaining = g_list_remove_link(remaining, l);
+                ordered = g_list_concat(ordered, l);
+                break;
+            }
+        }
+    }
+
+    /* Anything not in the canonical header (nested sub-descriptors,
+     * class-specific hex blocks, ...) keeps its original relative order,
+     * appended after the fixed header fields. */
+    node->props = g_list_concat(ordered, remaining);
+}
+
 /* ── Serialization ── */
 
 void usb_node_serialize(usb_node_t *node, GByteArray *buffer)

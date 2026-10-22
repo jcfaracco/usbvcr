@@ -1,0 +1,6 @@
+version: "1.0"
+name: "Hello World Injector Keyboard"
+
+devices:
+  - device: "devices/keyboard_hello_world.yaml"
+    flow: "flows/hello_world_flow.yaml"

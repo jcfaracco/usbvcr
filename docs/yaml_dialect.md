@@ -89,6 +89,17 @@ Auto-computed (`null`-eligible) fields: `bLength`, `wTotalLength`,
 Import schemas, apply a template, override named fields, and lay out the full
 descriptor tree (configurations → interfaces → endpoints).
 
+**Field order inside a descriptor mapping does not matter.** USB descriptors
+are byte-exact structures with a spec-fixed wire order; the loader always
+serializes `device_descriptor`, `configurations`/`configuration_descriptor`,
+`interfaces`/`interface_descriptor`, `endpoints`, `hid_descriptor`, and
+`interface_association` fields in their canonical spec order regardless of
+how you write them in YAML (`src/lib/usb_node.c` `usb_node_canonicalize_order`).
+This only covers each kind's own fixed header fields — the order you nest
+sub-descriptors in (e.g. `hid_descriptor` before `endpoints` inside an
+interface) still drives the wire sequence between them, since that
+sequencing is a structural choice, not a fixed layout.
+
 | Key | Value | Meaning |
 |-----|-------|---------|
 | `version` | string | dialect version |

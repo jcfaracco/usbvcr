@@ -175,6 +175,16 @@ static int parse_main(const char *path, yaml_device_t *dev)
         return -1;
     }
 
+    yaml_node_t *conn = yaml_map_get(&doc, root, "connection");
+    g_free(dev->engine);
+    g_free(dev->udc);
+    g_free(dev->host);
+    g_free(dev->port);
+    dev->engine = g_strdup(yaml_scalar(yaml_map_get(&doc, conn, "engine")));
+    dev->udc    = g_strdup(yaml_scalar(yaml_map_get(&doc, conn, "udc")));
+    dev->host   = g_strdup(yaml_scalar(yaml_map_get(&doc, conn, "host")));
+    dev->port   = g_strdup(yaml_scalar(yaml_map_get(&doc, conn, "port")));
+
     devs = yaml_map_get(&doc, root, "devices");
 
     if (!devs || devs->type != YAML_SEQUENCE_NODE) {
@@ -325,6 +335,10 @@ void yaml_device_free(yaml_device_t *dev)
     if (!dev)
         return;
     g_free(dev->name);
+    g_free(dev->engine);
+    g_free(dev->udc);
+    g_free(dev->host);
+    g_free(dev->port);
     /* Entries own their trees/flows; dev->tree/flow are just aliases. */
     g_list_free_full(dev->devices, dev_entry_free);
     schema_free(dev->schemas);

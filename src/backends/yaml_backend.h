@@ -20,4 +20,12 @@ usb_device_t *yaml_backend_create(const char *path);
  * manifest doesn't set one. */
 const char *yaml_backend_get_name(usb_device_t *dev);
 
+/* Project `connection:` block fields (engine/udc/host/port), or NULL if the
+ * manifest doesn't set them. Lets `usbvcr --yaml <file>` run without CLI
+ * flags; main.c's CLI flags take precedence when explicitly passed. */
+const char *yaml_backend_get_engine(usb_device_t *dev);
+const char *yaml_backend_get_udc(usb_device_t *dev);
+const char *yaml_backend_get_host(usb_device_t *dev);
+const char *yaml_backend_get_port(usb_device_t *dev);
+
 #endif /* YAML_BACKEND_H */

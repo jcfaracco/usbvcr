@@ -28,6 +28,27 @@
 
 ---
 
+## 0. Configuring via the YAML Manifest
+
+Every flag below (`--local`, `--udc`, `--host`, `--port`) can instead be set
+once in the project manifest's `connection:` block, so `usbvcr --yaml
+<project>.yaml` alone is enough to run:
+
+```yaml
+connection:
+  engine: local        # "local" or "qemu" (default: qemu)
+  udc: dummy_udc.0      # local engine only (default: auto-detect)
+  host: 127.0.0.1       # qemu engine only (default: localhost)
+  port: "1337"           # qemu engine only (default: 1337)
+```
+
+CLI flags always take precedence over the manifest when passed explicitly —
+useful for overriding a project's default engine/UDC/host/port for a one-off
+run without editing the YAML. See [`yaml_dialect.md`](yaml_dialect.md#project-manifest-projectnameyaml)
+for the full manifest reference.
+
+---
+
 ## 1. QEMU Engine (`usbredir`)
 
 The QEMU engine connects `usbvcr` to virtual machines over TCP using the standard **usbredir** protocol. QEMU handles the virtual USB Host Controller (xHCI/EHCI/UHCI), while `usbvcr` services USB packets over the network socket.

@@ -64,8 +64,8 @@ int main(int argc, char *argv[])
 {
     GOptionContext *context;
     GAppConfig config = {
-        .host = "localhost",
-        .port = "1337",
+        .host = NULL,
+        .port = NULL,
         .yaml = NULL,
         .pcap = NULL,
         .record_path = NULL,
@@ -83,13 +83,13 @@ int main(int argc, char *argv[])
 
     GOptionEntry entries[] = {
         { "debug", 'D', 0, G_OPTION_ARG_NONE, &config.debug, "enable debugging logs.", NULL },
-        { "host", 'H', 0, G_OPTION_ARG_STRING, &config.host, "address of the host to connect (default=localhost).", "HOST" },
-        { "port", 'P', 0, G_OPTION_ARG_STRING, &config.port, "port of the host to connect (default=1337).", "PORT" },
+        { "host", 'H', 0, G_OPTION_ARG_STRING, &config.host, "address of the host to connect (default: localhost, or manifest's connection.host).", "HOST" },
+        { "port", 'P', 0, G_OPTION_ARG_STRING, &config.port, "port of the host to connect (default: 1337, or manifest's connection.port).", "PORT" },
         { "yaml", 0, 0, G_OPTION_ARG_FILENAME, &config.yaml, "canonical device project (devices/ flows/ ...).", "FILE" },
         { "pcap", 0, 0, G_OPTION_ARG_FILENAME, &config.pcap, "pcap file to replay USB behaviour.", "FILE" },
         { "record", 'r', 0, G_OPTION_ARG_FILENAME, &config.record_path, "record live USB transfers to a pcap/pcapng file (format inferred from extension).", "FILE" },
-        { "local", 0, 0, G_OPTION_ARG_NONE, &config.local, "run the device locally against a Linux USB gadget (FunctionFS/ConfigFS) instead of QEMU.", NULL },
-        { "udc", 0, 0, G_OPTION_ARG_STRING, &config.udc, "UDC to bind the local gadget to, with --local (default: auto-detect).", "UDC" },
+        { "local", 0, 0, G_OPTION_ARG_NONE, &config.local, "run the device locally against a Linux USB gadget (FunctionFS/ConfigFS) instead of QEMU (or set connection.engine: local in the manifest).", NULL },
+        { "udc", 0, 0, G_OPTION_ARG_STRING, &config.udc, "UDC to bind the local gadget to, with --local (default: auto-detect, or manifest's connection.udc).", "UDC" },
         { "version", 'V', 0, G_OPTION_ARG_NONE, &config.version, "Show version and exit.", NULL },
         { NULL }
     };
@@ -103,6 +103,10 @@ int main(int argc, char *argv[])
     usb_device_t *dev = NULL;
     usb_device_t *pcap_dev = NULL;
     gchar *local_name = NULL;
+    gboolean use_local = FALSE;
+    const char *use_udc = NULL;
+    const char *use_host = NULL;
+    const char *use_port = NULL;
 
     if (!g_option_context_parse(context, &argc, &argv, &error)) {
         g_print("Error parsing options: %s\n", error->message);
@@ -140,8 +144,30 @@ int main(int argc, char *argv[])
     }
 
     /* Computed before fuzz_wrap, which replaces dev->state with its own —
-     * the backend-specific accessors below would otherwise read garbage. */
-    if (config.local)
+     * the backend-specific accessors below would otherwise read garbage.
+     * CLI flags take precedence; a manifest's connection: block fills in
+     * whatever wasn't passed on the command line, so `--yaml <file>` alone
+     * is enough to run. */
+    use_local = config.local;
+    use_udc   = config.udc;
+    use_host  = config.host;
+    use_port  = config.port;
+    if (config.yaml) {
+        if (!use_local && g_strcmp0(yaml_backend_get_engine(dev), "local") == 0)
+            use_local = TRUE;
+        if (!use_udc)
+            use_udc = yaml_backend_get_udc(dev);
+        if (!use_host)
+            use_host = yaml_backend_get_host(dev);
+        if (!use_port)
+            use_port = yaml_backend_get_port(dev);
+    }
+    if (!use_host)
+        use_host = "localhost";
+    if (!use_port)
+        use_port = "1337";
+
+    if (use_local)
         local_name = local_instance_name(&config, dev);
 
     if (config.do_fuzz) {
@@ -172,19 +198,19 @@ int main(int argc, char *argv[])
 
     LOG_INFO("Running device: %s", config.pcap ? config.pcap : config.yaml);
 
-    if (config.local) {
+    if (use_local) {
 #ifdef USBVCR_HAVE_LOCAL_ENGINE
         LOG_INFO("Running locally on UDC %s (gadget name '%s')",
-                 config.udc ? config.udc : "(auto-detect)", local_name);
-        rc = local_engine_run(dev, local_name, config.udc);
+                 use_udc ? use_udc : "(auto-detect)", local_name);
+        rc = local_engine_run(dev, local_name, use_udc);
 #else
         LOG_ERR("--local: local engine not built in this binary "
                 "(configure with -Denable_local_engine=true on Linux)");
         rc = -1;
 #endif
     } else {
-        LOG_DEBUG("Connecting to %s:%s ...", config.host, config.port);
-        sock = connect_to_server(config.host, config.port);
+        LOG_DEBUG("Connecting to %s:%s ...", use_host, use_port);
+        sock = connect_to_server(use_host, use_port);
         if (sock < 0) {
             LOG_ERR("Connection failed");
             rc = -1;

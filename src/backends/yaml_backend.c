@@ -240,3 +240,27 @@ const char *yaml_backend_get_name(usb_device_t *dev)
     yaml_backend_state_t *st = dev->state;
     return st->dev->name;
 }
+
+const char *yaml_backend_get_engine(usb_device_t *dev)
+{
+    yaml_backend_state_t *st = dev->state;
+    return st->dev->engine;
+}
+
+const char *yaml_backend_get_udc(usb_device_t *dev)
+{
+    yaml_backend_state_t *st = dev->state;
+    return st->dev->udc;
+}
+
+const char *yaml_backend_get_host(usb_device_t *dev)
+{
+    yaml_backend_state_t *st = dev->state;
+    return st->dev->host;
+}
+
+const char *yaml_backend_get_port(usb_device_t *dev)
+{
+    yaml_backend_state_t *st = dev->state;
+    return st->dev->port;
+}

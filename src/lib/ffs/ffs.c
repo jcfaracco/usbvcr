@@ -122,12 +122,15 @@ GByteArray *ffs_build_descriptors(usb_device_t *dev)
 
     g_byte_array_append(arr, (const guint8 *)&head, sizeof(head));
 
-    /* Full-Speed descriptors */
+    /* FunctionFS V2 format requires all counts up front, before any
+     * descriptor bytes: fs_count, hs_count, then fs_descs, then hs_descs. */
     g_byte_array_append(arr, (const guint8 *)&sub_count, sizeof(sub_count));
+    g_byte_array_append(arr, (const guint8 *)&sub_count, sizeof(sub_count));
+
+    /* Full-Speed descriptors */
     g_byte_array_append(arr, sub_descs, sub_bytes);
 
     /* High-Speed descriptors */
-    g_byte_array_append(arr, (const guint8 *)&sub_count, sizeof(sub_count));
     g_byte_array_append(arr, sub_descs, sub_bytes);
 
     return arr;

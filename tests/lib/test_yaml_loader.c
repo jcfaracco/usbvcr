@@ -127,6 +127,50 @@ START_TEST(test_parse_from_file_no_name)
 }
 END_TEST
 
+START_TEST(test_parse_from_file_no_connection)
+{
+    /* `connection:` is optional — a project without one loads fine, with
+     * every field left NULL (main.c falls back to CLI flags / defaults). */
+    yaml_device_t *dev =
+        yaml_parse_from_file(TEST_DATA_DIR "/example1/example1.yaml");
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_ptr_null(dev->engine);
+    ck_assert_ptr_null(dev->udc);
+    ck_assert_ptr_null(dev->host);
+    ck_assert_ptr_null(dev->port);
+    yaml_device_free(dev);
+}
+END_TEST
+
+START_TEST(test_parse_from_file_connection)
+{
+    /* A `connection:` block pins the run config in the manifest, so
+     * `usbvcr --yaml <file>` alone is enough to run (README §3). */
+    g_autofree char *dir = g_dir_make_tmp("usbvcr_connection_XXXXXX", NULL);
+    g_autofree char *path = g_build_filename(dir, "project.yaml", NULL);
+    ck_assert(g_file_set_contents(path,
+        "version: \"1.0\"\n"
+        "name: \"conn-test\"\n"
+        "connection:\n"
+        "  engine: local\n"
+        "  udc: dummy_udc.0\n"
+        "  host: 127.0.0.1\n"
+        "  port: \"1337\"\n",
+        -1, NULL));
+
+    yaml_device_t *dev = yaml_parse_from_file(path);
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_str_eq(dev->engine, "local");
+    ck_assert_str_eq(dev->udc, "dummy_udc.0");
+    ck_assert_str_eq(dev->host, "127.0.0.1");
+    ck_assert_str_eq(dev->port, "1337");
+    yaml_device_free(dev);
+
+    g_remove(path);
+    g_rmdir(dir);
+}
+END_TEST
+
 static Suite *yaml_loader_suite(void)
 {
     Suite *s = suite_create("yaml_loader");
@@ -146,6 +190,8 @@ static Suite *yaml_loader_suite(void)
     tcase_add_test(tc_load, test_device_free_null);
     tcase_add_test(tc_load, test_parse_from_file_example1);
     tcase_add_test(tc_load, test_parse_from_file_no_name);
+    tcase_add_test(tc_load, test_parse_from_file_no_connection);
+    tcase_add_test(tc_load, test_parse_from_file_connection);
     suite_add_tcase(s, tc_load);
 
     return s;

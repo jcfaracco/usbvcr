@@ -17,7 +17,7 @@
 #include "device.h"
 
 /* Linux FunctionFS ABI constants and structures */
-#define FUNCTIONFS_DESCRIPTORS_MAGIC_V2 2
+#define FUNCTIONFS_DESCRIPTORS_MAGIC_V2 3
 #define FUNCTIONFS_STRINGS_MAGIC        2
 
 #define FUNCTIONFS_HAS_FS_DESC          (1u << 0)

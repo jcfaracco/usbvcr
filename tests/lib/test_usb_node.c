@@ -212,6 +212,123 @@ START_TEST(test_merge_null_guards)
 }
 END_TEST
 
+/* ── usb_node_canonicalize_order ── */
+
+START_TEST(test_canonicalize_reorders_scrambled_device_descriptor)
+{
+    usb_node_t *node = usb_node_create();
+
+    /* Written in a scrambled order, as a user might type it by hand. */
+    usb_node_set_prop(node, create_prop_u16("idProduct", 0x1702));
+    usb_node_set_prop(node, create_prop_u16("idVendor", 0x04d9));
+    usb_node_set_prop(node, create_prop_u8("bLength", 18));
+    usb_node_set_prop(node, create_prop_u8("bDescriptorType", 0x01));
+    usb_node_set_prop(node, create_prop_u16("bcdUSB", 0x0200));
+    usb_node_set_prop(node, create_prop_u8("bDeviceClass", 0));
+    usb_node_set_prop(node, create_prop_u8("bDeviceSubClass", 0));
+    usb_node_set_prop(node, create_prop_u8("bDeviceProtocol", 0));
+    usb_node_set_prop(node, create_prop_u8("bMaxPacketSize0", 8));
+    usb_node_set_prop(node, create_prop_u16("bcdDevice", 0x0406));
+    usb_node_set_prop(node, create_prop_u8("iManufacturer", 1));
+    usb_node_set_prop(node, create_prop_u8("iProduct", 2));
+    usb_node_set_prop(node, create_prop_u8("iSerialNumber", 0));
+    usb_node_set_prop(node, create_prop_u8("bNumConfigurations", 1));
+
+    usb_node_canonicalize_order(node, "device_descriptor");
+
+    GByteArray *buf = g_byte_array_new();
+    usb_node_serialize(node, buf);
+
+    /* USB 2.0 table 9-8 byte layout, regardless of the scrambled input
+     * order above. */
+    const uint8_t expected[] = {
+        18, 0x01,           /* bLength, bDescriptorType */
+        0x00, 0x02,         /* bcdUSB = 0x0200 LE */
+        0x00, 0x00, 0x00,   /* bDeviceClass/SubClass/Protocol */
+        8,                  /* bMaxPacketSize0 */
+        0xd9, 0x04,         /* idVendor = 0x04d9 LE */
+        0x02, 0x17,         /* idProduct = 0x1702 LE */
+        0x06, 0x04,         /* bcdDevice = 0x0406 LE */
+        1, 2, 0,            /* iManufacturer, iProduct, iSerialNumber */
+        1,                  /* bNumConfigurations */
+    };
+    ck_assert_uint_eq(buf->len, sizeof(expected));
+    ck_assert_mem_eq(buf->data, expected, sizeof(expected));
+
+    g_byte_array_unref(buf);
+    usb_node_free(node);
+}
+END_TEST
+
+START_TEST(test_canonicalize_unknown_kind_is_noop)
+{
+    usb_node_t *node = usb_node_create();
+    usb_node_set_prop(node, create_prop_u8("zebra", 1));
+    usb_node_set_prop(node, create_prop_u8("alpha", 2));
+
+    usb_node_canonicalize_order(node, "totally_custom_block");
+
+    GList *l = node->props;
+    ck_assert_ptr_nonnull(l);
+    ck_assert_str_eq(((usb_prop_t *)l->data)->name, "zebra");
+    l = l->next;
+    ck_assert_ptr_nonnull(l);
+    ck_assert_str_eq(((usb_prop_t *)l->data)->name, "alpha");
+
+    usb_node_free(node);
+}
+END_TEST
+
+START_TEST(test_canonicalize_appends_noncanonical_after_header)
+{
+    usb_node_t *node = usb_node_create();
+
+    /* hid_descriptor is nested in the middle, as the HID example YAML
+     * writes it (interleaved with the interface header fields). It is not
+     * part of the interface descriptor's fixed header. */
+    usb_node_set_prop(node, create_prop_u8("bLength", 9));
+    usb_node_set_prop(node, create_prop_u8("bDescriptorType", 0x04));
+    usb_node_set_prop(node, create_prop_node("hid_descriptor", usb_node_create()));
+    usb_node_set_prop(node, create_prop_u8("bInterfaceNumber", 0));
+    usb_node_set_prop(node, create_prop_u8("bAlternateSetting", 0));
+    usb_node_set_prop(node, create_prop_u8("bNumEndpoints", 1));
+    usb_node_set_prop(node, create_prop_u8("bInterfaceClass", 3));
+    usb_node_set_prop(node, create_prop_u8("bInterfaceSubClass", 1));
+    usb_node_set_prop(node, create_prop_u8("bInterfaceProtocol", 1));
+    usb_node_set_prop(node, create_prop_u8("iInterface", 0));
+
+    usb_node_canonicalize_order(node, "interfaces");
+
+    /* The 9 canonical header fields come first, in spec order; the nested
+     * hid_descriptor is pushed after them. */
+    const char *expected_order[] = {
+        "bLength", "bDescriptorType", "bInterfaceNumber", "bAlternateSetting",
+        "bNumEndpoints", "bInterfaceClass", "bInterfaceSubClass",
+        "bInterfaceProtocol", "iInterface", "hid_descriptor",
+    };
+    GList *l = node->props;
+    for (size_t i = 0; i < G_N_ELEMENTS(expected_order); i++, l = l->next) {
+        ck_assert_ptr_nonnull(l);
+        ck_assert_str_eq(((usb_prop_t *)l->data)->name, expected_order[i]);
+    }
+    ck_assert_ptr_null(l);
+
+    usb_node_free(node);
+}
+END_TEST
+
+START_TEST(test_canonicalize_null_guards)
+{
+    /* Neither of these should crash. */
+    usb_node_canonicalize_order(NULL, "device_descriptor");
+
+    usb_node_t *node = usb_node_create();
+    usb_node_set_prop(node, create_prop_u8("bLength", 9));
+    usb_node_canonicalize_order(node, NULL);
+    usb_node_free(node);
+}
+END_TEST
+
 static Suite *usb_node_suite(void)
 {
     Suite *s = suite_create("usb_node");
@@ -241,6 +358,13 @@ static Suite *usb_node_suite(void)
     tcase_add_test(tc_mut, test_merge_copies_props);
     tcase_add_test(tc_mut, test_merge_null_guards);
     suite_add_tcase(s, tc_mut);
+
+    TCase *tc_canon = tcase_create("canonicalize_order");
+    tcase_add_test(tc_canon, test_canonicalize_reorders_scrambled_device_descriptor);
+    tcase_add_test(tc_canon, test_canonicalize_unknown_kind_is_noop);
+    tcase_add_test(tc_canon, test_canonicalize_appends_noncanonical_after_header);
+    tcase_add_test(tc_canon, test_canonicalize_null_guards);
+    suite_add_tcase(s, tc_canon);
 
     return s;
 }

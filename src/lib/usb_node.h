@@ -75,6 +75,18 @@ void usb_node_set_prop(usb_node_t *node, usb_prop_t *prop);
  * node before the device's own overrides are applied. */
 void usb_node_merge(usb_node_t *dst, const usb_node_t *src);
 
+/* ── Canonical field ordering ── */
+
+/* Reorder `node`'s props to match the fixed USB wire-format field order for
+ * the given descriptor `kind` (e.g. "device_descriptor", "endpoints"),
+ * regardless of what order they were set in (YAML mapping order is not
+ * byte order). Props outside the kind's fixed header — nested
+ * sub-descriptors, class-specific blocks, ... — keep their original
+ * relative order, appended after the canonical fields: their sequencing is
+ * a structural choice, not a fixed header layout. A `kind` with no
+ * registered canonical order leaves `node` untouched. */
+void usb_node_canonicalize_order(usb_node_t *node, const char *kind);
+
 /* ── Serialization ── */
 
 void usb_node_serialize(usb_node_t *node, GByteArray *buffer);

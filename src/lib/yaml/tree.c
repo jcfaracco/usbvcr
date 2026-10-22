@@ -247,6 +247,7 @@ static void build_mapping_value(yaml_document_t *doc, const char *key,
         usb_node_set_prop(out, create_prop_node(key, child));
     }
     build_map(doc, v, schemas, codecs, child, ns, depth + 1);
+    usb_node_canonicalize_order(child, key);
 }
 
 /* Each item becomes a distinct sibling under the same key. */
@@ -265,6 +266,7 @@ static void build_sequence_value(yaml_document_t *doc, const char *key,
             out->props = g_list_append(out->props,
                                        create_prop_node(key, child));
             build_map(doc, item, schemas, codecs, child, ns, depth + 1);
+            usb_node_canonicalize_order(child, key);
         } else {
             build_value(doc, key, item, schemas, codecs, out, ns,
                         depth + 1);

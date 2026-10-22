@@ -19,6 +19,39 @@ Every YAML file starts with `version: "1.0"` (validated by `match_version`).
 
 ---
 
+## Project manifest — `<project>/<name>.yaml`
+
+The file passed to `--yaml` is the project manifest. It sits at the project
+root (siblings of `devices/`, `flows/`, ...) and lists which device+flow
+pairs make up the project:
+
+```yaml
+version: "1.0"
+name: "Hello World Injector Keyboard"   # optional; used as the gadget name
+                                        # for the local engine (ConfigFS/
+                                        # FunctionFS dir), falls back to
+                                        # "usbvcr" if unset.
+
+connection:                            # optional; run config normally given
+                                        # on the CLI. Any field left out here
+                                        # falls back to its CLI flag/default.
+                                        # Explicit CLI flags always win.
+  engine: local                        # "local" or "qemu" (default: qemu)
+  udc: dummy_udc.0                     # local engine only (default: auto-detect)
+  host: 127.0.0.1                      # qemu engine only (default: localhost)
+  port: "1337"                         # qemu engine only (default: 1337)
+
+devices:
+  - device: "devices/keyboard_hello_world.yaml"
+    flow: "flows/hello_world_flow.yaml"
+```
+
+With a `connection:` block set, `usbvcr --yaml <project>.yaml` alone is
+enough to run — no `--local`/`--udc`/`--host`/`--port` needed. See
+[`running_engines.md`](running_engines.md) for the CLI-flag equivalents.
+
+---
+
 ## `schemas/` — descriptor templates
 
 Reusable, namespaced descriptor fragments. Fields left `null` are
@@ -55,6 +88,17 @@ Auto-computed (`null`-eligible) fields: `bLength`, `wTotalLength`,
 
 Import schemas, apply a template, override named fields, and lay out the full
 descriptor tree (configurations → interfaces → endpoints).
+
+**Field order inside a descriptor mapping does not matter.** USB descriptors
+are byte-exact structures with a spec-fixed wire order; the loader always
+serializes `device_descriptor`, `configurations`/`configuration_descriptor`,
+`interfaces`/`interface_descriptor`, `endpoints`, `hid_descriptor`, and
+`interface_association` fields in their canonical spec order regardless of
+how you write them in YAML (`src/lib/usb_node.c` `usb_node_canonicalize_order`).
+This only covers each kind's own fixed header fields — the order you nest
+sub-descriptors in (e.g. `hid_descriptor` before `endpoints` inside an
+interface) still drives the wire sequence between them, since that
+sequencing is a structural choice, not a fixed layout.
 
 | Key | Value | Meaning |
 |-----|-------|---------|

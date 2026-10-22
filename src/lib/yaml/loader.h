@@ -47,6 +47,15 @@ typedef struct {
     schema_t   *schemas;    /* schema base templates (schemas/ registry) */
     GHashTable *codecs;     /* "codec name" -> codec_t* (codecs/ tables) */
 
+    /* Optional `connection:` manifest block (README §3, run config): lets a
+     * project pin how `usbvcr --yaml <file>` runs without CLI flags. Any
+     * field left unset is NULL; main.c's CLI flags take precedence when
+     * explicitly passed. */
+    char       *engine;     /* "local" or "qemu", or NULL if unset */
+    char       *udc;        /* local engine: UDC name, or NULL (auto-detect) */
+    char       *host;       /* qemu engine: remote host, or NULL (default) */
+    char       *port;       /* qemu engine: remote port, or NULL (default) */
+
     /* Convenience aliases to the first manifest entry (not owned), so single-
      * device callers keep working. yaml_backend owns the flow join. */
     usb_node_t *tree;

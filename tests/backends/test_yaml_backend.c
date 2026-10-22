@@ -154,6 +154,36 @@ START_TEST(test_yaml_backend_e1_get_descriptor)
 }
 END_TEST
 
+/* Same device, every descriptor mapping's fields written out of USB wire
+ * order (tests/data/example1_scrambled/devices/keyboard_hello_world.yaml).
+ * Must serialize to the exact same bytes as the correctly-ordered original:
+ * proves usb_node_canonicalize_order() makes descriptor byte order
+ * independent of YAML key order. */
+#define PROJECT_PATH_E1_SCRAMBLED TEST_DATA_DIR "/example1_scrambled/example1_scrambled.yaml"
+
+START_TEST(test_yaml_backend_e1_scrambled_fields_same_bytes)
+{
+    usb_device_t *dev = yaml_backend_create(PROJECT_PATH_E1_SCRAMBLED);
+    const uint8_t *desc;
+    uint16_t len;
+    int rc;
+
+    ck_assert_ptr_nonnull(dev);
+
+    desc = NULL; len = 0;
+    rc = dev->ops->get_descriptor(dev, USB_DESC_DEVICE, 0, 0, &desc, &len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_uint_eq(len, sizeof(EXPECTED_DEVICE_DESC_E1));
+    ck_assert_mem_eq(desc, EXPECTED_DEVICE_DESC_E1, sizeof(EXPECTED_DEVICE_DESC_E1));
+
+    desc = NULL; len = 0;
+    rc = dev->ops->get_descriptor(dev, USB_DESC_CONFIG, 0, 0, &desc, &len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_uint_eq(len, sizeof(EXPECTED_CONFIG_DESC_E1));
+    ck_assert_mem_eq(desc, EXPECTED_CONFIG_DESC_E1, sizeof(EXPECTED_CONFIG_DESC_E1));
+}
+END_TEST
+
 START_TEST(test_yaml_backend_e1_control)
 {
     usb_device_t *dev = yaml_backend_create(PROJECT_PATH_E1);
@@ -539,6 +569,7 @@ static Suite *yaml_backend_suite(void)
     tc_e1 = tcase_create("example1_literal");
     tcase_add_test(tc_e1, test_yaml_backend_e1_lifecycle);
     tcase_add_test(tc_e1, test_yaml_backend_e1_get_descriptor);
+    tcase_add_test(tc_e1, test_yaml_backend_e1_scrambled_fields_same_bytes);
     tcase_add_test(tc_e1, test_yaml_backend_e1_control);
     tcase_add_test(tc_e1, test_yaml_backend_e1_ep_in_hello_world);
     suite_add_tcase(s, tc_e1);

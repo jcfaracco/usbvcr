@@ -46,24 +46,6 @@ ninja -C build
 meson test -C build
 ```
 
-**Run it**
-
-```sh
-# Emulate a YAML-described device, served to QEMU over usbredir
-./build/src/usbvcr --yaml path/to/device-project --host localhost --port 1337
-
-# Replay a captured pcap/pcapng trace instead
-./build/src/usbvcr --pcap capture.pcapng
-
-# Record every transfer of a live session to pcapng
-./build/src/usbvcr --yaml path/to/device-project --record session.pcapng
-
-# Skip QEMU entirely: drive a real Linux USB gadget (FunctionFS/ConfigFS)
-./build/src/usbvcr --yaml path/to/device-project --local
-```
-
-Then on the QEMU side: `-device usb-redir,chardev=usbvcr -chardev socket,id=usbvcr,host=localhost,port=1337`.
-
 **Coverage build**
 
 ```sh
@@ -71,6 +53,24 @@ meson setup build -Denable_coverage=true
 ninja -C build && meson test -C build
 gcovr -r . build
 ```
+
+**Run it**
+
+```sh
+# Emulate a YAML-described device, served to QEMU over usbredir
+./build/src/usbvcr --yaml tests/data/example1 --host localhost --port 1337
+
+# Replay a captured pcap/pcapng trace instead
+./build/src/usbvcr --pcap capture.pcapng --host localhost --port 1337
+
+# Record every transfer of a live session to pcapng
+./build/src/usbvcr --yaml tests/data/example1 --record session.pcapng
+
+# Skip QEMU: drive a real Linux USB gadget directly (FunctionFS/ConfigFS)
+sudo ./build/src/usbvcr --yaml tests/data/example1 --local
+```
+
+For detailed guides, QEMU command lines, and `dummy_hcd` / hardware OTG setup, see [`docs/running_engines.md`](docs/running_engines.md).
 
 ## How it works
 
@@ -154,6 +154,8 @@ seeds and saves a reproducer on crash.
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design goals, data flow,
   source layout, the generic codec system, build order.
+- [`docs/running_engines.md`](docs/running_engines.md) — comprehensive guide for
+  QEMU (`usbredir`) and local Linux gadget (`FunctionFS` / `ConfigFS`) execution.
 - [`docs/yaml_dialect.md`](docs/yaml_dialect.md) — canonical YAML directory
   and key reference.
 

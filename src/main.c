@@ -38,15 +38,24 @@ typedef struct {
 /* Instance name for the local gadget (ConfigFS/FunctionFS dir names): the
  * YAML project's `name:` field when configured, or `usbvcr_<vid>_<pid>`
  * derived from the device descriptor for a pcap replay. Falls back to the
- * plain "usbvcr" default when neither is available. Caller g_free()s. */
-static gchar *local_instance_name(const GAppConfig *config, usb_device_t *dev)
+ * plain "usbvcr" default when neither is available. Caller g_free()s.
+ *
+ * `yaml_cfg_dev` is non-NULL when a manifest's top-level `pcap:` field
+ * swapped `dev` for a pcap_backend — `dev` then has no yaml_backend state,
+ * so the project name must come from `yaml_cfg_dev` instead. */
+static gchar *local_instance_name(const GAppConfig *config, usb_device_t *dev,
+                                  usb_device_t *yaml_cfg_dev)
 {
-    if (config->yaml) {
+    if (yaml_cfg_dev) {
+        const char *name = yaml_backend_get_name(yaml_cfg_dev);
+        if (name)
+            return g_strdup(name);
+    } else if (config->yaml) {
         const char *name = yaml_backend_get_name(dev);
         return g_strdup(name ? name : "usbvcr");
     }
 
-    if (config->pcap) {
+    if (config->pcap || yaml_cfg_dev) {
         const uint8_t *desc = NULL;
         uint16_t len = 0;
         if (dev->ops->get_descriptor(dev, USB_DESC_DEVICE, 0, 0, &desc, &len) == 0 &&
@@ -82,12 +91,12 @@ int main(int argc, char *argv[])
     int sock = -1;
 
     GOptionEntry entries[] = {
-        { "debug", 'D', 0, G_OPTION_ARG_NONE, &config.debug, "enable debugging logs.", NULL },
+        { "debug", 'D', 0, G_OPTION_ARG_NONE, &config.debug, "enable debugging logs (or set connection.debug: true in the manifest).", NULL },
         { "host", 'H', 0, G_OPTION_ARG_STRING, &config.host, "address of the host to connect (default: localhost, or manifest's connection.host).", "HOST" },
         { "port", 'P', 0, G_OPTION_ARG_STRING, &config.port, "port of the host to connect (default: 1337, or manifest's connection.port).", "PORT" },
-        { "yaml", 0, 0, G_OPTION_ARG_FILENAME, &config.yaml, "canonical device project (devices/ flows/ ...).", "FILE" },
-        { "pcap", 0, 0, G_OPTION_ARG_FILENAME, &config.pcap, "pcap file to replay USB behaviour.", "FILE" },
-        { "record", 'r', 0, G_OPTION_ARG_FILENAME, &config.record_path, "record live USB transfers to a pcap/pcapng file (format inferred from extension).", "FILE" },
+        { "yaml", 0, 0, G_OPTION_ARG_FILENAME, &config.yaml, "canonical device project (devices/ flows/ ...), or a manifest whose top-level pcap: field replays a capture.", "FILE" },
+        { "pcap", 0, 0, G_OPTION_ARG_FILENAME, &config.pcap, "pcap file to replay USB behaviour (or set top-level pcap: in a --yaml manifest).", "FILE" },
+        { "record", 'r', 0, G_OPTION_ARG_FILENAME, &config.record_path, "record live USB transfers to a pcap/pcapng file, format inferred from extension (or set connection.record in the manifest).", "FILE" },
         { "local", 0, 0, G_OPTION_ARG_NONE, &config.local, "run the device locally against a Linux USB gadget (FunctionFS/ConfigFS) instead of QEMU (or set connection.engine: local in the manifest).", NULL },
         { "udc", 0, 0, G_OPTION_ARG_STRING, &config.udc, "UDC to bind the local gadget to, with --local (default: auto-detect, or manifest's connection.udc).", "UDC" },
         { "version", 'V', 0, G_OPTION_ARG_NONE, &config.version, "Show version and exit.", NULL },
@@ -102,11 +111,13 @@ int main(int argc, char *argv[])
      * canonical YAML device project (emulate). Both feed the same engine. */
     usb_device_t *dev = NULL;
     usb_device_t *pcap_dev = NULL;
+    usb_device_t *yaml_cfg_dev = NULL;  /* manifest kept alive when pcap: swaps the backend */
     gchar *local_name = NULL;
     gboolean use_local = FALSE;
     const char *use_udc = NULL;
     const char *use_host = NULL;
     const char *use_port = NULL;
+    const char *use_record = NULL;
 
     if (!g_option_context_parse(context, &argc, &argv, &error)) {
         g_print("Error parsing options: %s\n", error->message);
@@ -137,6 +148,22 @@ int main(int argc, char *argv[])
             rc = -1;
             goto end;
         }
+
+        /* Manifest's top-level pcap: replaces devices:/flows: with a capture
+         * to replay — swap backends but keep the manifest around to read its
+         * connection:/record:/debug fields below. */
+        const char *manifest_pcap = yaml_backend_get_pcap(dev);
+        if (manifest_pcap) {
+            yaml_cfg_dev = dev;
+            dev = pcap_backend_create(manifest_pcap);
+            if (!dev) {
+                LOG_ERR("failed to load pcap capture referenced by manifest: %s",
+                        manifest_pcap);
+                rc = -1;
+                goto end;
+            }
+            pcap_dev = dev;
+        }
     } else {
         LOG_ERR("no device: pass --yaml <FILE> or --pcap <FILE>");
         rc = -1;
@@ -148,19 +175,30 @@ int main(int argc, char *argv[])
      * CLI flags take precedence; a manifest's connection: block fills in
      * whatever wasn't passed on the command line, so `--yaml <file>` alone
      * is enough to run. */
-    use_local = config.local;
-    use_udc   = config.udc;
-    use_host  = config.host;
-    use_port  = config.port;
+    use_local  = config.local;
+    use_udc    = config.udc;
+    use_host   = config.host;
+    use_port   = config.port;
+    use_record = config.record_path;
     if (config.yaml) {
-        if (!use_local && g_strcmp0(yaml_backend_get_engine(dev), "local") == 0)
+        /* yaml_cfg_dev, when set, is the manifest the pcap: swap read from —
+         * its connection:/record:/debug fields still apply even though `dev`
+         * is now the pcap backend. */
+        usb_device_t *cfg = yaml_cfg_dev ? yaml_cfg_dev : dev;
+        if (!use_local && g_strcmp0(yaml_backend_get_engine(cfg), "local") == 0)
             use_local = TRUE;
         if (!use_udc)
-            use_udc = yaml_backend_get_udc(dev);
+            use_udc = yaml_backend_get_udc(cfg);
         if (!use_host)
-            use_host = yaml_backend_get_host(dev);
+            use_host = yaml_backend_get_host(cfg);
         if (!use_port)
-            use_port = yaml_backend_get_port(dev);
+            use_port = yaml_backend_get_port(cfg);
+        if (!use_record)
+            use_record = yaml_backend_get_record(cfg);
+        if (!config.debug && yaml_backend_get_debug(cfg)) {
+            config.debug = TRUE;
+            current_log_level = LOG_LEVEL_DEBUG;
+        }
     }
     if (!use_host)
         use_host = "localhost";
@@ -168,7 +206,7 @@ int main(int argc, char *argv[])
         use_port = "1337";
 
     if (use_local)
-        local_name = local_instance_name(&config, dev);
+        local_name = local_instance_name(&config, dev, yaml_cfg_dev);
 
     if (config.do_fuzz) {
         if (!config.have_seed)
@@ -191,7 +229,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (config.record_path && record_open(config.record_path) < 0) {
+    if (use_record && record_open(use_record) < 0) {
         rc = -1;
         goto end;
     }

@@ -185,10 +185,25 @@ static int parse_main(const char *path, yaml_device_t *dev)
     dev->host   = g_strdup(yaml_scalar(yaml_map_get(&doc, conn, "host")));
     dev->port   = g_strdup(yaml_scalar(yaml_map_get(&doc, conn, "port")));
 
+    g_free(dev->record);
+    dev->record = g_strdup(yaml_scalar(yaml_map_get(&doc, conn, "record")));
+
+    const char *dbg = yaml_scalar(yaml_map_get(&doc, conn, "debug"));
+    dev->debug = dbg && (g_ascii_strcasecmp(dbg, "true") == 0 ||
+                         g_ascii_strcasecmp(dbg, "yes") == 0 ||
+                         strcmp(dbg, "1") == 0);
+
+    /* Top-level `pcap:` — alternate to `devices:`, resolved relative to the
+     * project dir like device/flow refs below. */
+    g_free(dev->pcap);
+    const char *pref = yaml_scalar(yaml_map_get(&doc, root, "pcap"));
+    dev->pcap = pref ? g_build_filename(dir, pref, NULL) : NULL;
+
     devs = yaml_map_get(&doc, root, "devices");
 
     if (!devs || devs->type != YAML_SEQUENCE_NODE) {
-        LOG_WARN("yaml_loader: project '%s' has no devices: manifest", path);
+        if (!dev->pcap)
+            LOG_WARN("yaml_loader: project '%s' has no devices: manifest", path);
     } else {
         for (yaml_node_item_t *i = devs->data.sequence.items.start;
              rc == 0 && i < devs->data.sequence.items.top; i++) {
@@ -339,6 +354,8 @@ void yaml_device_free(yaml_device_t *dev)
     g_free(dev->udc);
     g_free(dev->host);
     g_free(dev->port);
+    g_free(dev->record);
+    g_free(dev->pcap);
     /* Entries own their trees/flows; dev->tree/flow are just aliases. */
     g_list_free_full(dev->devices, dev_entry_free);
     schema_free(dev->schemas);

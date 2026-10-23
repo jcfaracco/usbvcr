@@ -32,6 +32,13 @@ name: "Hello World Injector Keyboard"   # optional; used as the gadget name
                                         # FunctionFS dir), falls back to
                                         # "usbvcr" if unset.
 
+pcap: "capture.pcapng"                 # optional; alternate to devices: below —
+                                        # replay this capture instead of emulating
+                                        # from schemas/devices/flows. Resolved
+                                        # relative to this file. Mutually exclusive
+                                        # with devices: (ignored if --pcap is also
+                                        # passed on the CLI).
+
 connection:                            # optional; run config normally given
                                         # on the CLI. Any field left out here
                                         # falls back to its CLI flag/default.
@@ -40,6 +47,8 @@ connection:                            # optional; run config normally given
   udc: dummy_udc.0                     # local engine only (default: auto-detect)
   host: 127.0.0.1                      # qemu engine only (default: localhost)
   port: "1337"                         # qemu engine only (default: 1337)
+  record: "session.pcapng"             # optional; same as --record (default: off)
+  debug: true                          # optional; same as --debug (default: false)
 
 devices:
   - device: "devices/keyboard_hello_world.yaml"
@@ -47,8 +56,9 @@ devices:
 ```
 
 With a `connection:` block set, `usbvcr --yaml <project>.yaml` alone is
-enough to run — no `--local`/`--udc`/`--host`/`--port` needed. See
-[`running_engines.md`](running_engines.md) for the CLI-flag equivalents.
+enough to run — no `--local`/`--udc`/`--host`/`--port`/`--record`/`--debug`
+needed. See [`running_engines.md`](running_engines.md) for the CLI-flag
+equivalents.
 
 ---
 

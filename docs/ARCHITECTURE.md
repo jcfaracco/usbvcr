@@ -94,7 +94,11 @@ There is a single dialect: **canonical** — `device / schema / flow`
 second grammar into the loader.
 
 Record/replay of captured traffic is handled at the **pcap layer**
-(`src/lib/pcap/`), not as an alternate YAML dialect.
+(`src/lib/pcap/`), not as an alternate YAML dialect. A project manifest may
+still carry a top-level `pcap:` field naming a capture to replay instead of
+`devices:`/`flows:` (see [docs/yaml_dialect.md](yaml_dialect.md)) — that is
+run-config convenience (same manifest, same `connection:` block), not a
+second descriptor grammar; `src/lib/yaml/loader.c` never parses pcap framing.
 
 ## 5. Source layout
 

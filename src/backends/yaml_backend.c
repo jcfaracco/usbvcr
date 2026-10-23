@@ -213,7 +213,10 @@ usb_device_t *yaml_backend_create(const char *path)
     if (!yd)
         return NULL;
 
-    if (usb_node_validate(yd->tree, 0) < 0) {
+    /* A manifest whose top-level `pcap:` field replaces `devices:` has no
+     * tree to validate — main.c discards this backend's ops and only reads
+     * its connection:/record:/debug:/pcap fields. */
+    if (yd->tree && usb_node_validate(yd->tree, 0) < 0) {
         LOG_ERR("There are some NULL props in devices for %s (`--debug` shows them).\n", path);
         return NULL;
     }
@@ -263,4 +266,22 @@ const char *yaml_backend_get_port(usb_device_t *dev)
 {
     yaml_backend_state_t *st = dev->state;
     return st->dev->port;
+}
+
+const char *yaml_backend_get_record(usb_device_t *dev)
+{
+    yaml_backend_state_t *st = dev->state;
+    return st->dev->record;
+}
+
+gboolean yaml_backend_get_debug(usb_device_t *dev)
+{
+    yaml_backend_state_t *st = dev->state;
+    return st->dev->debug;
+}
+
+const char *yaml_backend_get_pcap(usb_device_t *dev)
+{
+    yaml_backend_state_t *st = dev->state;
+    return st->dev->pcap;
 }

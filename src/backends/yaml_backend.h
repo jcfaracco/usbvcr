@@ -10,6 +10,8 @@
 #ifndef YAML_BACKEND_H
 #define YAML_BACKEND_H
 
+#include <glib.h>
+
 #include "device.h"
 
 /* Create a backend from a canonical device project directory.
@@ -27,5 +29,16 @@ const char *yaml_backend_get_engine(usb_device_t *dev);
 const char *yaml_backend_get_udc(usb_device_t *dev);
 const char *yaml_backend_get_host(usb_device_t *dev);
 const char *yaml_backend_get_port(usb_device_t *dev);
+
+/* Project `connection:` block's record/debug fields, or NULL/FALSE if unset.
+ * Same CLI-takes-precedence rule as above. */
+const char *yaml_backend_get_record(usb_device_t *dev);
+gboolean yaml_backend_get_debug(usb_device_t *dev);
+
+/* Top-level `pcap:` field: alternate to `devices:` — a capture path to
+ * replay instead of emulating, or NULL if unset. When set, main.c swaps
+ * this backend for a pcap_backend built from this path, keeping this
+ * backend alive only to read the fields above. */
+const char *yaml_backend_get_pcap(usb_device_t *dev);
 
 #endif /* YAML_BACKEND_H */

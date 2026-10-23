@@ -55,6 +55,15 @@ typedef struct {
     char       *udc;        /* local engine: UDC name, or NULL (auto-detect) */
     char       *host;       /* qemu engine: remote host, or NULL (default) */
     char       *port;       /* qemu engine: remote port, or NULL (default) */
+    char       *record;     /* connection.record: pcap/pcapng output path, or NULL */
+    gboolean    debug;      /* connection.debug: enable debug logging */
+
+    /* Top-level `pcap:` field: alternate to `devices:` — points at a capture
+     * to replay instead of emulating from schemas/devices/flows. Resolved
+     * relative to the project dir. Mutually exclusive with `devices:`; the
+     * caller (main.c) swaps to pcap_backend when this is set and drops the
+     * (empty) descriptor tree. */
+    char       *pcap;
 
     /* Convenience aliases to the first manifest entry (not owned), so single-
      * device callers keep working. yaml_backend owns the flow join. */

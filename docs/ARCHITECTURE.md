@@ -1,7 +1,7 @@
 # Architecture & Implementation Plan
 
 This document is the architecture and implementation plan for usbvcr. It goes
-deeper than the [README](../README.md): data flow, the YAML dialect, the
+deeper than the [README](https://github.com/jcfaracco/usbvcr#readme): data flow, the YAML dialect, the
 generic codec system, and the build order the project followed.
 
 > **usbredir** here is the wire protocol/transport spoken to QEMU

@@ -51,7 +51,7 @@ jobs:
         run: python3 -m pip install --upgrade meson ninja
 
       - name: Configure
-        run: meson setup build
+        run: meson setup build -Dwerror=true
 
       - name: Build
         run: ninja -C build
@@ -92,7 +92,7 @@ jobs:
         run: python3 -m pip install --upgrade meson ninja
 
       - name: Configure (coverage build)
-        run: meson setup build -Denable_coverage=true
+        run: meson setup build -Denable_coverage=true -Dwerror=true
 
       - name: Build
         run: ninja -C build

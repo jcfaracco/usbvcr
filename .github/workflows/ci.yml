@@ -112,7 +112,7 @@ jobs:
 
       - name: Upload test log on failure
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: meson-testlog-${{ matrix.os }}-${{ matrix.cc }}
           path: build/meson-logs/testlog.txt
@@ -172,7 +172,7 @@ jobs:
 
       - name: Upload test log on failure
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: meson-testlog-sanitize
           path: build/meson-logs/testlog.txt
@@ -219,7 +219,7 @@ jobs:
 
       - name: Upload test log on failure
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: meson-testlog-coverage
           path: build/meson-logs/testlog.txt
@@ -247,7 +247,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-report
           path: coverage/

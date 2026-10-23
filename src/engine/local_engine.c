@@ -135,11 +135,17 @@ static void handle_control_event(ffs_ctx_t *ctx,
     {
         if (setup.requesttype & 0x80)
         {
-            write(ctx->ep0_fd, data, n);
+            if (write(ctx->ep0_fd, data, n) < 0)
+            {
+                LOG_WARN("local_engine: ep0 write failed: %s", g_strerror(errno));
+            }
         }
         else
         {
-            write(ctx->ep0_fd, NULL, 0);
+            if (write(ctx->ep0_fd, NULL, 0) < 0)
+            {
+                LOG_WARN("local_engine: ep0 status ACK failed: %s", g_strerror(errno));
+            }
         }
     }
     else
@@ -147,11 +153,17 @@ static void handle_control_event(ffs_ctx_t *ctx,
         uint8_t dummy;
         if (setup.requesttype & 0x80)
         {
-            read(ctx->ep0_fd, &dummy, 0);   /* Stall IN */
+            if (read(ctx->ep0_fd, &dummy, 0) < 0)   /* Stall IN */
+            {
+                LOG_WARN("local_engine: ep0 stall (IN) failed: %s", g_strerror(errno));
+            }
         }
         else
         {
-            write(ctx->ep0_fd, NULL, 0);
+            if (write(ctx->ep0_fd, NULL, 0) < 0)
+            {
+                LOG_WARN("local_engine: ep0 stall (OUT) failed: %s", g_strerror(errno));
+            }
         }
     }
 }
@@ -211,7 +223,11 @@ static void service_endpoints(usb_device_t *dev, GArray *eps)
             int n = dev->ops->ep_in(dev, ep->ep_addr, buf, sizeof(buf));
             if (n > 0)
             {
-                write(ep->fd, buf, (size_t)n);
+                if (write(ep->fd, buf, (size_t)n) < 0)
+                {
+                    LOG_WARN("local_engine: ep 0x%02x write failed: %s",
+                             ep->ep_addr, g_strerror(errno));
+                }
             }
         }
         else if (!ep->is_in && dev->ops->ep_out != NULL)

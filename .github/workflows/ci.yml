@@ -79,7 +79,7 @@ jobs:
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install pkg-config glib libyaml check ccache
+          brew install pkg-config glib libyaml check ccache meson ninja
           echo "$(brew --prefix)/opt/ccache/libexec" >> "$GITHUB_PATH"
 
       - name: Cache ccache
@@ -91,12 +91,14 @@ jobs:
             ccache-${{ matrix.os }}-${{ matrix.cc }}-
 
       - name: Cache pip
+        if: runner.os == 'Linux'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/pip
           key: pip-${{ matrix.os }}
 
-      - name: Install meson + ninja
+      - name: Install meson + ninja (Linux)
+        if: runner.os == 'Linux'
         run: python3 -m pip install --upgrade meson ninja
 
       - name: Configure

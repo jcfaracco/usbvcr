@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # .github/workflows/ci.yml, on the default branch.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # .github/workflows/pages.yml only exists on the pages branch — Dependabot's
+  # github-actions ecosystem only scans the default branch by default, so it
+  # needs its own entry pointed there to see that workflow at all.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "pages"
+    schedule:
+      interval: "weekly"

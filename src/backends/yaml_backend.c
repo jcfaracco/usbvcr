@@ -218,6 +218,7 @@ usb_device_t *yaml_backend_create(const char *path)
      * its connection:/record:/debug:/pcap fields. */
     if (yd->tree && usb_node_validate(yd->tree, 0) < 0) {
         LOG_ERR("There are some NULL props in devices for %s (`--debug` shows them).\n", path);
+        yaml_device_free(yd);
         return NULL;
     }
 
@@ -236,6 +237,32 @@ usb_device_t *yaml_backend_create(const char *path)
     dev->ops = &yaml_ops;
     dev->state = st;
     return dev;
+}
+
+void yaml_backend_destroy(usb_device_t *dev)
+{
+    yaml_backend_state_t *st;
+
+    if (dev == NULL)
+    {
+        return;
+    }
+
+    st = (yaml_backend_state_t *)dev->state;
+    if (st != NULL)
+    {
+        if (st->desc_buf != NULL)
+        {
+            g_byte_array_unref(st->desc_buf);
+        }
+        if (st->desc_bufs != NULL)
+        {
+            g_hash_table_destroy(st->desc_bufs);
+        }
+        yaml_device_free(st->dev);
+        g_free(st);
+    }
+    g_free(dev);
 }
 
 const char *yaml_backend_get_name(usb_device_t *dev)

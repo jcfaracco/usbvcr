@@ -18,6 +18,9 @@
  * Returns NULL on error. */
 usb_device_t *yaml_backend_create(const char *path);
 
+/* Free a backend created by yaml_backend_create(). No-op on NULL. */
+void yaml_backend_destroy(usb_device_t *dev);
+
 /* Project `name:` field the backend was loaded from, or NULL if the
  * manifest doesn't set one. */
 const char *yaml_backend_get_name(usb_device_t *dev);

@@ -1,7 +1,3 @@
----
-title: usbvcr
----
-
 # usbvcr
 
 **YAML in, real USB traffic out.** Describe a USB device — descriptors,

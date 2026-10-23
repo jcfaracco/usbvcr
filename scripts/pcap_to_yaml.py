@@ -221,11 +221,21 @@ def parse_config_descriptor(raw: bytes) -> dict:
         "iConfiguration": iConfiguration,
         "bmAttributes": Hex(bmAttributes),
         "bMaxPower": bMaxPower,
-        "interfaces": [],
     }
 
+    # "interfaces" (and each interface's "endpoints") are inserted into their
+    # parent dict lazily, on first use, rather than up front - dict insertion
+    # order is what controls wire order for unnamed fields (see the raw
+    # fallback below), so a key created eagerly would always serialize
+    # before anything inserted after it, even if the real device byte stream
+    # put it later (e.g. a device-level descriptor seen before the first
+    # INTERFACE, or - as UVC class-specific descriptors do in practice - one
+    # straddling an interface's own endpoint).
+    interfaces = []
     off = bLength
     current_iface = None
+    current_iface_endpoints = None
+    unknown_idx = 0
     end = min(len(raw), wTotalLength)
     while off + 2 <= end:
         sub_len, sub_type = struct.unpack_from("<BB", raw, off)
@@ -238,6 +248,8 @@ def parse_config_descriptor(raw: bytes) -> dict:
              bInterfaceClass, bInterfaceSubClass, bInterfaceProtocol,
              iInterface) = struct.unpack_from("<BBBBBBBBB", body, 0)
             current_iface = {
+                "bLength": sub_len,
+                "bDescriptorType": Hex(sub_type),
                 "bInterfaceNumber": bInterfaceNumber,
                 "bAlternateSetting": bAlternateSetting,
                 "bNumEndpoints": bNumEndpoints,
@@ -245,9 +257,10 @@ def parse_config_descriptor(raw: bytes) -> dict:
                 "bInterfaceSubClass": Hex(bInterfaceSubClass),
                 "bInterfaceProtocol": Hex(bInterfaceProtocol),
                 "iInterface": iInterface,
-                "endpoints": [],
             }
-            config["interfaces"].append(current_iface)
+            current_iface_endpoints = None
+            config.setdefault("interfaces", interfaces)
+            interfaces.append(current_iface)
 
         elif sub_type == 0x21 and sub_len >= 9 and current_iface is not None:  # HID
             (_, _, bcdHID, bCountryCode, bNumDescriptors,
@@ -266,15 +279,35 @@ def parse_config_descriptor(raw: bytes) -> dict:
         elif sub_type == 0x05 and sub_len >= 7 and current_iface is not None:  # ENDPOINT
             (_, _, bEndpointAddress, ep_bmAttributes, wMaxPacketSize,
              bInterval) = struct.unpack_from("<BBBBHB", body, 0)
-            current_iface["endpoints"].append({
+            if current_iface_endpoints is None:
+                current_iface_endpoints = []
+                current_iface["endpoints"] = current_iface_endpoints
+            current_iface_endpoints.append({
+                "bLength": sub_len,
+                "bDescriptorType": Hex(sub_type),
                 "bEndpointAddress": Hex(bEndpointAddress),
                 "bmAttributes": Hex(ep_bmAttributes),
                 "wMaxPacketSize": wMaxPacketSize,
                 "bInterval": bInterval,
             })
 
+        else:
+            # Unrecognized sub-descriptor: class-specific interface/endpoint
+            # descriptors (e.g. UVC's VC_HEADER/terminals/units/CS_ENDPOINT),
+            # or a standalone one seen before the first INTERFACE (e.g. an
+            # Interface Association Descriptor). Byte-perfect raw hex
+            # fallback (docs/yaml_dialect.md's raw escape hatch, the same
+            # `{hex: ...}` shape used throughout tests/data/example3's
+            # hand-authored UVC fixture) - attached to whichever container is
+            # current so wire order is preserved, since the heuristics here
+            # don't know enough about any given device class to structure it.
+            target = current_iface if current_iface is not None else config
+            target[f"class_specific_{unknown_idx}"] = {"hex": body.hex().upper()}
+            unknown_idx += 1
+
         off += sub_len
 
+    config.setdefault("interfaces", interfaces)
     return config
 
 

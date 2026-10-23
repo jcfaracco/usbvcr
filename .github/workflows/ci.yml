@@ -26,6 +26,8 @@ jobs:
         run: |
           cppcheck --enable=warning --std=c11 \
             --error-exitcode=1 --inline-suppr -q \
+            --suppress=normalCheckLevelMaxBranches \
+            -I src -I src/lib -I src/core -I src/fuzz -I src/backends -I src/engine \
             src/
 
   build-test:

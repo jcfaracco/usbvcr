@@ -11,7 +11,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test-coverage:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=warning --std=c11 \
+            --error-exitcode=1 --inline-suppr -q \
+            src/
+
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libglib2.0-dev \
+            libyaml-dev \
+            libsubunit-dev \
+            check
+
+      - name: Install meson + ninja
+        run: python3 -m pip install --upgrade meson ninja
+
+      - name: Configure
+        run: meson setup build
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Run test suite
+        run: meson test -C build --print-errorlogs
+
+      - name: Upload test log on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: meson-testlog
+          path: build/meson-logs/testlog.txt
+          retention-days: 7
+
+  coverage:
+    needs: build-test
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -47,7 +104,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: meson-testlog
+          name: meson-testlog-coverage
           path: build/meson-logs/testlog.txt
           retention-days: 7
 

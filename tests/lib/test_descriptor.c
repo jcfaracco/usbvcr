@@ -48,6 +48,7 @@ void test_desc_parse_config_from_file(const char *file)
     ck_assert_ptr_nonnull(usb);
     ck_assert_int_eq(usb->ops->get_descriptor(usb, USB_DESC_CONFIG, 0, 0, &out, &len), 0);
     ck_assert_int_eq(desc_parse_config(out, len, &ii, &ei), 0);
+    yaml_backend_destroy(usb);
 }
 
 START_TEST(test_desc_parse_config_1)
@@ -67,10 +68,12 @@ START_TEST(test_yaml_backend_get_name)
     usb_device_t *dev = yaml_backend_create(TEST_DATA_DIR "/example1/example1.yaml");
     ck_assert_ptr_nonnull(dev);
     ck_assert_str_eq(yaml_backend_get_name(dev), "Hello World Injector Keyboard");
+    yaml_backend_destroy(dev);
 
     dev = yaml_backend_create(TEST_DATA_DIR "/example2/example2.yaml");
     ck_assert_ptr_nonnull(dev);
     ck_assert_str_eq(yaml_backend_get_name(dev), "Virtual USB Keyboard");
+    yaml_backend_destroy(dev);
 }
 END_TEST
 

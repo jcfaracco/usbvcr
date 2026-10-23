@@ -83,6 +83,7 @@ START_TEST(test_ffs_build_descriptors_valid)
     ck_assert_int_gt(fs_count, 0);
 
     g_byte_array_free(arr, TRUE);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -167,6 +168,7 @@ START_TEST(test_ffs_setup_and_teardown_mock)
     rmdir(ctx->configfs_path);
     rmdir(tmp);
     ffs_ctx_free(ctx);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 

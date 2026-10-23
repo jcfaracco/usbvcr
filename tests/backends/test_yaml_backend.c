@@ -128,6 +128,7 @@ START_TEST(test_yaml_backend_e1_lifecycle)
     ck_assert_ptr_nonnull(dev);
     ck_assert_str_eq(dev->ops->name, "yaml");
     ck_assert_str_eq(yaml_backend_get_name(dev), "Hello World Injector Keyboard");
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -151,6 +152,7 @@ START_TEST(test_yaml_backend_e1_get_descriptor)
     ck_assert_int_eq(rc, 0);
     ck_assert_uint_eq(len, sizeof(EXPECTED_CONFIG_DESC_E1));
     ck_assert_mem_eq(desc, EXPECTED_CONFIG_DESC_E1, sizeof(EXPECTED_CONFIG_DESC_E1));
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -181,6 +183,7 @@ START_TEST(test_yaml_backend_e1_scrambled_fields_same_bytes)
     ck_assert_int_eq(rc, 0);
     ck_assert_uint_eq(len, sizeof(EXPECTED_CONFIG_DESC_E1));
     ck_assert_mem_eq(desc, EXPECTED_CONFIG_DESC_E1, sizeof(EXPECTED_CONFIG_DESC_E1));
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -225,6 +228,7 @@ START_TEST(test_yaml_backend_e1_control)
     rc = dev->ops->control(dev, &setup, data, &len);
     ck_assert_int_eq(rc, 0);
     ck_assert_uint_eq(len, 0);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -272,6 +276,7 @@ START_TEST(test_yaml_backend_e1_ep_in_hello_world)
     /* Drained queue NAKs. */
     n = dev->ops->ep_in(dev, 0x81, data, sizeof(data));
     ck_assert_int_eq(n, 0);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -314,6 +319,7 @@ START_TEST(test_yaml_backend_e2_lifecycle)
     ck_assert_ptr_nonnull(dev);
     ck_assert_str_eq(dev->ops->name, "yaml");
     ck_assert_str_eq(yaml_backend_get_name(dev), "Virtual USB Keyboard");
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -337,6 +343,7 @@ START_TEST(test_yaml_backend_e2_get_descriptor)
     ck_assert_int_eq(rc, 0);
     ck_assert_uint_eq(len, sizeof(EXPECTED_CONFIG_DESC_E2));
     ck_assert_mem_eq(desc, EXPECTED_CONFIG_DESC_E2, sizeof(EXPECTED_CONFIG_DESC_E2));
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -376,6 +383,7 @@ START_TEST(test_yaml_backend_e2_control)
     len = 0;
     rc = dev->ops->control(dev, &setup, data, &len);
     ck_assert_int_eq(rc, -1);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -393,6 +401,7 @@ START_TEST(test_yaml_backend_lifecycle)
     ck_assert_ptr_nonnull(dev);
     ck_assert_str_eq(dev->ops->name, "yaml");
     ck_assert_str_eq(yaml_backend_get_name(dev), "USB Video Class Webcam Sample");
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -421,6 +430,7 @@ START_TEST(test_yaml_backend_get_descriptor)
     /* Unknown descriptor index stalls. */
     rc = dev->ops->get_descriptor(dev, USB_DESC_DEVICE, 1, 0, &desc, &len);
     ck_assert_int_eq(rc, -1);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -469,6 +479,7 @@ START_TEST(test_yaml_backend_control_enumeration)
     rc = dev->ops->control(dev, &setup, data, &len);
     ck_assert_int_eq(rc, 0);
     ck_assert_uint_eq(len, 0);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -515,6 +526,7 @@ START_TEST(test_yaml_backend_control_uvc_classes)
     ck_assert_int_eq(rc, 0);
     ck_assert_uint_eq(len, 1);
     ck_assert_uint_eq(data[0], 0x01);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -556,6 +568,7 @@ START_TEST(test_yaml_backend_streaming)
     /* Drained queue NAKs. */
     n = dev->ops->ep_in(dev, 0x82, data, sizeof(data));
     ck_assert_int_eq(n, 0);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 

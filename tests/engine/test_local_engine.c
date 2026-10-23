@@ -78,6 +78,7 @@ START_TEST(test_open_endpoints_and_close)
     unlink(ep1_path);
     rmdir(tmp);
     ffs_ctx_free(ctx);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -111,6 +112,7 @@ START_TEST(test_handle_control_event_in)
 
     close(pfd[0]);
     ffs_ctx_free(ctx);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -137,6 +139,7 @@ START_TEST(test_handle_control_event_out)
 
     close(pfd[0]);
     ffs_ctx_free(ctx);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -167,6 +170,7 @@ START_TEST(test_handle_control_event_stall)
 
     close(sv[1]);
     ffs_ctx_free(ctx);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -206,6 +210,7 @@ START_TEST(test_handle_ep0_events)
 
     close(pfd[1]);
     ffs_ctx_free(ctx);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -265,6 +270,7 @@ START_TEST(test_service_endpoints)
     close(out_pfd[0]);
     close(out_pfd[1]);
     g_array_free(eps, TRUE);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -285,6 +291,7 @@ START_TEST(test_local_engine_run_setup_fail)
     /* Running with an invalid name or without root FunctionFS mounts will fail at ffs_setup */
     int ret = local_engine_run(dev, "nonexistent_dev_path_xyz", NULL);
     ck_assert_int_eq(ret, -1);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 

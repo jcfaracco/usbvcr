@@ -250,7 +250,11 @@ static int ffs_init_configfs_dirs(ffs_ctx_t *ctx, usb_device_t *dev)
     g_mkdir_with_parents(fn_dir, 0755);
 
     link_dst = g_strdup_printf("%s/ffs.%s", cfg_dir, ctx->name);
-    symlink(fn_dir, link_dst);
+    if (symlink(fn_dir, link_dst) < 0 && errno != EEXIST)
+    {
+        LOG_ERR("ffs: failed to symlink %s -> %s: %s", link_dst, fn_dir, g_strerror(errno));
+        return -1;
+    }
     return 0;
 }
 

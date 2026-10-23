@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install cppcheck
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cppcheck
@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -81,7 +81,7 @@ jobs:
           echo "$(brew --prefix)/opt/ccache/libexec" >> "$GITHUB_PATH"
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ matrix.os }}-${{ matrix.cc }}-${{ hashFiles('src/**/*.c', 'src/**/*.h', 'meson.build', 'meson.options') }}
@@ -89,7 +89,7 @@ jobs:
             ccache-${{ matrix.os }}-${{ matrix.cc }}-
 
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/pip
           key: pip-${{ matrix.os }}
@@ -108,7 +108,7 @@ jobs:
 
       - name: Upload test log on failure
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: meson-testlog-${{ matrix.os }}-${{ matrix.cc }}
           path: build/meson-logs/testlog.txt
@@ -122,7 +122,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install system dependencies
         run: |
@@ -138,7 +138,7 @@ jobs:
           echo "/usr/lib/ccache/bin" >> "$GITHUB_PATH"
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-sanitize-${{ hashFiles('src/**/*.c', 'src/**/*.h', 'meson.build', 'meson.options') }}
@@ -146,7 +146,7 @@ jobs:
             ccache-sanitize-
 
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/pip
           key: pip-ubuntu-latest
@@ -168,7 +168,7 @@ jobs:
 
       - name: Upload test log on failure
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: meson-testlog-sanitize
           path: build/meson-logs/testlog.txt
@@ -181,7 +181,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install system dependencies
         run: |
@@ -196,7 +196,7 @@ jobs:
             gcovr
 
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/pip
           key: pip-ubuntu-latest
@@ -215,7 +215,7 @@ jobs:
 
       - name: Upload test log on failure
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: meson-testlog-coverage
           path: build/meson-logs/testlog.txt
@@ -243,7 +243,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: coverage-report
           path: coverage/

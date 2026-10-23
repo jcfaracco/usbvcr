@@ -29,14 +29,34 @@ jobs:
             src/
 
   build-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            cc: gcc
+            werror: true
+          - os: ubuntu-latest
+            cc: clang
+            werror: false   # clang + project's -Wpedantic trips a C2y-extension
+                             # warning inside glib's own headers (__COUNTER__ use
+                             # in gstring.h) — not our code; portability signal
+                             # only until that's addressed deliberately.
+          - os: macos-latest
+            cc: clang
+            werror: false   # same reasoning; also unverified end-to-end (no
+                             # macOS runner available to test this locally).
+    env:
+      CC: ${{ matrix.cc }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -47,11 +67,15 @@ jobs:
             libsubunit-dev \
             check
 
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install pkg-config glib libyaml check
+
       - name: Install meson + ninja
         run: python3 -m pip install --upgrade meson ninja
 
       - name: Configure
-        run: meson setup build -Dwerror=true
+        run: meson setup build ${{ matrix.werror && '-Dwerror=true' || '' }}
 
       - name: Build
         run: ninja -C build
@@ -63,7 +87,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: meson-testlog
+          name: meson-testlog-${{ matrix.os }}-${{ matrix.cc }}
           path: build/meson-logs/testlog.txt
           retention-days: 7
 

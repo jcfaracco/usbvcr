@@ -100,7 +100,7 @@ int main(int argc, char *argv[])
         { "local", 0, 0, G_OPTION_ARG_NONE, &config.local, "run the device locally against a Linux USB gadget (FunctionFS/ConfigFS) instead of QEMU (or set connection.engine: local in the manifest).", NULL },
         { "udc", 0, 0, G_OPTION_ARG_STRING, &config.udc, "UDC to bind the local gadget to, with --local (default: auto-detect, or manifest's connection.udc).", "UDC" },
         { "version", 'V', 0, G_OPTION_ARG_NONE, &config.version, "Show version and exit.", NULL },
-        { NULL }
+        G_OPTION_ENTRY_NULL
     };
 
     // Create the context with a usage summary

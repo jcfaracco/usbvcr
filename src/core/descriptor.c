@@ -26,8 +26,10 @@ void desc_set_interface_info_header(const uint8_t *cfg, uint8_t cur_iface,
 {
     uint32_t n = ii->interface_count;
 
-    if (cur_iface >= 32)
+    if (cur_iface >= 32) {
+        LOG_ERR("descriptor: interface number %u exceeds max supported (31), ignored", cur_iface);
         return;
+    }
 
     if (cur_iface + 1u > n)
         ii->interface_count = cur_iface + 1u;
@@ -45,6 +47,12 @@ void desc_set_ep_info_header(const uint8_t *cfg, uint8_t cur_iface,
 {
     uint8_t addr = cfg[offset + EP_bEndpointAddress];
     uint8_t idx  = usb_ep_index(addr);
+
+    if (idx >= 32) {
+        LOG_ERR("descriptor: endpoint address 0x%02x at offset %zu yields out-of-range index %u",
+                addr, offset, idx);
+        return;
+    }
 
     ei->type[idx]     = cfg[offset + EP_bmAttributes] & 0x03;
     ei->interval[idx] = cfg[offset + EP_bInterval];
@@ -70,24 +78,39 @@ int desc_parse_config(const uint8_t *cfg, size_t len,
         uint8_t btype = cfg[offset + DESC_bDescriptorType];
 
         if (blen == 0 || offset + blen > len) {
-            LOG_ERR("descriptor: malformed at offset %zu", offset);
+            if (blen == 0)
+                LOG_ERR("descriptor: zero-length descriptor at offset %zu (bType=0x%02x)",
+                        offset, btype);
+            else
+                LOG_ERR("descriptor: descriptor at offset %zu overruns buffer "
+                        "(bLength=%u, remaining=%zu)", offset, blen, len - offset);
             return -1;
         }
 
         switch (btype) {
             case USB_DESC_INTERFACE:
-               if (blen < 9)
+               if (blen < 9) {
+                   LOG_WARN("descriptor: INTERFACE at offset %zu has bLength=%u (expected >= 9), skipping",
+                            offset, blen);
                    break;
+               }
 
                cur_iface = cfg[offset + IFACE_bInterfaceNumber];
 
                desc_set_interface_info_header(cfg, cur_iface, offset, ii);
                break;
             case USB_DESC_ENDPOINT:
-               if (blen < 7)
+               if (blen < 7) {
+                   LOG_WARN("descriptor: ENDPOINT at offset %zu has bLength=%u (expected >= 7), skipping",
+                            offset, blen);
                    break;
+               }
 
                desc_set_ep_info_header(cfg, cur_iface, offset, ei);
+               break;
+            default:
+               LOG_DEBUG("descriptor: unhandled bDescriptorType=0x%02x at offset %zu (bLength=%u)",
+                         btype, offset, blen);
                break;
         }
 

@@ -425,6 +425,12 @@ static void pb_tick(usb_device_t *dev)
     (void)dev;
 }
 
+static int pb_get_speed(usb_device_t *dev)
+{
+    (void)dev;
+    return -1;
+}
+
 static const usb_device_ops_t pcap_ops = {
     .name           = "pcap",
     .get_descriptor = pb_get_descriptor,
@@ -432,6 +438,7 @@ static const usb_device_ops_t pcap_ops = {
     .ep_in          = pb_ep_in,
     .ep_out         = pb_ep_out,
     .tick           = pb_tick,
+    .get_speed      = pb_get_speed,
 };
 
 void pcap_backend_destroy(usb_device_t *dev)

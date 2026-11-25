@@ -77,11 +77,13 @@ enum {
      (1u << USB_VCR_CAP_BULK_RECEIVING))
 
 /* Link speeds. */
+#ifndef USB_VCR_SPEED_LOW
 #define USB_VCR_SPEED_LOW     0
 #define USB_VCR_SPEED_FULL    1
 #define USB_VCR_SPEED_HIGH    2
 #define USB_VCR_SPEED_SUPER   3
 #define USB_VCR_SPEED_UNKNOWN 255
+#endif
 
 /* Device descriptor field offsets (USB 2.0 spec, table 9-8). */
 #define USB_DD_bcdUSB           2   /* u16 LE */

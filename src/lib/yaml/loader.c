@@ -257,6 +257,12 @@ static int parse_main(const char *path, yaml_device_t *dev)
                          g_ascii_strcasecmp(dbg, "yes") == 0 ||
                          strcmp(dbg, "1") == 0);
 
+    const char *conn_speed = yaml_scalar(yaml_map_get(&doc, conn, "speed"));
+    const char *root_speed = yaml_scalar(yaml_map_get(&doc, root, "speed"));
+    int parsed_speed = usb_parse_speed(conn_speed ? conn_speed : root_speed);
+    if (parsed_speed >= 0)
+        dev->speed = parsed_speed;
+
     /* Top-level `pcap:` — alternate to `devices:`, resolved relative to the
      * project dir like device/flow refs below. */
     g_free(dev->pcap);
@@ -301,10 +307,13 @@ static int parse_main(const char *path, yaml_device_t *dev)
             }
 
             yaml_dev_entry_t *e = g_new0(yaml_dev_entry_t, 1);
+            const char *dspeed = yaml_scalar(yaml_map_get(&doc, item, "speed"));
+            int item_speed = usb_parse_speed(dspeed);
             e->name      = g_strdup(dref);
             e->flow_path = fref ? resolve_asset_path(dir, "flows", fref) : NULL;
             e->tree      = tree;   /* entry owns it */
             e->flow      = e->flow_path ? flow_load(e->flow_path) : NULL;
+            e->speed     = (item_speed >= 0) ? item_speed : dev->speed;
             dev->devices = g_list_append(dev->devices, e);
             LOG_DEBUG("[Manifest] device '%s' flow '%s'",
                       dref, fref ? fref : "(none)");
@@ -318,6 +327,8 @@ static int parse_main(const char *path, yaml_device_t *dev)
         yaml_dev_entry_t *first = dev->devices->data;
         dev->tree = first->tree;   /* alias, not owned */
         dev->flow = first->flow;
+        if (first->speed >= 0)
+            dev->speed = first->speed;
     }
 
     g_free(dir);
@@ -381,6 +392,7 @@ yaml_device_t *yaml_device_create(void)
     yaml_device_t *dev = g_new0(yaml_device_t, 1);
 
     /* tree/flow start NULL: they alias the first manifest entry once loaded. */
+    dev->speed     = -1;
     dev->schemas   = schema_new();
     dev->codecs    = g_hash_table_new_full(g_str_hash, g_str_equal,
                                            g_free,

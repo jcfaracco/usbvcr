@@ -40,6 +40,9 @@ typedef struct {
 
     /* Optional: periodic hook for streaming producers. May be NULL. */
     void (*tick)(usb_device_t *dev);
+
+    /* Optional: query actual device speed (USB_VCR_SPEED_*). Return -1 if unknown. */
+    int (*get_speed)(usb_device_t *dev);
 } usb_device_ops_t;
 
 struct usb_device {

@@ -84,6 +84,14 @@ static void fw_tick(usb_device_t *dev)
         fs->base->ops->tick(fs->base);
 }
 
+static int fw_get_speed(usb_device_t *dev)
+{
+    fuzz_state_t *fs = dev->state;
+    if (fs && fs->base && fs->base->ops && fs->base->ops->get_speed)
+        return fs->base->ops->get_speed(fs->base);
+    return -1;
+}
+
 static const usb_device_ops_t fuzz_ops = {
     .name           = "fuzz",
     .get_descriptor = fw_get_descriptor,
@@ -91,6 +99,7 @@ static const usb_device_ops_t fuzz_ops = {
     .ep_in          = fw_ep_in,
     .ep_out         = fw_ep_out,
     .tick           = fw_tick,
+    .get_speed      = fw_get_speed,
 };
 
 usb_device_t *fuzz_wrap(usb_device_t *base, const fuzz_cfg_t *cfg)

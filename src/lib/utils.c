@@ -50,6 +50,36 @@ int str_index_in_set(const char *s, const char *const set[], size_t n) {
 }
 
 
+int usb_parse_speed(const char *str)
+{
+    if (str == NULL)
+    {
+        return -1;
+    }
+
+    if (g_ascii_strcasecmp(str, "low") == 0 || strcmp(str, "0") == 0)
+    {
+        return USB_VCR_SPEED_LOW;
+    }
+    if (g_ascii_strcasecmp(str, "full") == 0 || strcmp(str, "1") == 0)
+    {
+        return USB_VCR_SPEED_FULL;
+    }
+    if (g_ascii_strcasecmp(str, "high") == 0 || strcmp(str, "2") == 0)
+    {
+        return USB_VCR_SPEED_HIGH;
+    }
+    if (g_ascii_strcasecmp(str, "super") == 0 ||
+        g_ascii_strcasecmp(str, "superspeed") == 0 ||
+        strcmp(str, "3") == 0)
+    {
+        return USB_VCR_SPEED_SUPER;
+    }
+
+    return -1;
+}
+
+
 /* TODO: Check if there is an option instead of developing it. */
 void trim_string(char *dst, const char *src, size_t dst_size) {
     size_t len = 0;

@@ -81,6 +81,12 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
         ep0_mps = mp0;
     }
 
+    if (dev->ops != NULL && dev->ops->get_speed != NULL) {
+        int backend_speed = dev->ops->get_speed(dev);
+        if (backend_speed >= 0)
+            speed = (uint8_t)backend_speed;
+    }
+
     /* ep0 (control) is implicit: it has no endpoint descriptor in the
      * config, so fill its ep_info from the device descriptor. Without a nonzero
      * max packet size the peer cannot run control transfers and enumeration
@@ -110,9 +116,7 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
     /* Pull the connect fields from the device descriptor by named offset. */
     usb_device_connect_header_t c;
     memset(&c, 0, sizeof(c));
-    /* Speed derived from bcdUSB/bMaxPacketSize0 above. TODO: let the backend
-     * override it outright - the descriptor heuristic still can't catch a
-     * Full-Speed device that happens to use ep0 mp0 == 64. */
+    /* Speed derived from bcdUSB/bMaxPacketSize0 above or overridden by backend. */
     c.speed              = speed;
     c.device_class       = DESC_U8(dd,  USB_DD_bDeviceClass);
     c.device_subclass    = DESC_U8(dd,  USB_DD_bDeviceSubClass);

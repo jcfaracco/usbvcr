@@ -37,6 +37,7 @@ typedef struct {
     char       *flow_path;  /* resolved flows/ path from the manifest, or NULL */
     usb_node_t *tree;       /* device/config/interface/endpoint descriptor tree */
     void       *flow;       /* Flow* (see flow.h), built from flow_path (TODO) */
+    int         speed;      /* speed override (USB_VCR_SPEED_*), or -1 */
 } yaml_dev_entry_t;
 
 /* Loaded project: the `devices:` manifest (device+flow pairs) plus the shared
@@ -69,6 +70,7 @@ typedef struct {
      * device callers keep working. yaml_backend owns the flow join. */
     usb_node_t *tree;
     void       *flow;
+    int         speed;      /* speed override (USB_VCR_SPEED_*), or -1 */
 } yaml_device_t;
 
 /* Load a canonical device project rooted at `dir` (contains devices/,

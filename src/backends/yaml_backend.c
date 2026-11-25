@@ -198,6 +198,22 @@ static void yb_tick(usb_device_t *dev)
     flow_tick(st->dev->flow);
 }
 
+static int yb_get_speed(usb_device_t *dev)
+{
+    yaml_backend_state_t *st;
+
+    if (dev == NULL || dev->state == NULL)
+    {
+        return -1;
+    }
+    st = (yaml_backend_state_t *)dev->state;
+    if (st->dev == NULL)
+    {
+        return -1;
+    }
+    return st->dev->speed;
+}
+
 static const usb_device_ops_t yaml_ops = {
     .name           = "yaml",
     .get_descriptor = yb_get_descriptor,
@@ -205,6 +221,7 @@ static const usb_device_ops_t yaml_ops = {
     .ep_in          = yb_ep_in,
     .ep_out         = yb_ep_out,
     .tick           = yb_tick,
+    .get_speed      = yb_get_speed,
 };
 
 usb_device_t *yaml_backend_create(const char *path)

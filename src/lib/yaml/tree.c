@@ -247,6 +247,25 @@ static void build_mapping_value(yaml_document_t *doc, const char *key,
         child = usb_node_create();
         usb_node_set_prop(out, create_prop_node(key, child));
     }
+
+    if (strcmp(key, "strings") == 0 && v->type == YAML_MAPPING_NODE) {
+        for (yaml_node_pair_t *p = v->data.mapping.pairs.start;
+             p < v->data.mapping.pairs.top; p++) {
+            yaml_node_t *k = yaml_document_get_node(doc, p->key);
+            yaml_node_t *val = yaml_document_get_node(doc, p->value);
+            if (!k || !val || k->type != YAML_SCALAR_NODE)
+                continue;
+            const char *kstr = (const char *)k->data.scalar.value;
+            const char *vstr = (val->type == YAML_SCALAR_NODE) ?
+                               (const char *)val->data.scalar.value : NULL;
+            if (kstr && vstr) {
+                usb_node_set_prop(child, create_prop_array(kstr,
+                                  (const uint8_t *)vstr, strlen(vstr) + 1));
+            }
+        }
+        return;
+    }
+
     build_map(doc, v, schemas, codecs, child, ns, depth + 1);
     usb_node_canonicalize_order(child, key);
 }

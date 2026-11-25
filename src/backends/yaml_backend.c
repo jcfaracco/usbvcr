@@ -70,6 +70,62 @@ static int yb_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
         target = find_node_by_name_and_index(st->dev->tree, "device_descriptor", index);
     } else if (type == 2) { // USB_DESC_CONFIG
         target = find_node_by_name_and_index(st->dev->tree, "configurations", index);
+    } else if (type == 3) { // USB_DESC_STRING
+        guint key = ((guint)type << 8) | index;
+        GByteArray *buf = g_hash_table_lookup(st->desc_bufs, GUINT_TO_POINTER(key));
+        if (!buf) {
+            buf = g_byte_array_new();
+            g_hash_table_insert(st->desc_bufs, GUINT_TO_POINTER(key), buf);
+        }
+        g_byte_array_set_size(buf, 0);
+
+        if (index == 0) {
+            uint8_t lang_desc[4] = { 4, 3, 0x09, 0x04 };
+            g_byte_array_append(buf, lang_desc, sizeof(lang_desc));
+            if (out) *out = buf->data;
+            if (len) *len = buf->len;
+            return 0;
+        }
+
+        const char *text = NULL;
+        usb_prop_t *sprop = find_prop_by_name_and_index(st->dev->tree, "strings", 0);
+        if (sprop && sprop->type == USB_PROP_NODE) {
+            char idx_str[16];
+            snprintf(idx_str, sizeof(idx_str), "%u", index);
+            for (GList *l = sprop->val.node->props; l; l = l->next) {
+                usb_prop_t *p = l->data;
+                if (strcmp(p->name, idx_str) == 0 ||
+                    (index == 1 && strcmp(p->name, "manufacturer") == 0) ||
+                    (index == 2 && strcmp(p->name, "product") == 0)) {
+                    if (p->type == USB_PROP_ARRAY && p->val.array) {
+                        text = (const char *)p->val.array;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (!text && index == 2 && st->dev->name) {
+            text = st->dev->name;
+        }
+
+        if (!text)
+            return -1;
+
+        size_t text_len = strlen(text);
+        uint8_t b_len = (uint8_t)(2 + text_len * 2);
+        uint8_t b_type = 3;
+        g_byte_array_append(buf, &b_len, 1);
+        g_byte_array_append(buf, &b_type, 1);
+        for (size_t i = 0; i < text_len; i++) {
+            uint16_t ch = (uint8_t)text[i];
+            uint8_t le[2] = { (uint8_t)(ch & 0xff), (uint8_t)(ch >> 8) };
+            g_byte_array_append(buf, le, 2);
+        }
+
+        if (out) *out = buf->data;
+        if (len) *len = buf->len;
+        return 0;
     }
 
     if (!target)

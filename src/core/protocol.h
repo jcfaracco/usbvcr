@@ -41,6 +41,7 @@ enum {
     RT_ISO_STREAM_STATUS        = 14,
     RT_START_INTERRUPT_RECEIVING = 15,
     RT_STOP_INTERRUPT_RECEIVING  = 16,
+    RT_CANCEL_DATA_PACKET       = 21,
     RT_CONTROL_PACKET           = 100,
     RT_BULK_PACKET              = 101,
     RT_ISO_PACKET               = 102,

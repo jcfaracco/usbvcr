@@ -525,8 +525,20 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
         }
         break;
 
+    case RT_BULK_PACKET:  /* Bulk transfer (e.g. MSC SCSI command / data) */
+        if (dev->ops->ep_out && len > sizeof(usb_interrupt_packet_header_t)) {
+            usb_interrupt_packet_header_t h;
+            memcpy(&h, payload, sizeof(h));
+            dev->ops->ep_out(dev, h.endpoint, payload + sizeof(h), len - sizeof(h));
+        }
+        break;
+
+    case RT_CANCEL_DATA_PACKET:
+        LOG_DEBUG("cancel data packet id=0x%016lx", (unsigned long)hdr->id);
+        break;
+
     default:
-        LOG_DEBUG("unhandled packet type=%u len=%zu", hdr->type, len);
+        LOG_WARN("unhandled packet type=%u len=%zu", hdr->type, len);
         break;
     }
 }

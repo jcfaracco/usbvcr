@@ -227,7 +227,9 @@ static int yb_control(usb_device_t *dev,
              * descriptor with a short request (e.g. 8 bytes) before asking
              * for the full length. Over-serving desyncs the host parser. */
             if (n > setup->length) n = setup->length;
-            if (n > USB_VCR_BUF_SIZE) n = USB_VCR_BUF_SIZE;
+#if USB_VCR_BUF_SIZE < 65536
+            if (n > USB_VCR_BUF_SIZE) n = (uint16_t)USB_VCR_BUF_SIZE;
+#endif
             memcpy(data, out_bytes, n);
             *len = n;
         } else {

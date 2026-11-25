@@ -31,7 +31,9 @@ static int fw_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
     }
 
     /* Copy into mutable scratch, then mutate in place. */
-    size_t n = base_len < sizeof(fs->scratch) ? base_len : sizeof(fs->scratch);
+    size_t n = base_len;
+    if (n > sizeof(fs->scratch))
+        n = sizeof(fs->scratch);
     memcpy(fs->scratch, base_desc, n);
     n = fuzz_mutate_descriptor(&fs->rng, &fs->cfg, fs->scratch, n,
                                sizeof(fs->scratch));

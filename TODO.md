@@ -8,17 +8,6 @@ and why it matters.
 
 ## High Priority
 
-### `[core]` Speed detection heuristic is unreliable for Full-Speed devices
-**File:** `src/core/usb_core.c:113`
-
-Device speed is currently derived from `bcdUSB` / `bMaxPacketSize0`. The
-heuristic cannot distinguish a Full-Speed device that happens to advertise
-`ep0 maxpacket == 64` (which is also valid for High-Speed). The backend
-should be able to supply the actual speed directly — for example from a
-transport-layer capability field — overriding the descriptor guess.
-
----
-
 ### `[yaml/loader]` Flow model is not loaded from `flows/` (manifest step 4 is dead)
 **File:** `src/lib/yaml/loader.h:39`, `src/lib/yaml/loader.c:10`
 
@@ -48,16 +37,6 @@ runtime.
 
 ---
 
-### `[ffs]` FunctionFS strings are hard-coded
-**File:** `src/lib/ffs/ffs.c` — `ffs_build_strings()`
-
-The string descriptor written to `ep0` is always `"USB VCR Emulated Device"`
-regardless of what the loaded device YAML says. The product/manufacturer
-strings from the device descriptor (fetched via `get_descriptor`) should be
-used instead, forwarding the real device identity through FunctionFS.
-
----
-
 ## Medium Priority
 
 ### `[yaml/loader]` Null `length`/`count` fields are not auto-filled
@@ -81,13 +60,13 @@ schema has no OUT match/action type. Devices that need to react to OUT data
 
 ---
 
-### `[yaml_backend]` Descriptor lookup only handles `DEVICE` and `CONFIG`
+### `[yaml_backend]` Descriptor lookup does not handle `BOS` or `Device Qualifier`
 **File:** `src/backends/yaml_backend.c` — `yb_get_descriptor()`
 
-The `get_descriptor` op hard-codes `type == 1` (DEVICE) and `type == 2`
-(CONFIG). Other standard descriptor types — String (`0x03`), BOS (`0x0F`),
-Device Qualifier (`0x06`) — are silently returned as "not found". Hosts that
-issue `GET_DESCRIPTOR` for strings or BOS will always get a stall.
+The `get_descriptor` op handles `type == 1` (DEVICE), `type == 2` (CONFIG),
+and `type == 3` (STRING). Other standard descriptor types — BOS (`0x0F`),
+Device Qualifier (`0x06`) — are returned as "not found". Hosts that
+issue `GET_DESCRIPTOR` for BOS will receive a stall.
 
 ---
 

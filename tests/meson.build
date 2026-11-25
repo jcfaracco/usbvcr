@@ -31,6 +31,19 @@ if check_dep.found()
   )
   test('utils', test_utils, env : test_env)
 
+  test_stream = executable(
+    'test_stream',
+    'lib/test_stream.c',
+    files(
+      '../src/lib/stream/mjpeg_parser.c',
+      '../src/lib/stream/stream_provider.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib],
+    dependencies : [check_dep, glib_dep],
+  )
+  test('stream', test_stream, env : test_env)
+
   test_yaml_loader = executable(
     'test_yaml_loader',
     'lib/test_yaml_loader.c',
@@ -103,6 +116,8 @@ if check_dep.found()
       '../src/lib/usb_node.c',
       '../src/lib/utils.c',
       '../src/lib/version.c',
+      '../src/lib/stream/mjpeg_parser.c',
+      '../src/lib/stream/stream_provider.c',
       '../src/backends/yaml_backend.c',
     ),
     include_directories : [lib, core, backends],
@@ -233,6 +248,8 @@ if check_dep.found()
       '../src/lib/codec.c',
       '../src/lib/version.c',
       '../src/lib/utils.c',
+      '../src/lib/stream/mjpeg_parser.c',
+      '../src/lib/stream/stream_provider.c',
       '../src/lib/log.c',
     ),
     include_directories : [lib, core, backends],
@@ -258,6 +275,8 @@ if check_dep.found()
         '../src/lib/codec.c',
         '../src/lib/version.c',
         '../src/lib/utils.c',
+        '../src/lib/stream/mjpeg_parser.c',
+        '../src/lib/stream/stream_provider.c',
       ),
       include_directories : [lib, core, backends],
       dependencies : [check_dep, glib_dep, yaml_dep],
@@ -281,6 +300,8 @@ if check_dep.found()
         '../src/lib/codec.c',
         '../src/lib/version.c',
         '../src/lib/utils.c',
+        '../src/lib/stream/mjpeg_parser.c',
+        '../src/lib/stream/stream_provider.c',
       ),
       include_directories : [lib, core, engine, backends],
       dependencies : [check_dep, glib_dep, yaml_dep],

@@ -278,6 +278,35 @@ START_TEST(test_parse_speed)
 }
 END_TEST
 
+START_TEST(test_parse_file_and_loop)
+{
+    g_autofree char *dir = g_dir_make_tmp("usbvcr-test-file-XXXXXX", NULL);
+    g_autofree char *path = g_build_filename(dir, "project.yaml", NULL);
+    g_autofree char *fake_mjpeg = g_build_filename(dir, "video.mjpeg", NULL);
+
+    ck_assert(g_file_set_contents(fake_mjpeg, "fake", 4, NULL));
+    ck_assert(g_file_set_contents(path,
+        "version: \"1.0\"\n"
+        "name: \"file-test\"\n"
+        "devices:\n"
+        "  - device: keyboard\n"
+        "    file: video.mjpeg\n"
+        "    loop: true\n",
+        -1, NULL));
+
+    yaml_device_t *dev = yaml_parse_from_file(path);
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_ptr_nonnull(dev->file);
+    ck_assert(g_str_has_suffix(dev->file, "video.mjpeg"));
+    ck_assert_int_eq(dev->loop, TRUE);
+
+    yaml_device_free(dev);
+    g_remove(fake_mjpeg);
+    g_remove(path);
+    g_rmdir(dir);
+}
+END_TEST
+
 static Suite *yaml_loader_suite(void)
 {
     Suite *s = suite_create("yaml_loader");
@@ -302,6 +331,7 @@ static Suite *yaml_loader_suite(void)
     tcase_add_test(tc_load, test_bare_id_resolution);
     tcase_add_test(tc_load, test_extends_device);
     tcase_add_test(tc_load, test_parse_speed);
+    tcase_add_test(tc_load, test_parse_file_and_loop);
     suite_add_tcase(s, tc_load);
 
     return s;

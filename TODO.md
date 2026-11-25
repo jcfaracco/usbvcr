@@ -50,13 +50,15 @@ or silently truncate data.
 
 ---
 
-### `[flow]` `flow_ep_out()` has no match/action support
-**File:** `src/lib/flow.c` — `flow_ep_out()`
+### `[storage/msc]` Automated unit tests for disk_provider and SCSI commands
+**File:** `src/lib/storage/disk_provider.c`, `tests/`
 
-Host-to-device OUT transfers (e.g. HID SET_REPORT, interrupt OUT endpoints)
-are consumed and logged but never matched against any flow rule. The flow
-schema has no OUT match/action type. Devices that need to react to OUT data
-(e.g. LED state changes) cannot be modelled.
+The `disk_provider` component implements SCSI transparent command set (SPC/SBC)
+over Bulk-Only Transport (BOT), verified end-to-end against real Linux guest VMs.
+A dedicated unit test suite (`tests/lib/test_disk_provider.c`) should be added to
+exercise and validate individual SCSI CDB parsing (INQUIRY, READ CAPACITY 10/16,
+MODE SENSE, READ 10, WRITE 10, SYNCHRONIZE CACHE, REQUEST SENSE) and CSW tag/residue
+pairing against synthetic test images.
 
 ---
 

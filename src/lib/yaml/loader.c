@@ -18,6 +18,7 @@
 #include "codec.h"
 #include "log.h"
 #include "version.h"
+#include "utils.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -114,6 +115,69 @@ static void dev_entry_free(gpointer p)
     usb_node_free(e->tree);
     if (e->flow) { flow_free(e->flow); }
     g_free(e);
+}
+
+static char *resolve_asset_path(const char *dir, const char *sub, const char *ref)
+{
+    char *path;
+    char *filename;
+
+    if (!ref)
+    {
+        return NULL;
+    }
+
+    if (g_path_is_absolute(ref))
+    {
+        if (g_file_test(ref, G_FILE_TEST_EXISTS))
+        {
+            return g_strdup(ref);
+        }
+        return NULL;
+    }
+
+    if (strchr(ref, '/') || g_str_has_suffix(ref, ".yaml") || g_str_has_suffix(ref, ".yml"))
+    {
+        path = g_build_filename(dir, ref, NULL);
+        if (g_file_test(path, G_FILE_TEST_EXISTS))
+        {
+            return path;
+        }
+        g_free(path);
+
+        /* Try directly under datadir */
+        path = usbvcr_find_data_file(NULL, ref);
+        if (path != NULL)
+        {
+            return path;
+        }
+
+        /* Try under datadir/sub if ref starts with sub/ */
+        if (sub != NULL && g_str_has_prefix(ref, sub) && ref[strlen(sub)] == '/')
+        {
+            path = usbvcr_find_data_file(sub, ref + strlen(sub) + 1);
+            if (path != NULL)
+            {
+                return path;
+            }
+        }
+
+        return NULL;
+    }
+
+    /* Bare ID (e.g. "keyboard", "mouse"): check local <dir>/<sub>/<ref>.yaml first */
+    filename = g_strdup_printf("%s.yaml", ref);
+    path = g_build_filename(dir, sub, filename, NULL);
+    if (g_file_test(path, G_FILE_TEST_EXISTS))
+    {
+        g_free(filename);
+        return path;
+    }
+    g_free(path);
+    g_free(filename);
+
+    /* Fallback to datadir/<sub>/<ref>.yaml */
+    return usbvcr_find_data_file(sub, ref);
 }
 
 /* Project file: read the `devices:` manifest — a sequence of {device, flow}
@@ -218,7 +282,13 @@ static int parse_main(const char *path, yaml_device_t *dev)
                 continue;
             }
 
-            char *dpath = g_build_filename(dir, dref, NULL);
+            char *dpath = resolve_asset_path(dir, "devices", dref);
+            if (!dpath) {
+                LOG_ERR("yaml_loader: cannot find device '%s'", dref);
+                rc = -1;
+                break;
+            }
+
             char *ns = NULL;
             usb_node_t *tree = yaml_tree_load(dpath, dev->schemas,
                                               dev->codecs, &ns);
@@ -232,7 +302,7 @@ static int parse_main(const char *path, yaml_device_t *dev)
 
             yaml_dev_entry_t *e = g_new0(yaml_dev_entry_t, 1);
             e->name      = g_strdup(dref);
-            e->flow_path = fref ? g_build_filename(dir, fref, NULL) : NULL;
+            e->flow_path = fref ? resolve_asset_path(dir, "flows", fref) : NULL;
             e->tree      = tree;   /* entry owns it */
             e->flow      = e->flow_path ? flow_load(e->flow_path) : NULL;
             dev->devices = g_list_append(dev->devices, e);
@@ -325,7 +395,17 @@ yaml_device_t *yaml_parse_from_file(const char *path)
         return NULL;
 
     char *dir = g_path_get_dirname(path);
+    char *datadir = usbvcr_get_data_dir();
     yaml_device_t *dev = yaml_device_create();
+
+    /* Pre-load global shared resources (schemas and codecs) from data dir first */
+    if (datadir != NULL) {
+        if (g_strcmp0(datadir, dir) != 0) {
+            load_scope_dir(datadir, "schemas", YAML_SCOPE_SCHEMAS, dev);
+            load_scope_dir(datadir, "codecs",  YAML_SCOPE_CODECS,  dev);
+        }
+        g_free(datadir);
+    }
 
     /* Shared resources first (dir-scanned): schema templates + codec tables.
      * Then the project `devices:` manifest, which loads each device tree using

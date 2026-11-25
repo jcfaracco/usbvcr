@@ -29,6 +29,7 @@ typedef enum {
 typedef struct {
     flow_action_type_t type;
     char *respond_with;
+    GByteArray *respond_bytes;
     uint8_t respond_with_status;
     char *transition_state;
     int return_nak_if_queue_empty;
@@ -62,6 +63,8 @@ static void flow_action_free(flow_action_t *act) {
         return;
 
     g_free(act->respond_with);
+    if (act->respond_bytes)
+        g_byte_array_unref(act->respond_bytes);
     g_free(act->transition_state);
     g_free(act->stream_file);
 
@@ -287,7 +290,13 @@ static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq, uint8_t ep_h
         if ((v = yaml_map_get(doc, item, "respond_with"))) {
             a = g_new0(flow_action_t, 1);
             a->type = ACT_RESPOND_WITH;
-            a->respond_with = g_strdup(yaml_scalar(v));
+            if (v->type == YAML_MAPPING_NODE) {
+                yaml_node_t *hex_n = yaml_map_get(doc, v, "hex");
+                if (hex_n)
+                    a->respond_bytes = parse_hex_string(yaml_scalar(hex_n));
+            } else {
+                a->respond_with = g_strdup(yaml_scalar(v));
+            }
         } else if ((v = yaml_map_get(doc, item, "respond_with_status"))) {
             a = g_new0(flow_action_t, 1);
             a->type = ACT_RESPOND_WITH_STATUS;
@@ -427,12 +436,20 @@ static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t
         switch (a->type) {
             case ACT_RESPOND_WITH:
                 LOG_DEBUG("[flow] ACT_RESPOND_WITH");
-                if (out && len && a->respond_with) {
-                    size_t slen = strlen(a->respond_with) + 1;
-                    if (slen > 1024) slen = 1024;
-                    memcpy(out, a->respond_with, slen);
-                    *len = slen;
-                    if (handled) *handled = 1;
+                if (out && len) {
+                    if (a->respond_bytes) {
+                        size_t blen = a->respond_bytes->len;
+                        if (blen > 1024) blen = 1024;
+                        memcpy(out, a->respond_bytes->data, blen);
+                        *len = (uint16_t)blen;
+                        if (handled) *handled = 1;
+                    } else if (a->respond_with) {
+                        size_t slen = strlen(a->respond_with) + 1;
+                        if (slen > 1024) slen = 1024;
+                        memcpy(out, a->respond_with, slen);
+                        *len = slen;
+                        if (handled) *handled = 1;
+                    }
                 }
                 break;
             case ACT_RESPOND_WITH_STATUS:

@@ -268,8 +268,8 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
         return;
     }
 
-    LOG_DEBUG("stall: unhandled control req=0x%02x type=0x%02x",
-              setup.request, setup.requesttype);
+    LOG_WARN("stall: unhandled control req=0x%02x type=0x%02x",
+             setup.request, setup.requesttype);
     reply_control(sock, id, &setup, 1, NULL, 0, ctx);  /* stall */
 }
 

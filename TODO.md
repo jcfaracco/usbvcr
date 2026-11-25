@@ -60,6 +60,24 @@ schema has no OUT match/action type. Devices that need to react to OUT data
 
 ---
 
+### `[flow]` Orthogonal (and hierarchical) state machine support
+**File:** `src/lib/flow.c`, `src/lib/flow.h`
+
+The current flow state machine is flat: it tracks a single global scalar state
+(`flow->state`), which requires duplicating common rules (such as standard
+descriptors and control transfers) across all operational states (`idle`,
+`streaming`, etc.).
+
+For composite USB devices (e.g., webcam with VideoControl, VideoStreaming,
+and Audio interfaces), alternate settings and endpoint lifecycles across
+interfaces are completely independent. Supporting **orthogonal state machines**
+(concurrent, parallel state machines running per interface or component) and
+**hierarchical states** (nested sub-states inheriting rules from parent states)
+will prevent combinatorial state explosion and naturally model independent
+interface behaviors.
+
+---
+
 ### `[yaml_backend]` Descriptor lookup does not handle `BOS` or `Device Qualifier`
 **File:** `src/backends/yaml_backend.c` — `yb_get_descriptor()`
 
@@ -136,4 +154,4 @@ to the UDC. Each syscall should be checked and logged on failure.
 
 ---
 
-*Last updated: 2026-11-19*
+*Last updated: 2026-11-25*

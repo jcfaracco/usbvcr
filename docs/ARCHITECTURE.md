@@ -108,13 +108,15 @@ src/lib/            # pure: no socket/engine deps
   yaml_loader.{c,h}   # canonical dialect -> UsbNode tree; imports/templates/override; null autofill
   codec.{c,h}         # generic table-driven item-stream encoder (see §6)
   flow.{c,h}          # states, rules, match, actions, transitions, when: eval, endpoint queues
+  stream_provider.{c,h} # packet-sliced streaming provider (e.g. UVC video over isochronous EPs)
+  video_parser.{c,h}  # container-agnostic video frame parser (e.g. Motion-JPEG)
   log.{c,h} utils.{c,h}
   pcap/               # pcap record/replay (pcap.{c,h}, record.{c,h})
 
 src/core/           # engine — generic, device-agnostic
   transport.{c,h}     # usbredir framing
-  protocol.h          # wire structs / caps / constants
-  usb_core.{c,h}      # handshake, announce, dispatch loop
+  protocol.h          # wire structs / caps / constants (includes ISO stream control)
+  usb_core.{c,h}      # handshake, announce, dispatch loop, isochronous streaming & pacing
   descriptor.{c,h}    # desc_parse_config: consumes serialized config bytes
   device.h            # usb_device_ops — the backend seam
 
@@ -137,7 +139,8 @@ of YAML; `backends` bridges. Keeps `fuzz_wrap` working for free.
   hid_report) from the tree; cache bytes.
 - `control` — run flow `match` rules → `respond_with` / `respond_raw` /
   `respond_with_status`.
-- `ep_in` — drain current state's `queue_endpoint_data`.
+- `ep_in` — drain current state's `queue_endpoint_data` or produce stream
+  packets via `stream_provider` when configured with `stream_from_file`.
 - `ep_out` — feed OUT data to flow (e.g. keyboard LEDs).
 - `tick` — run `on_enter`, advance transitions.
 - `state` — current flow state + per-endpoint queues.

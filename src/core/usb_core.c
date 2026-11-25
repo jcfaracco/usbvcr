@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -143,7 +144,7 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
 static int do_handshake(int sock, const usb_record_ctx_t *ctx, uint32_t *caps_out)
 {
     usb_header_t hdr;
-    uint8_t payload[USB_VCR_BUF_SIZE];
+    uint8_t payload[4096];
     size_t len;
     uint32_t peer_caps = 0;
     int r;
@@ -184,7 +185,18 @@ static int reply_control(int sock, int64_t id,
                          uint8_t status, const uint8_t *data, uint16_t n,
                          const usb_record_ctx_t *ctx)
 {
-    uint8_t buf[USB_VCR_BUF_SIZE];
+    uint8_t stack_buf[4096];
+    uint8_t *buf = stack_buf;
+    size_t total = sizeof(usb_control_packet_header_t) + n;
+    bool allocated = false;
+
+    if (total > sizeof(stack_buf)) {
+        buf = malloc(total);
+        if (!buf)
+            return -1;
+        allocated = true;
+    }
+
     usb_control_packet_header_t h = *setup;
     h.status = status;
     h.length = n;
@@ -193,7 +205,10 @@ static int reply_control(int sock, int64_t id,
     if (data && n)
         memcpy(buf + sizeof(h), data, n);
 
-    return usb_conn_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n, ctx);
+    int ret = usb_conn_send(sock, RT_CONTROL_PACKET, id, buf, total, ctx);
+    if (allocated)
+        free(buf);
+    return ret;
 }
 
 /* Fallback: standard GET_DESCRIPTOR served straight from the descriptor
@@ -238,7 +253,7 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
      * data+n. This keeps device behavior data-driven and lets the same engine
      * serve both a YAML description and a captured pcap replay. */
     if (dev->ops->control) {
-        uint8_t data[USB_VCR_BUF_SIZE];
+        uint8_t data[4096];
         uint16_t n = 0;
         if (dev->ops->control(dev, &setup, data, &n) == 0) {
             reply_control(sock, id, &setup, 0, data, n, ctx);
@@ -285,12 +300,12 @@ static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep,
 
     /* Drain whatever the backend wants to send right now. */
     for (;;) {
-        uint8_t data[USB_VCR_BUF_SIZE];
+        uint8_t data[4096];
         int n = dev->ops->ep_in(dev, ep, data, sizeof(data));
         if (n <= 0)
             break;
 
-        uint8_t buf[USB_VCR_BUF_SIZE];
+        uint8_t buf[sizeof(usb_interrupt_packet_header_t) + 4096];
         usb_interrupt_packet_header_t h = { ep, 0, (uint16_t)n };
         memcpy(buf, &h, sizeof(h));
         memcpy(buf + sizeof(h), data, (size_t)n);
@@ -330,7 +345,7 @@ static void push_iso_packets(int sock, usb_device_t *dev, uint8_t ep,
         if (n <= 0)
             break;
 
-        uint8_t buf[USB_VCR_BUF_SIZE];
+        uint8_t buf[sizeof(usb_iso_packet_header_t) + 1024];
         usb_iso_packet_header_t h = { ep, 0, (uint16_t)n };
         memcpy(buf, &h, sizeof(h));
         memcpy(buf + sizeof(h), data, (size_t)n);
@@ -376,7 +391,7 @@ static void handle_set_configuration(int sock, usb_device_t *dev, int64_t id,
         setup.request     = USB_REQ_SET_CONFIGURATION;
         setup.requesttype = 0x00;
         setup.value       = cfg;
-        uint8_t data[USB_VCR_BUF_SIZE];
+        uint8_t data[64];
         uint16_t n = 0;
         dev->ops->control(dev, &setup, data, &n);  /* drive flow; reply unused */
     }
@@ -407,7 +422,7 @@ static void handle_set_alt_setting(int sock, usb_device_t *dev, int64_t id,
         setup.requesttype = 0x01;
         setup.value       = req.alt;
         setup.index       = req.interface;
-        uint8_t data[USB_VCR_BUF_SIZE];
+        uint8_t data[64];
         uint16_t n = 0;
         dev->ops->control(dev, &setup, data, &n);  /* drive flow; reply unused */
     }
@@ -535,20 +550,26 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
 
             if (ep & 0x80) {
                 /* Bulk IN request from host */
-                uint8_t in_buf[USB_VCR_BUF_SIZE];
-                uint8_t resp[sizeof(usb_bulk_packet_header_t) + USB_VCR_BUF_SIZE];
-                usb_bulk_packet_header_t rh = bh;
-                int n = 0;
                 size_t req_len = (size_t)bh.length | ((size_t)bh.length_high << 16);
-                size_t max_in = sizeof(in_buf) - sizeof(rh) - 64;
+                size_t max_in = USB_VCR_BUF_SIZE - sizeof(usb_bulk_packet_header_t) - 64;
                 if (req_len == 0 || req_len > max_in)
                     req_len = max_in;
 
+                uint8_t *in_buf = malloc(req_len);
+                uint8_t *resp = malloc(sizeof(usb_bulk_packet_header_t) + req_len);
+                if (!in_buf || !resp) {
+                    free(in_buf);
+                    free(resp);
+                    break;
+                }
+
+                int n = 0;
                 if (dev->ops->ep_in) {
                     n = dev->ops->ep_in(dev, ep, in_buf, req_len);
                     if (n < 0) n = 0;
                 }
 
+                usb_bulk_packet_header_t rh = bh;
                 rh.status = 0; /* usb_redir_success */
                 rh.length = (uint16_t)(n & 0xffff);
                 rh.length_high = (uint16_t)(n >> 16);
@@ -557,6 +578,8 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
                     memcpy(resp + sizeof(rh), in_buf, n);
 
                 usb_conn_send(sock, RT_BULK_PACKET, hdr->id, resp, sizeof(rh) + n, ctx);
+                free(in_buf);
+                free(resp);
             } else {
                 /* Bulk OUT from host (e.g. SCSI CBW) */
                 if (dev->ops->ep_out)
@@ -585,7 +608,11 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
 int usb_core_run(int sock, usb_device_t *dev)
 {
     usb_header_t hdr;
-    uint8_t payload[USB_VCR_BUF_SIZE];
+    uint8_t *payload = malloc(USB_VCR_BUF_SIZE);
+    if (!payload) {
+        LOG_ERR("usb_core_run: failed to allocate payload buffer");
+        return -1;
+    }
     size_t len;
     uint32_t caps;
     bool int_ep_active[32] = {false};
@@ -595,17 +622,21 @@ int usb_core_run(int sock, usb_device_t *dev)
      * an emulated device; the USB device descriptor carries no bus/devnum. */
     usb_record_ctx_t ctx = { .bus = 0, .device = 1 };
 
-    if (do_handshake(sock, &ctx, &caps) < 0)
+    if (do_handshake(sock, &ctx, &caps) < 0) {
+        free(payload);
         return -1;
+    }
 
-    if (announce_device(sock, dev, caps, &ctx) < 0)
+    if (announce_device(sock, dev, caps, &ctx) < 0) {
+        free(payload);
         return -1;
+    }
 
     /* Serve requests until the peer goes away. The socket recv timeout turns
      * an idle wait into a periodic tick, so streaming backends make progress
      * even when no request is pending. */
     for (;;) {
-        int rc = usb_conn_recv(sock, &hdr, payload, sizeof(payload), &len, &ctx);
+        int rc = usb_conn_recv(sock, &hdr, payload, USB_VCR_BUF_SIZE, &len, &ctx);
         if (rc < 0)
             break;              /* EOF / hard error: peer gone */
         if (rc == 0)            /* got a request: rc == 1 means idle */
@@ -617,5 +648,6 @@ int usb_core_run(int sock, usb_device_t *dev)
         poll_iso_endpoints(sock, dev, iso_ep_active, &ctx);
     }
 
+    free(payload);
     return 0;
 }

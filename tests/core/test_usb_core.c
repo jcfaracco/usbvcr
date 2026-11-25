@@ -177,7 +177,11 @@ static void harness_start(harness *h)
     struct timeval tv = {0, 100 * 1000};   /* 100 ms */
     setsockopt(h->fds[1], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    ck_assert_int_eq(pthread_create(&h->thread, NULL, engine_thread, h), 0);
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 2 * 1024 * 1024);
+    ck_assert_int_eq(pthread_create(&h->thread, &attr, engine_thread, h), 0);
+    pthread_attr_destroy(&attr);
 }
 
 /* Close the peer end (engine sees EOF and returns) and join. All bytes the

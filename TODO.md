@@ -97,6 +97,20 @@ iterating the `getaddrinfo` result list would handle both address families.
 
 ---
 
+### `[scripts/pcap_to_yaml]` Automated tests for PCAP-to-YAML heuristics
+**File:** `scripts/pcap_to_yaml.py`, `tests/`
+
+The `scripts/pcap_to_yaml.py` conversion script uses several heuristics to infer
+symbolic devices, configurations, HID report descriptors, and operational flow
+rules from raw usbmon capture files. Currently, there is no automated test suite
+to validate these heuristics against edge cases (e.g., malformed captures, complex
+or vendor-specific HID reports falling back to raw payloads, multi-interface
+devices, non-standard control requests, and round-trip fidelity against existing
+test captures like `tests/data/pcap/hid_capture.pcapng`). A dedicated Python test
+suite should be added to exercise and validate each heuristic stage.
+
+---
+
 ### `[ffs]` FunctionFS descriptors are emitted for FS and HS only
 **File:** `src/lib/ffs/ffs.c` — `ffs_build_descriptors()`
 

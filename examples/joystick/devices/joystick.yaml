@@ -1,0 +1,58 @@
+device_descriptor:
+  - bLength: 18
+    bDescriptorType: 0x01
+    bcdUSB: 0x0200
+    bDeviceClass: 0x00
+    bDeviceSubClass: 0x00
+    bDeviceProtocol: 0x00
+    bMaxPacketSize0: 64
+    idVendor: 0x044f          # ThrustMaster, Inc.
+    idProduct: 0xb10a         # T.16000M Joystick
+    bcdDevice: 0x0100
+    iManufacturer: 1
+    iProduct: 2
+    iSerialNumber: 3
+    bNumConfigurations: 1
+
+configurations:
+  - bLength: 9
+    bDescriptorType: 0x02
+    wTotalLength: 34          # 9 (config) + 9 (iface) + 9 (HID) + 7 (ep)
+    bNumInterfaces: 1
+    bConfigurationValue: 1
+    iConfiguration: 0
+    bmAttributes: 0x80        # Bus powered
+    bMaxPower: 50             # 100 mA
+    interfaces:
+      - bLength: 9
+        bDescriptorType: 0x04
+        bInterfaceNumber: 0
+        bAlternateSetting: 0
+        bNumEndpoints: 1
+        bInterfaceClass: 0x03      # HID Class
+        bInterfaceSubClass: 0x00   # None
+        bInterfaceProtocol: 0x00   # None
+        iInterface: 0
+        hid_descriptor:
+          bLength: 9
+          bDescriptorType: 0x21    # HID Descriptor
+          bcdHID: 0x0111
+          bCountryCode: 0
+          bNumDescriptors: 1
+          bReportDescriptorType: 0x22
+          wDescriptorLength: 63
+        endpoints:
+          - bLength: 7
+            bDescriptorType: 0x05
+            bEndpointAddress: 0x81  # Interrupt IN
+            bmAttributes: 0x03       # Interrupt transfer
+            wMaxPacketSize: 64
+            bInterval: 10
+
+# HID Report Descriptor (63 bytes) for a 4-axis, 12-button USB Joystick:
+# - X, Y (8-bit signed, -127..127)
+# - Z (Throttle), Rz (Rudder) (8-bit unsigned, 0..255)
+# - 12 buttons (1-bit each) + 4-bit padding
+# Total report size: 6 bytes
+report_descriptor:
+  hex: "05010904a1010901a100093009311581257f750895028102c009320935150026ff0075089502810205091901290c150025017501950c8102750195048103c0"

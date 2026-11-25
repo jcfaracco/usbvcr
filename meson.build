@@ -60,5 +60,9 @@ if have_local_engine
     add_project_arguments('-DUSBVCR_HAVE_LOCAL_ENGINE=1', language : 'c')
 endif
 
+pkgdatadir = get_option('prefix') / get_option('datadir') / 'usbvcr'
+add_project_arguments('-DUSBVCR_DATA_DIR="@0@"'.format(pkgdatadir), language : 'c')
+install_subdir('data', install_dir : get_option('datadir') / 'usbvcr')
+
 subdir('src')
 subdir('tests')

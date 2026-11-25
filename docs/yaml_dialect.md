@@ -32,6 +32,13 @@ name: "Hello World Injector Keyboard"   # optional; used as the gadget name
                                         # FunctionFS dir), falls back to
                                         # "usbvcr" if unset.
 
+pcap: "capture.pcapng"                 # optional; alternate to devices: below —
+                                        # replay this capture instead of emulating
+                                        # from schemas/devices/flows. Resolved
+                                        # relative to this file. Mutually exclusive
+                                        # with devices: (ignored if --pcap is also
+                                        # passed on the CLI).
+
 connection:                            # optional; run config normally given
                                         # on the CLI. Any field left out here
                                         # falls back to its CLI flag/default.
@@ -40,6 +47,8 @@ connection:                            # optional; run config normally given
   udc: dummy_udc.0                     # local engine only (default: auto-detect)
   host: 127.0.0.1                      # qemu engine only (default: localhost)
   port: "1337"                         # qemu engine only (default: 1337)
+  record: "session.pcapng"             # optional; same as --record (default: off)
+  debug: true                          # optional; same as --debug (default: false)
 
 devices:
   - device: "devices/keyboard_hello_world.yaml"
@@ -47,8 +56,9 @@ devices:
 ```
 
 With a `connection:` block set, `usbvcr --yaml <project>.yaml` alone is
-enough to run — no `--local`/`--udc`/`--host`/`--port` needed. See
-[`running_engines.md`](running_engines.md) for the CLI-flag equivalents.
+enough to run — no `--local`/`--udc`/`--host`/`--port`/`--record`/`--debug`
+needed. See [`running_engines.md`](running_engines.md) for the CLI-flag
+equivalents.
 
 ---
 
@@ -104,6 +114,7 @@ sequencing is a structural choice, not a fixed layout.
 |-----|-------|---------|
 | `version` | string | dialect version |
 | `name` | string | human label |
+| `extends` | string | device template/instance to inherit from (e.g. `uvc_camera`) |
 | `imports` | list of paths | schema files to pull templates from |
 | `device_descriptor` | map | uses `template:` + field overrides |
 | `strings` | map `index: text` | USB string descriptors |
@@ -125,7 +136,7 @@ Inside an interface:
 | `bInterfaceNumber`, `bInterfaceClass`, `bInterfaceSubClass`, `bInterfaceProtocol` | int | standard interface fields |
 | `hid_descriptor` | map | e.g. `wDescriptorLength` |
 | `endpoints` | list | `address`, `attributes`, `max_packet_size`, `interval` |
-| `report_descriptor` | list **or** `raw_file` | symbolic item list (see `codecs/`) or an opaque blob path |
+| `report_descriptor` | list **or** `raw_file` **or** `hex` | symbolic item list (see `codecs/`), an opaque blob path (`raw_file:`), or raw hex bytes (`hex:`) |
 
 Field override example:
 
@@ -136,9 +147,10 @@ device_descriptor:
   idProduct: 0x1702
 ```
 
-Two authoring modes coexist:
+Three authoring modes coexist:
 - **Schema mode** — named fields, serialized to bytes.
 - **Raw mode** — `raw_file: "payloads/…"` when no schema fits.
+- **Inline hex mode** — `hex: "05010904..."` for raw descriptor bytes inline.
 
 ---
 
@@ -169,12 +181,14 @@ Actions:
 
 | Action | Meaning |
 |--------|---------|
-| `respond_with` | serialize a tree node, e.g. `"$device.device_descriptor"`, `"$device.configurations[0].interfaces[0].report_descriptor"` |
+| `respond_with` | serialize a tree node, e.g. `"$device.device_descriptor"`, `"$device.configurations[0].interfaces[0].report_descriptor"`, or inline `{ hex: "..." }` |
 | `respond_raw` | send an opaque payload: `{ file: "payloads/blob.bin" }` |
 | `respond_with_status` | ACK/stall a setup packet (`0` = ACK) |
 | `transition_state` | switch to another state by name |
 | `queue_endpoint_data` | queue `payloads` (list of `hex:`) to an `endpoint:` |
 | `return_nak_if_queue_empty` | NAK polls when the endpoint queue is drained |
+| `stream_from_file` | stream periodic video or isochronous/bulk packets from a file (e.g. `{ file: "payloads/stream.mjpeg", loop: true }`) |
+| `disk_from_file` | attach backing storage image for USB Mass Storage (SCSI over Bulk-Only Transport) (e.g. `{ file: "payloads/disk.img" }`) |
 
 ```yaml
 states:

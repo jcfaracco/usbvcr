@@ -136,31 +136,84 @@ GByteArray *ffs_build_descriptors(usb_device_t *dev)
     return arr;
 }
 
+static char *extract_string_from_desc(const uint8_t *desc, uint16_t len)
+{
+    if (desc == NULL || len < 2)
+    {
+        return NULL;
+    }
+
+    /* USB String Descriptor: bLength = desc[0], bDescriptorType = desc[1] == 0x03 */
+    if (desc[1] == USB_DESC_STRING)
+    {
+        size_t b_len = desc[0] <= len ? desc[0] : len;
+        if (b_len > 2)
+        {
+            size_t nchars = (b_len - 2) / 2;
+            GError *err = NULL;
+            char *utf8 = g_utf16_to_utf8((const gunichar2 *)(desc + 2), (glong)nchars, NULL, NULL, &err);
+            if (utf8 != NULL)
+            {
+                return utf8;
+            }
+            if (err != NULL)
+            {
+                g_error_free(err);
+            }
+        }
+    }
+    else
+    {
+        /* Raw ASCII / UTF-8 string */
+        return g_strndup((const char *)desc, len);
+    }
+    return NULL;
+}
+
 GByteArray *ffs_build_strings(usb_device_t *dev)
 {
     GByteArray *arr;
     struct usb_functionfs_strings_head head;
-    uint16_t lang;
+    uint16_t lang = 0x0409;   /* en-US */
+    char *product_str = NULL;
     const char *str;
     guint str_len;
 
-    (void)dev;
-    arr = g_byte_array_new();
-    str = "USB VCR Emulated Device";
+    if (dev != NULL && dev->ops != NULL && dev->ops->get_descriptor != NULL)
+    {
+        const uint8_t *dd = NULL;
+        uint16_t ddlen = 0;
+        if (dev->ops->get_descriptor(dev, USB_DESC_DEVICE, 0, 0, &dd, &ddlen) == 0 &&
+            dd != NULL && ddlen >= 18)
+        {
+            uint8_t i_prod = dd[15];
+            if (i_prod > 0)
+            {
+                const uint8_t *sdesc = NULL;
+                uint16_t slen = 0;
+                if (dev->ops->get_descriptor(dev, USB_DESC_STRING, i_prod, lang, &sdesc, &slen) == 0)
+                {
+                    product_str = extract_string_from_desc(sdesc, slen);
+                }
+            }
+        }
+    }
+
+    str = product_str ? product_str : "USB VCR Emulated Device";
     str_len = (guint)strlen(str) + 1;
 
+    arr = g_byte_array_new();
     memset(&head, 0, sizeof(head));
     head.magic = FUNCTIONFS_STRINGS_MAGIC;
     head.length = (uint32_t)(sizeof(head) + sizeof(lang) + str_len);
     head.str_count = 1;
     head.lang_count = 1;
 
-    lang = 0x0409;   /* en-US */
-
     g_byte_array_append(arr, (const guint8 *)&head, sizeof(head));
     g_byte_array_append(arr, (const guint8 *)&lang, sizeof(lang));
     g_byte_array_append(arr, (const guint8 *)str, str_len);
 
+    g_free(product_str);
     return arr;
 }
 
@@ -239,9 +292,44 @@ static int ffs_init_configfs_dirs(ffs_ctx_t *ctx, usb_device_t *dev)
     /* Strings and configurations */
     str_dir = g_strdup_printf("%s/strings/0x409", ctx->configfs_path);
     g_mkdir_with_parents(str_dir, 0755);
+
+    char *prod_str = NULL;
+    char *mfg_str = NULL;
+    uint8_t i_manuf = dd[14];
+    uint8_t i_prod = dd[15];
+
+    if (i_prod > 0)
+    {
+        const uint8_t *sdesc = NULL;
+        uint16_t slen = 0;
+        if (dev->ops->get_descriptor(dev, USB_DESC_STRING, i_prod, 0x0409, &sdesc, &slen) == 0)
+        {
+            prod_str = extract_string_from_desc(sdesc, slen);
+        }
+    }
+    if (i_manuf > 0)
+    {
+        const uint8_t *sdesc = NULL;
+        uint16_t slen = 0;
+        if (dev->ops->get_descriptor(dev, USB_DESC_STRING, i_manuf, 0x0409, &sdesc, &slen) == 0)
+        {
+            mfg_str = extract_string_from_desc(sdesc, slen);
+        }
+    }
+
     g_free(file_path);
     file_path = g_strdup_printf("%s/product", str_dir);
-    write_str_file(file_path, "USB VCR Device");
+    write_str_file(file_path, prod_str ? prod_str : "USB VCR Device");
+
+    if (mfg_str != NULL)
+    {
+        g_free(file_path);
+        file_path = g_strdup_printf("%s/manufacturer", str_dir);
+        write_str_file(file_path, mfg_str);
+    }
+
+    g_free(prod_str);
+    g_free(mfg_str);
 
     cfg_dir = g_strdup_printf("%s/configs/c.1", ctx->configfs_path);
     g_mkdir_with_parents(cfg_dir, 0755);
@@ -250,7 +338,11 @@ static int ffs_init_configfs_dirs(ffs_ctx_t *ctx, usb_device_t *dev)
     g_mkdir_with_parents(fn_dir, 0755);
 
     link_dst = g_strdup_printf("%s/ffs.%s", cfg_dir, ctx->name);
-    symlink(fn_dir, link_dst);
+    if (symlink(fn_dir, link_dst) < 0 && errno != EEXIST)
+    {
+        LOG_ERR("ffs: failed to symlink %s -> %s: %s", link_dst, fn_dir, g_strerror(errno));
+        return -1;
+    }
     return 0;
 }
 

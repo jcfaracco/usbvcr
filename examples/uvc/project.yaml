@@ -1,0 +1,11 @@
+version: "1.0"
+name: "uvc-webcam-streaming"
+
+connection:
+  engine: "qemu"
+  host: "127.0.0.1"
+  port: "4000"
+
+devices:
+  - device: "devices/uvc_camera.yaml"
+    flow: "flows/uvc_streaming_flow.yaml"

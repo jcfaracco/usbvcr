@@ -11,4 +11,22 @@ void trim_string(char *dst, const char *src, size_t dst_size);
  * `set` has `n` entries. */
 int str_index_in_set(const char *s, const char *const set[], size_t n);
 
+/* Return allocated path to root of usbvcr data/ directory, or NULL. Caller frees. */
+char *usbvcr_get_data_dir(void);
+
+/* Search for file in data directory under optional subdir. Caller frees. */
+char *usbvcr_find_data_file(const char *subdir, const char *filename);
+
+/* Link speeds. */
+#ifndef USB_VCR_SPEED_LOW
+#define USB_VCR_SPEED_LOW     0
+#define USB_VCR_SPEED_FULL    1
+#define USB_VCR_SPEED_HIGH    2
+#define USB_VCR_SPEED_SUPER   3
+#define USB_VCR_SPEED_UNKNOWN 255
+#endif
+
+/* Parse speed string ("low", "full", "high", "super"), returns USB_VCR_SPEED_* or -1. */
+int usb_parse_speed(const char *str);
+
 #endif /* UTILS_H */

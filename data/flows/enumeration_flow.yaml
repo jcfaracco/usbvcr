@@ -1,0 +1,48 @@
+states:
+  - name: "operational"
+    rules:
+      # GET_DESCRIPTOR (device)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0100
+        actions:
+          - respond_with: "$device.device_descriptor"
+
+      # GET_DESCRIPTOR (configuration)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0200
+        actions:
+          - respond_with: "$device.configurations[0]"
+
+      # GET_DESCRIPTOR (HID report)
+      - match:
+          bmRequestType: 0x81
+          bRequest: 6
+          wValue: 0x2200
+          wIndex: 0
+        actions:
+          - respond_with: "$device.report_descriptor"
+
+      # SET_IDLE (HID class, host-to-device, interface)
+      - match:
+          bmRequestType: 0x21
+          bRequest: 0x0a
+        actions:
+          - respond_with_status: 0
+
+      # SET_CONFIGURATION
+      - match:
+          bmRequestType: 0x00
+          bRequest: 9
+          wValue: 1
+        actions:
+          - respond_with_status: 0
+
+      # Polling interrupt IN endpoint
+      - match:
+          endpoint_poll: 0x81
+        actions:
+          - return_nak_if_queue_empty: true

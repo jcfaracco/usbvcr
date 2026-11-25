@@ -69,6 +69,7 @@ typedef struct {
     int      ep_in_sent;
 
     int      tick_calls;
+    int      speed_ret;
 } fake_state;
 
 static int fake_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
@@ -124,6 +125,11 @@ static void fake_tick(usb_device_t *dev)
     ((fake_state *)dev->state)->tick_calls++;
 }
 
+static int fake_get_speed(usb_device_t *dev)
+{
+    return ((fake_state *)dev->state)->speed_ret;
+}
+
 static const usb_device_ops_t FAKE_OPS = {
     .name           = "fake",
     .get_descriptor = fake_get_descriptor,
@@ -131,6 +137,7 @@ static const usb_device_ops_t FAKE_OPS = {
     .ep_in          = fake_ep_in,
     .ep_out         = fake_ep_out,
     .tick           = fake_tick,
+    .get_speed      = fake_get_speed,
 };
 
 /* ------------------------------------------------------------------ *
@@ -157,6 +164,7 @@ static void harness_start(harness *h)
     memset(&h->state, 0, sizeof(h->state));
     h->state.control_ret = -1;           /* stall unless a test opts in */
     h->state.set_config_value = -1;
+    h->state.speed_ret = -1;
     h->dev.ops = &FAKE_OPS;
     h->dev.state = &h->state;
     h->ctx.bus = 0;
@@ -169,7 +177,11 @@ static void harness_start(harness *h)
     struct timeval tv = {0, 100 * 1000};   /* 100 ms */
     setsockopt(h->fds[1], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    ck_assert_int_eq(pthread_create(&h->thread, NULL, engine_thread, h), 0);
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 2 * 1024 * 1024);
+    ck_assert_int_eq(pthread_create(&h->thread, &attr, engine_thread, h), 0);
+    pthread_attr_destroy(&attr);
 }
 
 /* Close the peer end (engine sees EOF and returns) and join. All bytes the
@@ -247,6 +259,32 @@ START_TEST(test_handshake_and_announce)
     ck_assert_uint_eq(c.vendor_id, 0x1234);
     ck_assert_uint_eq(c.product_id, 0x5678);
     ck_assert_uint_eq(c.speed, USB_VCR_SPEED_FULL);
+
+    harness_stop(&h);
+}
+END_TEST
+
+START_TEST(test_announce_speed_override)
+{
+    harness h;
+    memset(&h.state, 0, sizeof(h.state));
+    h.state.control_ret = -1;
+    h.state.set_config_value = -1;
+    h.state.speed_ret = USB_VCR_SPEED_HIGH;
+    h.dev.ops = &FAKE_OPS;
+    h.dev.state = &h.state;
+    h.ctx.bus = 0;
+    h.ctx.device = 1;
+
+    ck_assert_int_eq(socketpair(AF_UNIX, SOCK_STREAM, 0, h.fds), 0);
+    struct timeval tv = {0, 100 * 1000};
+    setsockopt(h.fds[1], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ck_assert_int_eq(pthread_create(&h.thread, NULL, engine_thread, &h), 0);
+
+    usb_device_connect_header_t c;
+    peer_handshake(&h, &c);
+
+    ck_assert_uint_eq(c.speed, USB_VCR_SPEED_HIGH);
 
     harness_stop(&h);
 }
@@ -480,6 +518,7 @@ static Suite *usb_core_suite(void)
 
     TCase *tc_hs = tcase_create("handshake");
     tcase_add_test(tc_hs, test_handshake_and_announce);
+    tcase_add_test(tc_hs, test_announce_speed_override);
     suite_add_tcase(s, tc_hs);
 
     TCase *tc_ctl = tcase_create("control");

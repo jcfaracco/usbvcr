@@ -83,6 +83,7 @@ START_TEST(test_ffs_build_descriptors_valid)
     ck_assert_int_gt(fs_count, 0);
 
     g_byte_array_free(arr, TRUE);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -105,6 +106,54 @@ START_TEST(test_ffs_build_strings)
 
     const char *str = (const char *)(arr->data + off);
     ck_assert_str_eq(str, "USB VCR Emulated Device");
+
+    g_byte_array_free(arr, TRUE);
+}
+END_TEST
+
+static int dummy_desc_with_strings(usb_device_t *dev, uint8_t type, uint8_t index,
+                                   uint16_t lang, const uint8_t **out, uint16_t *len)
+{
+    (void)dev; (void)lang;
+    static const uint8_t dd[18] = {
+        0x12, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x40,
+        0x34, 0x12, 0x78, 0x56, 0x00, 0x01, 0x01, 0x02,
+        0x00, 0x01
+    };
+    static const uint8_t prod_desc[] = {
+        20, 3,
+        'M', 0, 'y', 0, ' ', 0, 'D', 0, 'e', 0, 'v', 0, 'i', 0, 'c', 0, 'e', 0
+    };
+
+    if (type == 1) {
+        *out = dd;
+        *len = sizeof(dd);
+        return 0;
+    }
+    if (type == 3 && index == 2) {
+        *out = prod_desc;
+        *len = sizeof(prod_desc);
+        return 0;
+    }
+    return -1;
+}
+
+START_TEST(test_ffs_build_strings_custom_device)
+{
+    usb_device_ops_t ops;
+    memset(&ops, 0, sizeof(ops));
+    ops.get_descriptor = dummy_desc_with_strings;
+
+    usb_device_t dev;
+    memset(&dev, 0, sizeof(dev));
+    dev.ops = &ops;
+
+    GByteArray *arr = ffs_build_strings(&dev);
+    ck_assert_ptr_nonnull(arr);
+
+    size_t off = sizeof(struct usb_functionfs_strings_head) + sizeof(uint16_t);
+    const char *str = (const char *)(arr->data + off);
+    ck_assert_str_eq(str, "My Device");
 
     g_byte_array_free(arr, TRUE);
 }
@@ -167,6 +216,7 @@ START_TEST(test_ffs_setup_and_teardown_mock)
     rmdir(ctx->configfs_path);
     rmdir(tmp);
     ffs_ctx_free(ctx);
+    yaml_backend_destroy(dev);
 }
 END_TEST
 
@@ -200,6 +250,7 @@ static Suite *ffs_suite(void)
     tcase_add_test(tc, test_ffs_build_descriptors_short_config);
     tcase_add_test(tc, test_ffs_build_descriptors_valid);
     tcase_add_test(tc, test_ffs_build_strings);
+    tcase_add_test(tc, test_ffs_build_strings_custom_device);
     tcase_add_test(tc, test_ffs_setup_and_teardown_mock);
     tcase_add_test(tc, test_ffs_detect_udc);
     tcase_add_test(tc, test_ffs_teardown_null);

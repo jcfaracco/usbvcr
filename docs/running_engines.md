@@ -30,22 +30,40 @@
 
 ## 0. Configuring via the YAML Manifest
 
-Every flag below (`--local`, `--udc`, `--host`, `--port`) can instead be set
-once in the project manifest's `connection:` block, so `usbvcr --yaml
-<project>.yaml` alone is enough to run:
+Every flag below (`--local`, `--udc`, `--host`, `--port`, `--record`,
+`--debug`) can instead be set once in the project manifest's `connection:`
+block, so `usbvcr --yaml <project>.yaml` alone is enough to run:
 
 ```yaml
 connection:
-  engine: local        # "local" or "qemu" (default: qemu)
-  udc: dummy_udc.0      # local engine only (default: auto-detect)
-  host: 127.0.0.1       # qemu engine only (default: localhost)
-  port: "1337"           # qemu engine only (default: 1337)
+  engine: local               # "local" or "qemu" (default: qemu)
+  udc: dummy_udc.0             # local engine only (default: auto-detect)
+  host: 127.0.0.1              # qemu engine only (default: localhost)
+  port: "1337"                  # qemu engine only (default: 1337)
+  record: "session.pcapng"     # same as --record (default: off)
+  debug: true                   # same as --debug (default: false)
 ```
 
 CLI flags always take precedence over the manifest when passed explicitly —
 useful for overriding a project's default engine/UDC/host/port for a one-off
 run without editing the YAML. See [`yaml_dialect.md`](yaml_dialect.md#project-manifest-projectnameyaml)
 for the full manifest reference.
+
+A manifest can also replace `devices:`/`flows:` entirely with a top-level
+`pcap:` field, pointing at a capture to replay instead of emulating:
+
+```yaml
+version: "1.0"
+pcap: "capture.pcapng"
+connection:
+  host: 127.0.0.1
+  port: "1337"
+```
+
+`usbvcr --yaml replay.yaml` then behaves like `usbvcr --pcap capture.pcapng`,
+but still picks up `connection:`/`record:`/`debug:` from the same file. This
+is a run-config convenience, not a second device dialect — see
+[`ARCHITECTURE.md`](ARCHITECTURE.md#4-one-yaml-dialect-canonical).
 
 ---
 

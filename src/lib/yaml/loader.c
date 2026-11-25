@@ -18,6 +18,7 @@
 #include "codec.h"
 #include "log.h"
 #include "version.h"
+#include "utils.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -111,9 +112,81 @@ static void dev_entry_free(gpointer p)
         return;
     g_free(e->name);
     g_free(e->flow_path);
+    g_free(e->file);
     usb_node_free(e->tree);
     if (e->flow) { flow_free(e->flow); }
     g_free(e);
+}
+
+static char *resolve_asset_path(const char *dir, const char *sub, const char *ref)
+{
+    char *path;
+    char *filename;
+
+    if (!ref)
+    {
+        return NULL;
+    }
+
+    if (g_path_is_absolute(ref))
+    {
+        if (g_file_test(ref, G_FILE_TEST_EXISTS))
+        {
+            return g_strdup(ref);
+        }
+        return NULL;
+    }
+
+    /* Check directly under dir (e.g. "video.mjpeg", "payloads/video.mjpeg") */
+    path = g_build_filename(dir, ref, NULL);
+    if (g_file_test(path, G_FILE_TEST_EXISTS))
+    {
+        return path;
+    }
+    g_free(path);
+
+    if (strchr(ref, '/') || g_str_has_suffix(ref, ".yaml") || g_str_has_suffix(ref, ".yml"))
+    {
+        path = g_build_filename(dir, ref, NULL);
+        if (g_file_test(path, G_FILE_TEST_EXISTS))
+        {
+            return path;
+        }
+        g_free(path);
+
+        /* Try directly under datadir */
+        path = usbvcr_find_data_file(NULL, ref);
+        if (path != NULL)
+        {
+            return path;
+        }
+
+        /* Try under datadir/sub if ref starts with sub/ */
+        if (sub != NULL && g_str_has_prefix(ref, sub) && ref[strlen(sub)] == '/')
+        {
+            path = usbvcr_find_data_file(sub, ref + strlen(sub) + 1);
+            if (path != NULL)
+            {
+                return path;
+            }
+        }
+
+        return NULL;
+    }
+
+    /* Bare ID (e.g. "keyboard", "mouse"): check local <dir>/<sub>/<ref>.yaml first */
+    filename = g_strdup_printf("%s.yaml", ref);
+    path = g_build_filename(dir, sub, filename, NULL);
+    if (g_file_test(path, G_FILE_TEST_EXISTS))
+    {
+        g_free(filename);
+        return path;
+    }
+    g_free(path);
+    g_free(filename);
+
+    /* Fallback to datadir/<sub>/<ref>.yaml */
+    return usbvcr_find_data_file(sub, ref);
 }
 
 /* Project file: read the `devices:` manifest — a sequence of {device, flow}
@@ -185,10 +258,41 @@ static int parse_main(const char *path, yaml_device_t *dev)
     dev->host   = g_strdup(yaml_scalar(yaml_map_get(&doc, conn, "host")));
     dev->port   = g_strdup(yaml_scalar(yaml_map_get(&doc, conn, "port")));
 
+    g_free(dev->record);
+    dev->record = g_strdup(yaml_scalar(yaml_map_get(&doc, conn, "record")));
+
+    const char *dbg = yaml_scalar(yaml_map_get(&doc, conn, "debug"));
+    dev->debug = dbg && (g_ascii_strcasecmp(dbg, "true") == 0 ||
+                         g_ascii_strcasecmp(dbg, "yes") == 0 ||
+                         strcmp(dbg, "1") == 0);
+
+    const char *conn_speed = yaml_scalar(yaml_map_get(&doc, conn, "speed"));
+    const char *root_speed = yaml_scalar(yaml_map_get(&doc, root, "speed"));
+    int parsed_speed = usb_parse_speed(conn_speed ? conn_speed : root_speed);
+    if (parsed_speed >= 0)
+        dev->speed = parsed_speed;
+
+    const char *root_file = yaml_scalar(yaml_map_get(&doc, root, "file"));
+    const char *root_loop = yaml_scalar(yaml_map_get(&doc, root, "loop"));
+    char *resolved_file = root_file ? resolve_asset_path(dir, "payloads", root_file) : NULL;
+    gboolean parsed_loop = FALSE;
+    if (root_loop) {
+        parsed_loop = (g_ascii_strcasecmp(root_loop, "true") == 0 ||
+                       g_ascii_strcasecmp(root_loop, "yes") == 0 ||
+                       strcmp(root_loop, "1") == 0);
+    }
+
+    /* Top-level `pcap:` — alternate to `devices:`, resolved relative to the
+     * project dir like device/flow refs below. */
+    g_free(dev->pcap);
+    const char *pref = yaml_scalar(yaml_map_get(&doc, root, "pcap"));
+    dev->pcap = pref ? g_build_filename(dir, pref, NULL) : NULL;
+
     devs = yaml_map_get(&doc, root, "devices");
 
     if (!devs || devs->type != YAML_SEQUENCE_NODE) {
-        LOG_WARN("yaml_loader: project '%s' has no devices: manifest", path);
+        if (!dev->pcap)
+            LOG_WARN("yaml_loader: project '%s' has no devices: manifest", path);
     } else {
         for (yaml_node_item_t *i = devs->data.sequence.items.start;
              rc == 0 && i < devs->data.sequence.items.top; i++) {
@@ -203,7 +307,13 @@ static int parse_main(const char *path, yaml_device_t *dev)
                 continue;
             }
 
-            char *dpath = g_build_filename(dir, dref, NULL);
+            char *dpath = resolve_asset_path(dir, "devices", dref);
+            if (!dpath) {
+                LOG_ERR("yaml_loader: cannot find device '%s'", dref);
+                rc = -1;
+                break;
+            }
+
             char *ns = NULL;
             usb_node_t *tree = yaml_tree_load(dpath, dev->schemas,
                                               dev->codecs, &ns);
@@ -216,10 +326,27 @@ static int parse_main(const char *path, yaml_device_t *dev)
             }
 
             yaml_dev_entry_t *e = g_new0(yaml_dev_entry_t, 1);
+            const char *dspeed = yaml_scalar(yaml_map_get(&doc, item, "speed"));
+            const char *efile = yaml_scalar(yaml_map_get(&doc, item, "file"));
+            const char *eloop = yaml_scalar(yaml_map_get(&doc, item, "loop"));
+            int item_speed = usb_parse_speed(dspeed);
             e->name      = g_strdup(dref);
-            e->flow_path = fref ? g_build_filename(dir, fref, NULL) : NULL;
+            e->flow_path = fref ? resolve_asset_path(dir, "flows", fref) : NULL;
             e->tree      = tree;   /* entry owns it */
-            e->flow      = e->flow_path ? flow_load(e->flow_path) : NULL;
+            e->flow      = e->flow_path ? flow_load_with_dir(e->flow_path, dir) : NULL;
+            e->speed     = (item_speed >= 0) ? item_speed : dev->speed;
+            if (efile) {
+                e->file = resolve_asset_path(dir, "payloads", efile);
+            } else if (resolved_file) {
+                e->file = g_strdup(resolved_file);
+            }
+            if (eloop) {
+                e->loop = (g_ascii_strcasecmp(eloop, "true") == 0 ||
+                           g_ascii_strcasecmp(eloop, "yes") == 0 ||
+                           strcmp(eloop, "1") == 0);
+            } else {
+                e->loop = parsed_loop;
+            }
             dev->devices = g_list_append(dev->devices, e);
             LOG_DEBUG("[Manifest] device '%s' flow '%s'",
                       dref, fref ? fref : "(none)");
@@ -233,8 +360,17 @@ static int parse_main(const char *path, yaml_device_t *dev)
         yaml_dev_entry_t *first = dev->devices->data;
         dev->tree = first->tree;   /* alias, not owned */
         dev->flow = first->flow;
+        dev->file = first->file;   /* alias, not owned */
+        dev->loop = first->loop;
+        if (first->speed >= 0)
+            dev->speed = first->speed;
+    } else {
+        dev->file = resolved_file; /* standalone device owns it */
+        dev->loop = parsed_loop;
+        resolved_file = NULL;
     }
 
+    g_free(resolved_file);
     g_free(dir);
     yaml_document_delete(&doc);
     yaml_parser_delete(&parser);
@@ -296,6 +432,7 @@ yaml_device_t *yaml_device_create(void)
     yaml_device_t *dev = g_new0(yaml_device_t, 1);
 
     /* tree/flow start NULL: they alias the first manifest entry once loaded. */
+    dev->speed     = -1;
     dev->schemas   = schema_new();
     dev->codecs    = g_hash_table_new_full(g_str_hash, g_str_equal,
                                            g_free,
@@ -310,7 +447,17 @@ yaml_device_t *yaml_parse_from_file(const char *path)
         return NULL;
 
     char *dir = g_path_get_dirname(path);
+    char *datadir = usbvcr_get_data_dir();
     yaml_device_t *dev = yaml_device_create();
+
+    /* Pre-load global shared resources (schemas and codecs) from data dir first */
+    if (datadir != NULL) {
+        if (g_strcmp0(datadir, dir) != 0) {
+            load_scope_dir(datadir, "schemas", YAML_SCOPE_SCHEMAS, dev);
+            load_scope_dir(datadir, "codecs",  YAML_SCOPE_CODECS,  dev);
+        }
+        g_free(datadir);
+    }
 
     /* Shared resources first (dir-scanned): schema templates + codec tables.
      * Then the project `devices:` manifest, which loads each device tree using
@@ -339,6 +486,10 @@ void yaml_device_free(yaml_device_t *dev)
     g_free(dev->udc);
     g_free(dev->host);
     g_free(dev->port);
+    g_free(dev->record);
+    g_free(dev->pcap);
+    if (dev->devices == NULL)
+        g_free(dev->file);
     /* Entries own their trees/flows; dev->tree/flow are just aliases. */
     g_list_free_full(dev->devices, dev_entry_free);
     schema_free(dev->schemas);

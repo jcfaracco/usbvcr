@@ -1,0 +1,6 @@
+version: "1.0"
+name: "Default UVC HD Webcam"
+
+devices:
+  - device: "devices/uvc_camera.yaml"
+    flow: "flows/uvc_streaming_flow.yaml"

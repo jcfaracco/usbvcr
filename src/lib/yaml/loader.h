@@ -35,8 +35,11 @@ yaml_scope_t yaml_scope_from_path(const char *path);
 typedef struct {
     char       *name;       /* device file path from the manifest (identity) */
     char       *flow_path;  /* resolved flows/ path from the manifest, or NULL */
+    char       *file;       /* backing data file (e.g. video.mjpeg, disk.img) */
+    gboolean    loop;       /* whether backing data stream loops */
     usb_node_t *tree;       /* device/config/interface/endpoint descriptor tree */
     void       *flow;       /* Flow* (see flow.h), built from flow_path (TODO) */
+    int         speed;      /* speed override (USB_VCR_SPEED_*), or -1 */
 } yaml_dev_entry_t;
 
 /* Loaded project: the `devices:` manifest (device+flow pairs) plus the shared
@@ -55,11 +58,23 @@ typedef struct {
     char       *udc;        /* local engine: UDC name, or NULL (auto-detect) */
     char       *host;       /* qemu engine: remote host, or NULL (default) */
     char       *port;       /* qemu engine: remote port, or NULL (default) */
+    char       *record;     /* connection.record: pcap/pcapng output path, or NULL */
+    gboolean    debug;      /* connection.debug: enable debug logging */
+
+    /* Top-level `pcap:` field: alternate to `devices:` — points at a capture
+     * to replay instead of emulating from schemas/devices/flows. Resolved
+     * relative to the project dir. Mutually exclusive with `devices:`; the
+     * caller (main.c) swaps to pcap_backend when this is set and drops the
+     * (empty) descriptor tree. */
+    char       *pcap;
 
     /* Convenience aliases to the first manifest entry (not owned), so single-
      * device callers keep working. yaml_backend owns the flow join. */
     usb_node_t *tree;
     void       *flow;
+    char       *file;       /* backing data file (e.g. video.mjpeg, disk.img) */
+    gboolean    loop;       /* whether backing data stream loops */
+    int         speed;      /* speed override (USB_VCR_SPEED_*), or -1 */
 } yaml_device_t;
 
 /* Load a canonical device project rooted at `dir` (contains devices/,

@@ -1,0 +1,6 @@
+version: "1.0"
+name: "Default USB Boot Keyboard"
+
+devices:
+  - device: "devices/keyboard.yaml"
+    flow: "flows/enumeration_flow.yaml"

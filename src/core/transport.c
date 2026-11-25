@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <errno.h>
 
@@ -52,8 +54,8 @@ int connect_to_server(const char *host, const char *port)
         return -1;
     }
 
-    /* Receive timeout so we don't block forever */
-    struct timeval timeout = {5, 0};
+    /* Receive timeout so we don't block forever and can tick periodic streaming */
+    struct timeval timeout = {0, 10000}; /* 10ms for smooth streaming and ticks */
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     if (connect(sock, res->ai_addr, res->ai_addrlen) < 0) {
@@ -126,12 +128,25 @@ int usb_conn_send(int sock, uint32_t type, int64_t id,
                   const void *payload, size_t len,
                   const usb_record_ctx_t *ctx)
 {
-    uint8_t frame[USB_VCR_BUF_SIZE];
     size_t hs = hdr_wire_size();
 
-    if (hs + len > sizeof(frame)) {
+    if (hs + len > USB_VCR_BUF_SIZE) {
         LOG_ERR("send: payload too large (%zu bytes)", len);
         return -1;
+    }
+
+    uint8_t stack_frame[4096];
+    uint8_t *frame = stack_frame;
+    size_t frame_len = hs + len;
+    bool allocated = false;
+
+    if (frame_len > sizeof(stack_frame)) {
+        frame = malloc(frame_len);
+        if (!frame) {
+            LOG_ERR("send: out of memory allocating %zu bytes", frame_len);
+            return -1;
+        }
+        allocated = true;
     }
 
     /* Serialize the header field by field: type(4) length(4) id(4 or 8). */
@@ -144,14 +159,18 @@ int usb_conn_send(int sock, uint32_t type, int64_t id,
     if (payload && len)
         memcpy(frame + hs, payload, len);
 
-    size_t frame_len = hs + len;
+    int ret = 0;
     if (send(sock, frame, frame_len, 0) < 0) {
         LOG_ERR("Error type: %s", strerror(errno));
-        return -1;
-    }
-    if (ctx)
+        ret = -1;
+    } else if (ctx) {
         record_conn_send(type, id, payload, len, ctx);
-    return 0;
+    }
+
+    if (allocated)
+        free(frame);
+
+    return ret;
 }
 
 int usb_conn_recv(int sock, usb_header_t *hdr,

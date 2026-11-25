@@ -221,11 +221,21 @@ def parse_config_descriptor(raw: bytes) -> dict:
         "iConfiguration": iConfiguration,
         "bmAttributes": Hex(bmAttributes),
         "bMaxPower": bMaxPower,
-        "interfaces": [],
     }
 
+    # "interfaces" (and each interface's "endpoints") are inserted into their
+    # parent dict lazily, on first use, rather than up front - dict insertion
+    # order is what controls wire order for unnamed fields (see the raw
+    # fallback below), so a key created eagerly would always serialize
+    # before anything inserted after it, even if the real device byte stream
+    # put it later (e.g. a device-level descriptor seen before the first
+    # INTERFACE, or - as UVC class-specific descriptors do in practice - one
+    # straddling an interface's own endpoint).
+    interfaces = []
     off = bLength
     current_iface = None
+    current_iface_endpoints = None
+    unknown_idx = 0
     end = min(len(raw), wTotalLength)
     while off + 2 <= end:
         sub_len, sub_type = struct.unpack_from("<BB", raw, off)
@@ -238,6 +248,8 @@ def parse_config_descriptor(raw: bytes) -> dict:
              bInterfaceClass, bInterfaceSubClass, bInterfaceProtocol,
              iInterface) = struct.unpack_from("<BBBBBBBBB", body, 0)
             current_iface = {
+                "bLength": sub_len,
+                "bDescriptorType": Hex(sub_type),
                 "bInterfaceNumber": bInterfaceNumber,
                 "bAlternateSetting": bAlternateSetting,
                 "bNumEndpoints": bNumEndpoints,
@@ -245,9 +257,10 @@ def parse_config_descriptor(raw: bytes) -> dict:
                 "bInterfaceSubClass": Hex(bInterfaceSubClass),
                 "bInterfaceProtocol": Hex(bInterfaceProtocol),
                 "iInterface": iInterface,
-                "endpoints": [],
             }
-            config["interfaces"].append(current_iface)
+            current_iface_endpoints = None
+            config.setdefault("interfaces", interfaces)
+            interfaces.append(current_iface)
 
         elif sub_type == 0x21 and sub_len >= 9 and current_iface is not None:  # HID
             (_, _, bcdHID, bCountryCode, bNumDescriptors,
@@ -266,15 +279,35 @@ def parse_config_descriptor(raw: bytes) -> dict:
         elif sub_type == 0x05 and sub_len >= 7 and current_iface is not None:  # ENDPOINT
             (_, _, bEndpointAddress, ep_bmAttributes, wMaxPacketSize,
              bInterval) = struct.unpack_from("<BBBBHB", body, 0)
-            current_iface["endpoints"].append({
+            if current_iface_endpoints is None:
+                current_iface_endpoints = []
+                current_iface["endpoints"] = current_iface_endpoints
+            current_iface_endpoints.append({
+                "bLength": sub_len,
+                "bDescriptorType": Hex(sub_type),
                 "bEndpointAddress": Hex(bEndpointAddress),
                 "bmAttributes": Hex(ep_bmAttributes),
                 "wMaxPacketSize": wMaxPacketSize,
                 "bInterval": bInterval,
             })
 
+        else:
+            # Unrecognized sub-descriptor: class-specific interface/endpoint
+            # descriptors (e.g. UVC's VC_HEADER/terminals/units/CS_ENDPOINT),
+            # or a standalone one seen before the first INTERFACE (e.g. an
+            # Interface Association Descriptor). Byte-perfect raw hex
+            # fallback (docs/yaml_dialect.md's raw escape hatch, the same
+            # `{hex: ...}` shape used throughout tests/data/example3's
+            # hand-authored UVC fixture) - attached to whichever container is
+            # current so wire order is preserved, since the heuristics here
+            # don't know enough about any given device class to structure it.
+            target = current_iface if current_iface is not None else config
+            target[f"class_specific_{unknown_idx}"] = {"hex": body.hex().upper()}
+            unknown_idx += 1
+
         off += sub_len
 
+    config.setdefault("interfaces", interfaces)
     return config
 
 
@@ -381,7 +414,7 @@ def decompile_hid_report(raw: bytes, codec: dict):
 # Flow synthesis
 # ---------------------------------------------------------------------------
 
-def build_flow(control_pairs, interrupt_payloads_by_endpoint, report_raw_file=None) -> dict:
+def build_flow(control_pairs, interrupt_payloads_by_endpoint, report_raw_file=None, raw_file=None, video_ep=0x81) -> dict:
     rules = []
     seen = set()
 
@@ -448,10 +481,21 @@ def build_flow(control_pairs, interrupt_payloads_by_endpoint, report_raw_file=No
             "actions": [{"return_nak_if_queue_empty": True}],
         })
 
+    if raw_file and video_ep is not None:
+        rules.append({
+            "match": {"endpoint_poll": Hex(video_ep)},
+            "actions": [{
+                "stream_from_file": {
+                    "file": raw_file,
+                    "loop": True,
+                }
+            }],
+        })
+
     return {"version": "1.0", "states": [{"name": "operational", "rules": rules}]}
 
 
-def build_device(name: str, device_desc: dict, config: dict, report_items) -> dict:
+def build_device(name: str, device_desc: dict, config: dict, report_items, raw_file: str = None) -> dict:
     device = {
         "version": "1.0",
         "name": name,
@@ -460,18 +504,25 @@ def build_device(name: str, device_desc: dict, config: dict, report_items) -> di
     }
     if report_items is not None:
         device["report_descriptor"] = {"codec": "hid_report", "items": report_items}
+    if raw_file is not None:
+        device["file"] = raw_file
+        device["loop"] = True
     return device
 
 
-def build_project(name: str, vendor: str, product: str, slug: str) -> dict:
+def build_project(name: str, vendor: str, product: str, slug: str, raw_file: str = None) -> dict:
+    dev_entry = {
+        "device": f"devices/{slug}.yaml",
+        "flow": f"flows/{slug}_flow.yaml",
+    }
+    if raw_file is not None:
+        dev_entry["file"] = raw_file
+        dev_entry["loop"] = True
     return {
         "version": "1.0",
         "name": name,
         "vars": [{"vendor": vendor}, {"product": product}],
-        "devices": [{
-            "device": f"devices/{slug}.yaml",
-            "flow": f"flows/{slug}_flow.yaml",
-        }],
+        "devices": [dev_entry],
     }
 
 
@@ -536,19 +587,40 @@ def main(argv=None) -> int:
             report_raw_file = "payloads/report_descriptor.bin"
 
     interrupt_payloads = {}
+    video_frames = []
+    video_ep = None
+    current_video_frame = bytearray()
+
     for t in transfers:
         if t.xfer == XFER_INT and t.event_type == "C" and t.direction_in and t.data:
             interrupt_payloads.setdefault(t.endpoint, []).append(t.data.hex().upper())
+        elif t.xfer in (XFER_ISO, XFER_BULK) and t.event_type == "C" and t.direction_in and t.data:
+            video_ep = t.endpoint
+            if len(t.data) >= 2:
+                hdr_len = t.data[0]
+                if 2 <= hdr_len <= len(t.data):
+                    hdr_info = t.data[1]
+                    payload = t.data[hdr_len:]
+                    eof = bool(hdr_info & 0x02)
+                    if payload:
+                        current_video_frame.extend(payload)
+                    if eof and current_video_frame:
+                        video_frames.append(bytes(current_video_frame))
+                        current_video_frame.clear()
+
+    raw_file = None
+    if video_frames:
+        raw_file = "payloads/video.mjpeg"
 
     idVendor, idProduct = int(device_desc["idVendor"]), int(device_desc["idProduct"])
     name = args.name or f"Extracted Device {idVendor:04x}:{idProduct:04x}"
     slug = f"device_{idVendor:04x}_{idProduct:04x}"
 
-    device = build_device(name, device_desc, config, report_items)
+    device = build_device(name, device_desc, config, report_items, raw_file)
     if report_raw_file and config["interfaces"]:
         config["interfaces"][0]["report_descriptor"] = {"raw_file": report_raw_file}
-    flow = build_flow(control_pairs, interrupt_payloads, report_raw_file)
-    project = build_project(name, args.vendor, args.product, slug)
+    flow = build_flow(control_pairs, interrupt_payloads, report_raw_file, raw_file, video_ep)
+    project = build_project(name, args.vendor, args.product, slug, raw_file)
 
     out = pathlib.Path(args.output)
     write_yaml(out / f"{out.name}.yaml", project)
@@ -560,6 +632,10 @@ def main(argv=None) -> int:
         payload_path = out / report_raw_file
         payload_path.parent.mkdir(parents=True, exist_ok=True)
         payload_path.write_bytes(report_raw)
+    if raw_file:
+        raw_path = out / raw_file
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_path.write_bytes(b"".join(video_frames))
 
     print(f"Wrote project to {out}/")
     print(f"  {out.name}.yaml")
@@ -569,6 +645,8 @@ def main(argv=None) -> int:
         print("  codecs/hid_report.yaml")
     if report_raw_file:
         print(f"  {report_raw_file}")
+    if raw_file:
+        print(f"  {raw_file}")
     return 0
 
 

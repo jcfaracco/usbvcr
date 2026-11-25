@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -81,6 +82,12 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
         ep0_mps = mp0;
     }
 
+    if (dev->ops != NULL && dev->ops->get_speed != NULL) {
+        int backend_speed = dev->ops->get_speed(dev);
+        if (backend_speed >= 0)
+            speed = (uint8_t)backend_speed;
+    }
+
     /* ep0 (control) is implicit: it has no endpoint descriptor in the
      * config, so fill its ep_info from the device descriptor. Without a nonzero
      * max packet size the peer cannot run control transfers and enumeration
@@ -110,9 +117,7 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
     /* Pull the connect fields from the device descriptor by named offset. */
     usb_device_connect_header_t c;
     memset(&c, 0, sizeof(c));
-    /* Speed derived from bcdUSB/bMaxPacketSize0 above. TODO: let the backend
-     * override it outright - the descriptor heuristic still can't catch a
-     * Full-Speed device that happens to use ep0 mp0 == 64. */
+    /* Speed derived from bcdUSB/bMaxPacketSize0 above or overridden by backend. */
     c.speed              = speed;
     c.device_class       = DESC_U8(dd,  USB_DD_bDeviceClass);
     c.device_subclass    = DESC_U8(dd,  USB_DD_bDeviceSubClass);
@@ -139,7 +144,7 @@ static int announce_device(int sock, usb_device_t *dev, uint32_t caps,
 static int do_handshake(int sock, const usb_record_ctx_t *ctx, uint32_t *caps_out)
 {
     usb_header_t hdr;
-    uint8_t payload[USB_VCR_BUF_SIZE];
+    uint8_t payload[4096];
     size_t len;
     uint32_t peer_caps = 0;
     int r;
@@ -180,7 +185,18 @@ static int reply_control(int sock, int64_t id,
                          uint8_t status, const uint8_t *data, uint16_t n,
                          const usb_record_ctx_t *ctx)
 {
-    uint8_t buf[USB_VCR_BUF_SIZE];
+    uint8_t stack_buf[4096];
+    uint8_t *buf = stack_buf;
+    size_t total = sizeof(usb_control_packet_header_t) + n;
+    bool allocated = false;
+
+    if (total > sizeof(stack_buf)) {
+        buf = malloc(total);
+        if (!buf)
+            return -1;
+        allocated = true;
+    }
+
     usb_control_packet_header_t h = *setup;
     h.status = status;
     h.length = n;
@@ -189,7 +205,10 @@ static int reply_control(int sock, int64_t id,
     if (data && n)
         memcpy(buf + sizeof(h), data, n);
 
-    return usb_conn_send(sock, RT_CONTROL_PACKET, id, buf, sizeof(h) + n, ctx);
+    int ret = usb_conn_send(sock, RT_CONTROL_PACKET, id, buf, total, ctx);
+    if (allocated)
+        free(buf);
+    return ret;
 }
 
 /* Fallback: standard GET_DESCRIPTOR served straight from the descriptor
@@ -205,7 +224,7 @@ static void handle_get_descriptor_fallback(int sock, usb_device_t *dev, int64_t 
 
     if (dev->ops->get_descriptor(dev, dtype, dindex, setup->index,
                                  &desc, &dlen) < 0) {
-        LOG_DEBUG("stall: no descriptor type=0x%02x index=%u", dtype, dindex);
+        LOG_WARN("stall: no descriptor type=0x%02x index=%u", dtype, dindex);
         reply_control(sock, id, setup, 1, NULL, 0, ctx);  /* stall */
         return;
     }
@@ -234,7 +253,7 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
      * data+n. This keeps device behavior data-driven and lets the same engine
      * serve both a YAML description and a captured pcap replay. */
     if (dev->ops->control) {
-        uint8_t data[USB_VCR_BUF_SIZE];
+        uint8_t data[4096];
         uint16_t n = 0;
         if (dev->ops->control(dev, &setup, data, &n) == 0) {
             reply_control(sock, id, &setup, 0, data, n, ctx);
@@ -248,8 +267,24 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
         return;
     }
 
-    LOG_DEBUG("stall: unhandled control req=0x%02x type=0x%02x",
-              setup.request, setup.requesttype);
+    if (setup.request == USB_REQ_GET_STATUS) {
+        uint8_t status_bytes[2] = {0, 0};
+        if ((setup.requesttype & 0x1f) == 0x00) {
+            status_bytes[0] = 0x01; /* Bit 0: Self Powered */
+        }
+        uint16_t n = 2;
+        if (n > setup.length) n = setup.length;
+        reply_control(sock, id, &setup, 0, status_bytes, n, ctx);
+        return;
+    }
+
+    if (setup.request == USB_REQ_CLEAR_FEATURE || setup.request == USB_REQ_SET_FEATURE) {
+        reply_control(sock, id, &setup, 0, NULL, 0, ctx);
+        return;
+    }
+
+    LOG_WARN("stall: unhandled control req=0x%02x type=0x%02x",
+             setup.request, setup.requesttype);
     reply_control(sock, id, &setup, 1, NULL, 0, ctx);  /* stall */
 }
 
@@ -265,12 +300,12 @@ static void push_interrupt_reports(int sock, usb_device_t *dev, uint8_t ep,
 
     /* Drain whatever the backend wants to send right now. */
     for (;;) {
-        uint8_t data[USB_VCR_BUF_SIZE];
+        uint8_t data[4096];
         int n = dev->ops->ep_in(dev, ep, data, sizeof(data));
         if (n <= 0)
             break;
 
-        uint8_t buf[USB_VCR_BUF_SIZE];
+        uint8_t buf[sizeof(usb_interrupt_packet_header_t) + 4096];
         usb_interrupt_packet_header_t h = { ep, 0, (uint16_t)n };
         memcpy(buf, &h, sizeof(h));
         memcpy(buf + sizeof(h), data, (size_t)n);
@@ -296,6 +331,44 @@ static void poll_interrupt_endpoints(int sock, usb_device_t *dev,
     }
 }
 
+static void push_iso_packets(int sock, usb_device_t *dev, uint8_t ep,
+                             const usb_record_ctx_t *ctx)
+{
+    if (!dev->ops->ep_in)
+        return;
+
+    /* Push up to 2 packets per 10ms tick (~30 fps for 640x480 MJPEG).
+     * High-speed isochronous endpoints use at most 1023 bytes per packet. */
+    for (int i = 0; i < 2; i++) {
+        uint8_t data[1023];
+        int n = dev->ops->ep_in(dev, ep, data, sizeof(data));
+        if (n <= 0)
+            break;
+
+        uint8_t buf[sizeof(usb_iso_packet_header_t) + 1024];
+        usb_iso_packet_header_t h = { ep, 0, (uint16_t)n };
+        memcpy(buf, &h, sizeof(h));
+        memcpy(buf + sizeof(h), data, (size_t)n);
+
+        if (usb_conn_send(sock, RT_ISO_PACKET, 0, buf, sizeof(h) + n, ctx) < 0)
+            break;
+        LOG_OUT("iso packet on ep 0x%02x (%d bytes)", ep, n);
+    }
+}
+
+static void poll_iso_endpoints(int sock, usb_device_t *dev,
+                               const bool *active,
+                               const usb_record_ctx_t *ctx)
+{
+    for (int i = 0; i < 32; i++) {
+        if (!active[i])
+            continue;
+        /* Reverse of usb_ep_index: reconstruct bEndpointAddress. */
+        uint8_t ep = (i & 0x0f) | ((i & 0x10) << 3);
+        push_iso_packets(sock, dev, ep, ctx);
+    }
+}
+
 /* ------------------------------------------------------------------ *
  * Standalone configuration / interface requests                       *
  * ------------------------------------------------------------------ */
@@ -318,7 +391,7 @@ static void handle_set_configuration(int sock, usb_device_t *dev, int64_t id,
         setup.request     = USB_REQ_SET_CONFIGURATION;
         setup.requesttype = 0x00;
         setup.value       = cfg;
-        uint8_t data[USB_VCR_BUF_SIZE];
+        uint8_t data[64];
         uint16_t n = 0;
         dev->ops->control(dev, &setup, data, &n);  /* drive flow; reply unused */
     }
@@ -332,7 +405,7 @@ static void handle_set_configuration(int sock, usb_device_t *dev, int64_t id,
  * replying with STALL in that case -- it does not let the host skip
  * asking). Every interface we serve has exactly one altsetting, so there is
  * nothing to actually switch: just echo back success. */
-static void handle_set_alt_setting(int sock, int64_t id,
+static void handle_set_alt_setting(int sock, usb_device_t *dev, int64_t id,
                                    const uint8_t *payload, size_t len,
                                    const usb_record_ctx_t *ctx)
 {
@@ -341,6 +414,18 @@ static void handle_set_alt_setting(int sock, int64_t id,
     if (len >= sizeof(req))
         memcpy(&req, payload, sizeof(req));
     LOG_DEBUG("set alt setting iface=%u alt=%u", req.interface, req.alt);
+
+    if (dev->ops->control) {
+        usb_control_packet_header_t setup;
+        memset(&setup, 0, sizeof(setup));
+        setup.request     = USB_REQ_SET_INTERFACE;
+        setup.requesttype = 0x01;
+        setup.value       = req.alt;
+        setup.index       = req.interface;
+        uint8_t data[64];
+        uint16_t n = 0;
+        dev->ops->control(dev, &setup, data, &n);  /* drive flow; reply unused */
+    }
 
     usb_alt_setting_status_header_t rstatus = {
         .status    = 0,
@@ -351,6 +436,48 @@ static void handle_set_alt_setting(int sock, int64_t id,
                  (uint8_t *)&rstatus, sizeof(rstatus), ctx);
 }
 
+static void handle_start_iso_stream(int sock, int64_t id,
+                                    const uint8_t *payload, size_t len,
+                                    bool *iso_ep_active,
+                                    const usb_record_ctx_t *ctx)
+{
+    uint8_t ep = 0;
+    if (len >= 1)
+        ep = payload[0];
+
+    LOG_DEBUG("start iso stream on ep 0x%02x", ep);
+    if (ep)
+        iso_ep_active[usb_ep_index(ep)] = true;
+
+    usb_iso_stream_status_header_t rstatus = {
+        .status   = 0,
+        .endpoint = ep,
+    };
+    usb_conn_send(sock, RT_ISO_STREAM_STATUS, id,
+                  (uint8_t *)&rstatus, sizeof(rstatus), ctx);
+}
+
+static void handle_stop_iso_stream(int sock, int64_t id,
+                                   const uint8_t *payload, size_t len,
+                                   bool *iso_ep_active,
+                                   const usb_record_ctx_t *ctx)
+{
+    uint8_t ep = 0;
+    if (len >= 1)
+        ep = payload[0];
+
+    LOG_DEBUG("stop iso stream on ep 0x%02x", ep);
+    if (ep)
+        iso_ep_active[usb_ep_index(ep)] = false;
+
+    usb_iso_stream_status_header_t rstatus = {
+        .status   = 0,
+        .endpoint = ep,
+    };
+    usb_conn_send(sock, RT_ISO_STREAM_STATUS, id,
+                  (uint8_t *)&rstatus, sizeof(rstatus), ctx);
+}
+
 /* ------------------------------------------------------------------ *
  * Main dispatch loop                                                  *
  * ------------------------------------------------------------------ */
@@ -358,7 +485,8 @@ static void handle_set_alt_setting(int sock, int64_t id,
 /* Dispatch one received, non-idle packet to its handler. */
 static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr,
                             const uint8_t *payload, size_t len,
-                            bool *int_ep_active, const usb_record_ctx_t *ctx)
+                            bool *int_ep_active, bool *iso_ep_active,
+                            const usb_record_ctx_t *ctx)
 {
     switch (hdr->type) {
     case RT_CONTROL_PACKET:
@@ -370,7 +498,21 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
         break;
 
     case RT_SET_ALT_SETTING:
-        handle_set_alt_setting(sock, hdr->id, payload, len, ctx);
+        handle_set_alt_setting(sock, dev, hdr->id, payload, len, ctx);
+        break;
+
+    case RT_START_ISO_STREAM:
+        handle_start_iso_stream(sock, hdr->id, payload, len, iso_ep_active, ctx);
+        break;
+
+    case RT_STOP_ISO_STREAM:
+        handle_stop_iso_stream(sock, hdr->id, payload, len, iso_ep_active, ctx);
+        break;
+
+    case RT_RESET:
+        LOG_DEBUG("usb bus reset");
+        memset(int_ep_active, 0, 32 * sizeof(bool));
+        memset(iso_ep_active, 0, 32 * sizeof(bool));
         break;
 
     case RT_START_INTERRUPT_RECEIVING:
@@ -398,8 +540,67 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
         }
         break;
 
+    case RT_BULK_PACKET:  /* Bulk transfer (e.g. MSC SCSI command / data) */
+        if (len >= sizeof(usb_bulk_packet_header_t)) {
+            usb_bulk_packet_header_t bh;
+            memcpy(&bh, payload, sizeof(bh));
+            uint8_t ep = bh.endpoint;
+            size_t data_len = len - sizeof(bh);
+            const uint8_t *data = payload + sizeof(bh);
+
+            if (ep & 0x80) {
+                /* Bulk IN request from host */
+                size_t req_len = (size_t)bh.length | ((size_t)bh.length_high << 16);
+                size_t max_in = USB_VCR_BUF_SIZE - sizeof(usb_bulk_packet_header_t) - 64;
+                if (req_len == 0 || req_len > max_in)
+                    req_len = max_in;
+
+                uint8_t *in_buf = malloc(req_len);
+                uint8_t *resp = malloc(sizeof(usb_bulk_packet_header_t) + req_len);
+                if (!in_buf || !resp) {
+                    free(in_buf);
+                    free(resp);
+                    break;
+                }
+
+                int n = 0;
+                if (dev->ops->ep_in) {
+                    n = dev->ops->ep_in(dev, ep, in_buf, req_len);
+                    if (n < 0) n = 0;
+                }
+
+                usb_bulk_packet_header_t rh = bh;
+                rh.status = 0; /* usb_redir_success */
+                rh.length = (uint16_t)(n & 0xffff);
+                rh.length_high = (uint16_t)(n >> 16);
+                memcpy(resp, &rh, sizeof(rh));
+                if (n > 0)
+                    memcpy(resp + sizeof(rh), in_buf, n);
+
+                usb_conn_send(sock, RT_BULK_PACKET, hdr->id, resp, sizeof(rh) + n, ctx);
+                free(in_buf);
+                free(resp);
+            } else {
+                /* Bulk OUT from host (e.g. SCSI CBW) */
+                if (dev->ops->ep_out)
+                    dev->ops->ep_out(dev, ep, data, data_len);
+
+                /* ACK bulk OUT completion */
+                usb_bulk_packet_header_t rh = bh;
+                rh.status = 0; /* usb_redir_success */
+                rh.length = bh.length;
+                rh.length_high = bh.length_high;
+                usb_conn_send(sock, RT_BULK_PACKET, hdr->id, &rh, sizeof(rh), ctx);
+            }
+        }
+        break;
+
+    case RT_CANCEL_DATA_PACKET:
+        LOG_DEBUG("cancel data packet id=0x%016lx", (unsigned long)hdr->id);
+        break;
+
     default:
-        LOG_DEBUG("unhandled packet type=%u len=%zu", hdr->type, len);
+        LOG_WARN("unhandled packet type=%u len=%zu", hdr->type, len);
         break;
     }
 }
@@ -407,35 +608,46 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
 int usb_core_run(int sock, usb_device_t *dev)
 {
     usb_header_t hdr;
-    uint8_t payload[USB_VCR_BUF_SIZE];
+    uint8_t *payload = malloc(USB_VCR_BUF_SIZE);
+    if (!payload) {
+        LOG_ERR("usb_core_run: failed to allocate payload buffer");
+        return -1;
+    }
     size_t len;
     uint32_t caps;
     bool int_ep_active[32] = {false};
+    bool iso_ep_active[32] = {false};
 
     /* Build recording context. bus=0 and device=1 are reasonable defaults for
      * an emulated device; the USB device descriptor carries no bus/devnum. */
     usb_record_ctx_t ctx = { .bus = 0, .device = 1 };
 
-    if (do_handshake(sock, &ctx, &caps) < 0)
+    if (do_handshake(sock, &ctx, &caps) < 0) {
+        free(payload);
         return -1;
+    }
 
-    if (announce_device(sock, dev, caps, &ctx) < 0)
+    if (announce_device(sock, dev, caps, &ctx) < 0) {
+        free(payload);
         return -1;
+    }
 
     /* Serve requests until the peer goes away. The socket recv timeout turns
      * an idle wait into a periodic tick, so streaming backends make progress
      * even when no request is pending. */
     for (;;) {
-        int rc = usb_conn_recv(sock, &hdr, payload, sizeof(payload), &len, &ctx);
+        int rc = usb_conn_recv(sock, &hdr, payload, USB_VCR_BUF_SIZE, &len, &ctx);
         if (rc < 0)
             break;              /* EOF / hard error: peer gone */
         if (rc == 0)            /* got a request: rc == 1 means idle */
-            dispatch_packet(sock, dev, &hdr, payload, len, int_ep_active, &ctx);
+            dispatch_packet(sock, dev, &hdr, payload, len, int_ep_active, iso_ep_active, &ctx);
 
         if (dev->ops->tick)
             dev->ops->tick(dev);
         poll_interrupt_endpoints(sock, dev, int_ep_active, &ctx);
+        poll_iso_endpoints(sock, dev, iso_ep_active, &ctx);
     }
 
+    free(payload);
     return 0;
 }

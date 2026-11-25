@@ -1,7 +1,7 @@
 # Architecture & Implementation Plan
 
 This document is the architecture and implementation plan for usbvcr. It goes
-deeper than the [README](../README.md): data flow, the YAML dialect, the
+deeper than the [README](https://github.com/jcfaracco/usbvcr#readme): data flow, the YAML dialect, the
 generic codec system, and the build order the project followed.
 
 > **usbredir** here is the wire protocol/transport spoken to QEMU
@@ -94,7 +94,11 @@ There is a single dialect: **canonical** — `device / schema / flow`
 second grammar into the loader.
 
 Record/replay of captured traffic is handled at the **pcap layer**
-(`src/lib/pcap/`), not as an alternate YAML dialect.
+(`src/lib/pcap/`), not as an alternate YAML dialect. A project manifest may
+still carry a top-level `pcap:` field naming a capture to replay instead of
+`devices:`/`flows:` (see [docs/yaml_dialect.md](yaml_dialect.md)) — that is
+run-config convenience (same manifest, same `connection:` block), not a
+second descriptor grammar; `src/lib/yaml/loader.c` never parses pcap framing.
 
 ## 5. Source layout
 
@@ -104,13 +108,16 @@ src/lib/            # pure: no socket/engine deps
   yaml_loader.{c,h}   # canonical dialect -> UsbNode tree; imports/templates/override; null autofill
   codec.{c,h}         # generic table-driven item-stream encoder (see §6)
   flow.{c,h}          # states, rules, match, actions, transitions, when: eval, endpoint queues
+  stream_provider.{c,h} # packet-sliced streaming provider (e.g. UVC video over isochronous EPs)
+  video_parser.{c,h}  # container-agnostic video frame parser (e.g. Motion-JPEG)
+  disk_provider.{c,h} # SCSI transparent command set (SPC/SBC) disk provider for MSC BOT
   log.{c,h} utils.{c,h}
   pcap/               # pcap record/replay (pcap.{c,h}, record.{c,h})
 
 src/core/           # engine — generic, device-agnostic
   transport.{c,h}     # usbredir framing
-  protocol.h          # wire structs / caps / constants
-  usb_core.{c,h}      # handshake, announce, dispatch loop
+  protocol.h          # wire structs / caps / constants (includes ISO stream control)
+  usb_core.{c,h}      # handshake, announce, dispatch loop, isochronous streaming & pacing
   descriptor.{c,h}    # desc_parse_config: consumes serialized config bytes
   device.h            # usb_device_ops — the backend seam
 
@@ -133,8 +140,9 @@ of YAML; `backends` bridges. Keeps `fuzz_wrap` working for free.
   hid_report) from the tree; cache bytes.
 - `control` — run flow `match` rules → `respond_with` / `respond_raw` /
   `respond_with_status`.
-- `ep_in` — drain current state's `queue_endpoint_data`.
-- `ep_out` — feed OUT data to flow (e.g. keyboard LEDs).
+- `ep_in` — drain current state's `queue_endpoint_data` or produce stream
+  packets via `stream_provider` when configured with `stream_from_file`.
+- `ep_out` — feed OUT data to flow (e.g. keyboard LEDs, or SCSI CBWs dispatched to `disk_provider` via `disk_from_file`).
 - `tick` — run `on_enter`, advance transitions.
 - `state` — current flow state + per-endpoint queues.
 

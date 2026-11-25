@@ -1,0 +1,7 @@
+version: "1.0"
+name: "Virtual UVC Webcam"
+extends: uvc_camera
+
+strings:
+  1: "USB VCR Project"
+  2: "Virtual UVC Webcam"

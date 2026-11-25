@@ -1,0 +1,10 @@
+version: "1.0"
+name: "uvc_streaming_flow"
+
+states:
+  - name: "operational"
+    rules:
+      - match:
+          endpoint_poll: 0x81
+        actions:
+          - return_nak_if_queue_empty: true

@@ -83,8 +83,8 @@ disk_provider_t *disk_provider_new(const char *path, uint8_t ep_in, uint8_t ep_o
     dp->ep_in = (ep_in != 0) ? ep_in : 0x81;
     dp->ep_out = (ep_out != 0) ? ep_out : 0x02;
 
-    LOG_INFO("disk_provider: attached '%s' size=%" G_GUINT64_FORMAT " bytes (%lu blocks)",
-             path, dp->disk_size, (unsigned long)dp->total_blocks);
+    LOG_INFO("disk_provider: attached '%s' size=%llu bytes (%lu blocks)",
+             path, (unsigned long long)dp->disk_size, (unsigned long)dp->total_blocks);
 
     return dp;
 }

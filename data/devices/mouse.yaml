@@ -1,0 +1,86 @@
+device_descriptor:
+  - bLength: 18
+    bDescriptorType: 0x01
+    bcdUSB: 0x0200
+    bDeviceClass: 0x00
+    bDeviceSubClass: 0x00
+    bDeviceProtocol: 0x00
+    bMaxPacketSize0: 8
+    idVendor: 0x046d          # Standard Logitech USB Mouse VID
+    idProduct: 0xc00e         # Standard Optical Mouse PID
+    bcdDevice: 0x0100
+    iManufacturer: 1
+    iProduct: 2
+    iSerialNumber: 0
+    bNumConfigurations: 1
+
+configurations:
+  - bLength: 9
+    bDescriptorType: 0x02
+    wTotalLength: 34          # 9 (config) + 9 (iface) + 9 (HID) + 7 (ep)
+    bNumInterfaces: 1
+    bConfigurationValue: 1
+    iConfiguration: 0
+    bmAttributes: 0xa0
+    bMaxPower: 50
+    interfaces:
+      - bLength: 9
+        bDescriptorType: 0x04
+        bInterfaceNumber: 0
+        bAlternateSetting: 0
+        bNumEndpoints: 1
+        bInterfaceClass: 0x03      # HID
+        bInterfaceSubClass: 0x01   # Boot
+        bInterfaceProtocol: 0x02   # Mouse
+        iInterface: 0
+        hid_descriptor:
+          bLength: 9
+          bDescriptorType: 0x21
+          bcdHID: 0x0111
+          bCountryCode: 0
+          bNumDescriptors: 1
+          bReportDescriptorType: 0x22
+          wDescriptorLength: 52
+        endpoints:
+          - bLength: 7
+            bDescriptorType: 0x05
+            bEndpointAddress: 0x81
+            bmAttributes: 0x03       # Interrupt
+            wMaxPacketSize: 4
+            bInterval: 10
+
+report_descriptor:
+  codec: "hid_report"
+  items:
+    - usage_page: "Generic Desktop"
+    - usage: "Mouse"
+    - collection: "Application"
+    - usage: "Pointer"
+    - collection: "Physical"
+    - usage_page: "Button"
+    - usage_minimum: 1
+    - usage_maximum: 3
+    - logical_minimum: 0
+    - logical_maximum: 1
+    - report_count: 3
+    - report_size: 1
+    - input: "Data,Var,Abs"
+    - report_count: 1
+    - report_size: 5
+    - input: "Const,Array,Abs"
+    - usage_page: "Generic Desktop"
+    - usage: "X"
+    - usage: "Y"
+    - logical_minimum: -127
+    - logical_maximum: 127
+    - report_size: 8
+    - report_count: 2
+    - input: "Data,Var,Rel"
+    - usage: "Wheel"
+    - logical_minimum: -127
+    - logical_maximum: 127
+    - report_size: 8
+    - report_count: 1
+    - input: "Data,Var,Rel"
+    - end_collection: true
+    - end_collection: true

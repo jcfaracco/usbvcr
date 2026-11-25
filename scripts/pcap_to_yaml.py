@@ -484,7 +484,7 @@ def build_flow(control_pairs, interrupt_payloads_by_endpoint, report_raw_file=No
     return {"version": "1.0", "states": [{"name": "operational", "rules": rules}]}
 
 
-def build_device(name: str, device_desc: dict, config: dict, report_items, video_file: str = None) -> dict:
+def build_device(name: str, device_desc: dict, config: dict, report_items, raw_file: str = None) -> dict:
     device = {
         "version": "1.0",
         "name": name,
@@ -493,19 +493,19 @@ def build_device(name: str, device_desc: dict, config: dict, report_items, video
     }
     if report_items is not None:
         device["report_descriptor"] = {"codec": "hid_report", "items": report_items}
-    if video_file is not None:
-        device["file"] = video_file
+    if raw_file is not None:
+        device["file"] = raw_file
         device["loop"] = True
     return device
 
 
-def build_project(name: str, vendor: str, product: str, slug: str, video_file: str = None) -> dict:
+def build_project(name: str, vendor: str, product: str, slug: str, raw_file: str = None) -> dict:
     dev_entry = {
         "device": f"devices/{slug}.yaml",
         "flow": f"flows/{slug}_flow.yaml",
     }
-    if video_file is not None:
-        dev_entry["file"] = video_file
+    if raw_file is not None:
+        dev_entry["file"] = raw_file
         dev_entry["loop"] = True
     return {
         "version": "1.0",
@@ -595,19 +595,19 @@ def main(argv=None) -> int:
                         video_frames.append(bytes(current_video_frame))
                         current_video_frame.clear()
 
-    video_raw_file = None
+    raw_file = None
     if video_frames:
-        video_raw_file = "payloads/video.mjpeg"
+        raw_file = "payloads/video.mjpeg"
 
     idVendor, idProduct = int(device_desc["idVendor"]), int(device_desc["idProduct"])
     name = args.name or f"Extracted Device {idVendor:04x}:{idProduct:04x}"
     slug = f"device_{idVendor:04x}_{idProduct:04x}"
 
-    device = build_device(name, device_desc, config, report_items, video_raw_file)
+    device = build_device(name, device_desc, config, report_items, raw_file)
     if report_raw_file and config["interfaces"]:
         config["interfaces"][0]["report_descriptor"] = {"raw_file": report_raw_file}
     flow = build_flow(control_pairs, interrupt_payloads, report_raw_file)
-    project = build_project(name, args.vendor, args.product, slug, video_raw_file)
+    project = build_project(name, args.vendor, args.product, slug, raw_file)
 
     out = pathlib.Path(args.output)
     write_yaml(out / f"{out.name}.yaml", project)
@@ -619,10 +619,10 @@ def main(argv=None) -> int:
         payload_path = out / report_raw_file
         payload_path.parent.mkdir(parents=True, exist_ok=True)
         payload_path.write_bytes(report_raw)
-    if video_raw_file:
-        video_path = out / video_raw_file
-        video_path.parent.mkdir(parents=True, exist_ok=True)
-        video_path.write_bytes(b"".join(video_frames))
+    if raw_file:
+        raw_path = out / raw_file
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_path.write_bytes(b"".join(video_frames))
 
     print(f"Wrote project to {out}/")
     print(f"  {out.name}.yaml")
@@ -632,8 +632,8 @@ def main(argv=None) -> int:
         print("  codecs/hid_report.yaml")
     if report_raw_file:
         print(f"  {report_raw_file}")
-    if video_raw_file:
-        print(f"  {video_raw_file}")
+    if raw_file:
+        print(f"  {raw_file}")
     return 0
 
 

@@ -13,7 +13,7 @@ lib_sources = files(
   'codec.c',
   'flow.c',
   'version.c',
-  'stream/mjpeg_parser.c',
+  'stream/video_parser.c',
   'stream/stream_provider.c',
 )
 

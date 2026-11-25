@@ -6,14 +6,14 @@
 stream_provider_t *stream_provider_new(const char *path, gboolean loop, uint8_t endpoint)
 {
     stream_provider_t *p;
-    mjpeg_stream_t *s;
+    video_stream_t *s;
 
     if (path == NULL)
     {
         return NULL;
     }
 
-    s = mjpeg_stream_open(path);
+    s = video_stream_open(path);
     if (s == NULL)
     {
         return NULL;
@@ -27,7 +27,7 @@ stream_provider_t *stream_provider_new(const char *path, gboolean loop, uint8_t 
     return p;
 }
 
-stream_provider_t *stream_provider_new_from_stream(mjpeg_stream_t *stream, gboolean loop, uint8_t endpoint)
+stream_provider_t *stream_provider_new_from_stream(video_stream_t *stream, gboolean loop, uint8_t endpoint)
 {
     stream_provider_t *p;
 
@@ -97,14 +97,14 @@ int stream_provider_produce_packet(stream_provider_t *p, uint8_t ep, uint8_t *bu
         return 0;
     }
 
-    frame_data = mjpeg_stream_get_frame(p->stream, p->current_frame, &frame_len);
+    frame_data = video_stream_get_frame(p->stream, p->current_frame, &frame_len);
     if (frame_data == NULL || frame_len == 0)
     {
         if (p->loop && p->stream->frame_count > 0)
         {
             p->current_frame = 0;
             p->frame_offset = 0;
-            frame_data = mjpeg_stream_get_frame(p->stream, p->current_frame, &frame_len);
+            frame_data = video_stream_get_frame(p->stream, p->current_frame, &frame_len);
         }
         if (frame_data == NULL || frame_len == 0)
         {
@@ -157,7 +157,7 @@ void stream_provider_free(stream_provider_t *p)
         return;
     }
 
-    mjpeg_stream_free(p->stream);
+    video_stream_free(p->stream);
     g_free(p->file_path);
     g_free(p);
 }

@@ -1,4 +1,4 @@
-/* Unit tests for MJPEG parser and stream provider (src/lib/stream/). */
+/* Unit tests for video parser and stream provider (src/lib/stream/). */
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -6,24 +6,24 @@
 #include <check.h>
 #include <glib.h>
 
-#include "stream/mjpeg_parser.h"
+#include "stream/video_parser.h"
 #include "stream/stream_provider.h"
 
-START_TEST(test_mjpeg_parser_empty_or_null)
+START_TEST(test_video_parser_empty_or_null)
 {
-    ck_assert_ptr_null(mjpeg_stream_open(NULL));
-    ck_assert_ptr_null(mjpeg_stream_open("/nonexistent/file.mjpeg"));
-    ck_assert_ptr_null(mjpeg_stream_new_from_bytes(NULL, 0));
+    ck_assert_ptr_null(video_stream_open(NULL));
+    ck_assert_ptr_null(video_stream_open("/nonexistent/file.mjpeg"));
+    ck_assert_ptr_null(video_stream_new_from_bytes(NULL, 0, VIDEO_FORMAT_AUTO));
 
     size_t len = 99;
-    ck_assert_ptr_null(mjpeg_stream_get_frame(NULL, 0, &len));
+    ck_assert_ptr_null(video_stream_get_frame(NULL, 0, &len));
     ck_assert_int_eq(len, 0);
 
-    mjpeg_stream_free(NULL);
+    video_stream_free(NULL);
 }
 END_TEST
 
-START_TEST(test_mjpeg_parser_single_and_multi_frame)
+START_TEST(test_video_parser_mjpeg_frames)
 {
     /* Construct 2 synthetic JPEG frames:
      * Frame 1: FF D8 01 02 03 FF D9 (7 bytes)
@@ -34,12 +34,12 @@ START_TEST(test_mjpeg_parser_single_and_multi_frame)
         0xFF, 0xD8, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0xD9
     };
 
-    mjpeg_stream_t *s = mjpeg_stream_new_from_bytes(data, sizeof(data));
+    video_stream_t *s = video_stream_new_from_bytes(data, sizeof(data), VIDEO_FORMAT_MJPEG);
     ck_assert_ptr_nonnull(s);
     ck_assert_int_eq(s->frame_count, 2);
 
     size_t f1_len = 0;
-    const uint8_t *f1 = mjpeg_stream_get_frame(s, 0, &f1_len);
+    const uint8_t *f1 = video_stream_get_frame(s, 0, &f1_len);
     ck_assert_ptr_nonnull(f1);
     ck_assert_int_eq(f1_len, 7);
     ck_assert_int_eq(f1[0], 0xFF);
@@ -48,7 +48,7 @@ START_TEST(test_mjpeg_parser_single_and_multi_frame)
     ck_assert_int_eq(f1[6], 0xD9);
 
     size_t f2_len = 0;
-    const uint8_t *f2 = mjpeg_stream_get_frame(s, 1, &f2_len);
+    const uint8_t *f2 = video_stream_get_frame(s, 1, &f2_len);
     ck_assert_ptr_nonnull(f2);
     ck_assert_int_eq(f2_len, 9);
     ck_assert_int_eq(f2[0], 0xFF);
@@ -58,10 +58,29 @@ START_TEST(test_mjpeg_parser_single_and_multi_frame)
 
     /* Out of bounds frame */
     size_t oob_len = 99;
-    ck_assert_ptr_null(mjpeg_stream_get_frame(s, 2, &oob_len));
+    ck_assert_ptr_null(video_stream_get_frame(s, 2, &oob_len));
     ck_assert_int_eq(oob_len, 0);
 
-    mjpeg_stream_free(s);
+    video_stream_free(s);
+}
+END_TEST
+
+START_TEST(test_video_parser_raw_and_yuy2)
+{
+    static const uint8_t raw_data[] = { 0x11, 0x22, 0x33, 0x44, 0x55 };
+
+    video_stream_t *s = video_stream_new_from_bytes(raw_data, sizeof(raw_data), VIDEO_FORMAT_YUY2);
+    ck_assert_ptr_nonnull(s);
+    ck_assert_int_eq(s->frame_count, 1);
+
+    size_t len = 0;
+    const uint8_t *f = video_stream_get_frame(s, 0, &len);
+    ck_assert_ptr_nonnull(f);
+    ck_assert_int_eq(len, sizeof(raw_data));
+    ck_assert_int_eq(f[0], 0x11);
+    ck_assert_int_eq(f[4], 0x55);
+
+    video_stream_free(s);
 }
 END_TEST
 
@@ -72,7 +91,7 @@ START_TEST(test_stream_provider_slicing_and_headers)
         0xFF, 0xD8, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0xFF, 0xD9
     };
 
-    mjpeg_stream_t *s = mjpeg_stream_new_from_bytes(data, sizeof(data));
+    video_stream_t *s = video_stream_new_from_bytes(data, sizeof(data), VIDEO_FORMAT_MJPEG);
     stream_provider_t *p = stream_provider_new_from_stream(s, FALSE, 0x81);
     ck_assert_ptr_nonnull(p);
 
@@ -113,7 +132,7 @@ START_TEST(test_stream_provider_looping)
         0xFF, 0xD8, 0xFF, 0xD9
     };
 
-    mjpeg_stream_t *s = mjpeg_stream_new_from_bytes(data, sizeof(data));
+    video_stream_t *s = video_stream_new_from_bytes(data, sizeof(data), VIDEO_FORMAT_MJPEG);
     stream_provider_t *p = stream_provider_new_from_stream(s, TRUE, 0);
     ck_assert_ptr_nonnull(p);
 
@@ -143,8 +162,9 @@ static Suite *stream_suite(void)
     Suite *s = suite_create("stream");
     TCase *tc = tcase_create("core");
 
-    tcase_add_test(tc, test_mjpeg_parser_empty_or_null);
-    tcase_add_test(tc, test_mjpeg_parser_single_and_multi_frame);
+    tcase_add_test(tc, test_video_parser_empty_or_null);
+    tcase_add_test(tc, test_video_parser_mjpeg_frames);
+    tcase_add_test(tc, test_video_parser_raw_and_yuy2);
     tcase_add_test(tc, test_stream_provider_slicing_and_headers);
     tcase_add_test(tc, test_stream_provider_looping);
 

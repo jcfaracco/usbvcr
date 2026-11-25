@@ -4,10 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <glib.h>
-#include "stream/mjpeg_parser.h"
+#include "stream/video_parser.h"
 
 typedef struct {
-    mjpeg_stream_t *stream;
+    video_stream_t *stream;
     char           *file_path;
     gboolean        loop;
     uint8_t         endpoint;          /* 0 = any IN endpoint, or e.g. 0x81 */
@@ -19,7 +19,7 @@ typedef struct {
 } stream_provider_t;
 
 stream_provider_t *stream_provider_new(const char *path, gboolean loop, uint8_t endpoint);
-stream_provider_t *stream_provider_new_from_stream(mjpeg_stream_t *stream, gboolean loop, uint8_t endpoint);
+stream_provider_t *stream_provider_new_from_stream(video_stream_t *stream, gboolean loop, uint8_t endpoint);
 void               stream_provider_set_active(stream_provider_t *p, gboolean active);
 void               stream_provider_set_interval(stream_provider_t *p, uint32_t interval_us);
 int                stream_provider_produce_packet(stream_provider_t *p, uint8_t ep, uint8_t *buf, size_t cap);

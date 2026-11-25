@@ -484,7 +484,7 @@ def build_flow(control_pairs, interrupt_payloads_by_endpoint, report_raw_file=No
     return {"version": "1.0", "states": [{"name": "operational", "rules": rules}]}
 
 
-def build_device(name: str, device_desc: dict, config: dict, report_items) -> dict:
+def build_device(name: str, device_desc: dict, config: dict, report_items, video_file: str = None) -> dict:
     device = {
         "version": "1.0",
         "name": name,
@@ -493,18 +493,25 @@ def build_device(name: str, device_desc: dict, config: dict, report_items) -> di
     }
     if report_items is not None:
         device["report_descriptor"] = {"codec": "hid_report", "items": report_items}
+    if video_file is not None:
+        device["file"] = video_file
+        device["loop"] = True
     return device
 
 
-def build_project(name: str, vendor: str, product: str, slug: str) -> dict:
+def build_project(name: str, vendor: str, product: str, slug: str, video_file: str = None) -> dict:
+    dev_entry = {
+        "device": f"devices/{slug}.yaml",
+        "flow": f"flows/{slug}_flow.yaml",
+    }
+    if video_file is not None:
+        dev_entry["file"] = video_file
+        dev_entry["loop"] = True
     return {
         "version": "1.0",
         "name": name,
         "vars": [{"vendor": vendor}, {"product": product}],
-        "devices": [{
-            "device": f"devices/{slug}.yaml",
-            "flow": f"flows/{slug}_flow.yaml",
-        }],
+        "devices": [dev_entry],
     }
 
 
@@ -569,19 +576,38 @@ def main(argv=None) -> int:
             report_raw_file = "payloads/report_descriptor.bin"
 
     interrupt_payloads = {}
+    video_frames = []
+    current_video_frame = bytearray()
+
     for t in transfers:
         if t.xfer == XFER_INT and t.event_type == "C" and t.direction_in and t.data:
             interrupt_payloads.setdefault(t.endpoint, []).append(t.data.hex().upper())
+        elif t.xfer in (XFER_ISO, XFER_BULK) and t.event_type == "C" and t.direction_in and t.data:
+            if len(t.data) >= 2:
+                hdr_len = t.data[0]
+                if 2 <= hdr_len <= len(t.data):
+                    hdr_info = t.data[1]
+                    payload = t.data[hdr_len:]
+                    eof = bool(hdr_info & 0x02)
+                    if payload:
+                        current_video_frame.extend(payload)
+                    if eof and current_video_frame:
+                        video_frames.append(bytes(current_video_frame))
+                        current_video_frame.clear()
+
+    video_raw_file = None
+    if video_frames:
+        video_raw_file = "payloads/video.mjpeg"
 
     idVendor, idProduct = int(device_desc["idVendor"]), int(device_desc["idProduct"])
     name = args.name or f"Extracted Device {idVendor:04x}:{idProduct:04x}"
     slug = f"device_{idVendor:04x}_{idProduct:04x}"
 
-    device = build_device(name, device_desc, config, report_items)
+    device = build_device(name, device_desc, config, report_items, video_raw_file)
     if report_raw_file and config["interfaces"]:
         config["interfaces"][0]["report_descriptor"] = {"raw_file": report_raw_file}
     flow = build_flow(control_pairs, interrupt_payloads, report_raw_file)
-    project = build_project(name, args.vendor, args.product, slug)
+    project = build_project(name, args.vendor, args.product, slug, video_raw_file)
 
     out = pathlib.Path(args.output)
     write_yaml(out / f"{out.name}.yaml", project)
@@ -593,6 +619,10 @@ def main(argv=None) -> int:
         payload_path = out / report_raw_file
         payload_path.parent.mkdir(parents=True, exist_ok=True)
         payload_path.write_bytes(report_raw)
+    if video_raw_file:
+        video_path = out / video_raw_file
+        video_path.parent.mkdir(parents=True, exist_ok=True)
+        video_path.write_bytes(b"".join(video_frames))
 
     print(f"Wrote project to {out}/")
     print(f"  {out.name}.yaml")
@@ -602,6 +632,8 @@ def main(argv=None) -> int:
         print("  codecs/hid_report.yaml")
     if report_raw_file:
         print(f"  {report_raw_file}")
+    if video_raw_file:
+        print(f"  {video_raw_file}")
     return 0
 
 

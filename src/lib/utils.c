@@ -3,6 +3,11 @@
 #include <ctype.h>
 #include <glib.h>
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <limits.h>
+#endif
+
 #include "utils.h"
 
 
@@ -67,8 +72,12 @@ void trim_string(char *dst, const char *src, size_t dst_size) {
 char *usbvcr_get_data_dir(void)
 {
     const char *env;
-    char *path;
+    char *path = NULL;
     const gchar * const *system_dirs;
+#if defined(__APPLE__)
+    char ep_buf[PATH_MAX];
+    uint32_t ep_size = sizeof(ep_buf);
+#endif
 
     env = g_getenv("USBVCR_DATA_DIR");
     if (env != NULL && g_file_test(env, G_FILE_TEST_IS_DIR))
@@ -81,7 +90,20 @@ char *usbvcr_get_data_dir(void)
         return g_canonicalize_filename("data", NULL);
     }
 
+    if (g_file_test("../data", G_FILE_TEST_IS_DIR))
+    {
+        return g_canonicalize_filename("../data", NULL);
+    }
+
+#if defined(__APPLE__)
+    if (_NSGetExecutablePath(ep_buf, &ep_size) == 0)
+    {
+        path = g_canonicalize_filename(ep_buf, NULL);
+    }
+#else
     path = g_file_read_link("/proc/self/exe", NULL);
+#endif
+
     if (path != NULL)
     {
         char *bindir = g_path_get_dirname(path);
@@ -90,6 +112,14 @@ char *usbvcr_get_data_dir(void)
         g_free(path);
 
         candidate = g_build_filename(bindir, "..", "..", "data", NULL);
+        if (g_file_test(candidate, G_FILE_TEST_IS_DIR))
+        {
+            g_free(bindir);
+            return candidate;
+        }
+        g_free(candidate);
+
+        candidate = g_build_filename(bindir, "..", "data", NULL);
         if (g_file_test(candidate, G_FILE_TEST_IS_DIR))
         {
             g_free(bindir);

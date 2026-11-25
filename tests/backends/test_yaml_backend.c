@@ -572,6 +572,26 @@ START_TEST(test_yaml_backend_streaming)
 }
 END_TEST
 
+START_TEST(test_yaml_backend_string_descriptors)
+{
+    usb_device_t *dev = yaml_backend_create(TEST_DATA_DIR "/example1/example1.yaml");
+    ck_assert_ptr_nonnull(dev);
+
+    const uint8_t *desc = NULL;
+    uint16_t len = 0;
+
+    /* Index 0: Language descriptor */
+    ck_assert_int_eq(dev->ops->get_descriptor(dev, 3, 0, 0, &desc, &len), 0);
+    ck_assert_int_eq(len, 4);
+    ck_assert_int_eq(desc[0], 4);
+    ck_assert_int_eq(desc[1], 3);
+    ck_assert_int_eq(desc[2], 0x09);
+    ck_assert_int_eq(desc[3], 0x04);
+
+    yaml_backend_destroy(dev);
+}
+END_TEST
+
 static Suite *yaml_backend_suite(void)
 {
     Suite *s;
@@ -582,6 +602,7 @@ static Suite *yaml_backend_suite(void)
     tc_e1 = tcase_create("example1_literal");
     tcase_add_test(tc_e1, test_yaml_backend_e1_lifecycle);
     tcase_add_test(tc_e1, test_yaml_backend_e1_get_descriptor);
+    tcase_add_test(tc_e1, test_yaml_backend_string_descriptors);
     tcase_add_test(tc_e1, test_yaml_backend_e1_scrambled_fields_same_bytes);
     tcase_add_test(tc_e1, test_yaml_backend_e1_control);
     tcase_add_test(tc_e1, test_yaml_backend_e1_ep_in_hello_world);

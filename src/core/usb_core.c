@@ -540,8 +540,9 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
                 usb_bulk_packet_header_t rh = bh;
                 int n = 0;
                 size_t req_len = (size_t)bh.length | ((size_t)bh.length_high << 16);
-                if (req_len == 0 || req_len > sizeof(in_buf))
-                    req_len = sizeof(in_buf);
+                size_t max_in = sizeof(in_buf) - sizeof(rh) - 64;
+                if (req_len == 0 || req_len > max_in)
+                    req_len = max_in;
 
                 if (dev->ops->ep_in) {
                     n = dev->ops->ep_in(dev, ep, in_buf, req_len);

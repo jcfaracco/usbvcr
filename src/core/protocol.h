@@ -10,7 +10,7 @@
  * host. On a big-endian host these would need byte swapping.
  */
 
-#define USB_VCR_BUF_SIZE 4096
+#define USB_VCR_BUF_SIZE (128 * 1024)
 
 /* In-memory packet header. The `id` is widened to 64 bits so it can hold a
  * 64-bit wire id; the transport layer serializes it as 4 or 8 bytes on the

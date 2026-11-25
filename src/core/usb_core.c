@@ -306,9 +306,10 @@ static void push_iso_packets(int sock, usb_device_t *dev, uint8_t ep,
     if (!dev->ops->ep_in)
         return;
 
-    /* Push available packets up to a reasonable burst */
+    /* Push available packets up to a reasonable burst.
+     * High-speed isochronous endpoints use at most 1023 bytes per packet. */
     for (int i = 0; i < 16; i++) {
-        uint8_t data[USB_VCR_BUF_SIZE];
+        uint8_t data[1023];
         int n = dev->ops->ep_in(dev, ep, data, sizeof(data));
         if (n <= 0)
             break;
@@ -475,6 +476,12 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
 
     case RT_STOP_ISO_STREAM:
         handle_stop_iso_stream(sock, hdr->id, payload, len, iso_ep_active, ctx);
+        break;
+
+    case RT_RESET:
+        LOG_DEBUG("usb bus reset");
+        memset(int_ep_active, 0, 32 * sizeof(bool));
+        memset(iso_ep_active, 0, 32 * sizeof(bool));
         break;
 
     case RT_START_INTERRUPT_RECEIVING:

@@ -1,7 +1,132 @@
 version: "1.0"
 name: "Virtual UVC Webcam"
-extends: uvc_camera
+
+device_descriptor:
+  - bLength: 18
+    bDescriptorType: 0x01
+    bcdUSB: 0x0200
+    bDeviceClass: 0xef        # Miscellaneous: IAD-compliant composite device
+    bDeviceSubClass: 0x02
+    bDeviceProtocol: 0x01
+    bMaxPacketSize0: 64
+    idVendor: 0x046d          # Logitech
+    idProduct: 0x082d         # C920 HD Pro Webcam
+    bcdDevice: 0x0000
+    iManufacturer: 1
+    iProduct: 2
+    iSerialNumber: 3
+    bNumConfigurations: 1
 
 strings:
   1: "USB VCR Project"
   2: "Virtual UVC Webcam"
+  3: "00000001"
+  4: "UVC Video Configuration"
+  5: "UVC Video Control"
+  6: "UVC Video Streaming"
+
+configurations:
+  - bLength: 9
+    bDescriptorType: 0x02
+    wTotalLength: 192
+    bNumInterfaces: 2
+    bConfigurationValue: 1
+    iConfiguration: 4
+    bmAttributes: 0xc0        # USB_CFG_ATT_ONE | USB_CFG_ATT_SELFPOWER
+    bMaxPower: 250            # 0xfa, 500 mA
+
+    interface_association:
+      bLength: 8
+      bDescriptorType: 0x0b   # USB_DT_INTERFACE_ASSOCIATION
+      bFirstInterface: 0
+      bInterfaceCount: 2
+      bFunctionClass: 0x0e    # USB_CLASS_VIDEO
+      bFunctionSubClass: 0x03 # SC_VIDEO_INTERFACE_COLLECTION
+      bFunctionProtocol: 0x00
+      iFunction: 5
+
+    interfaces:
+      # Interface 0: VideoControl
+      - bLength: 9
+        bDescriptorType: 0x04
+        bInterfaceNumber: 0
+        bAlternateSetting: 0
+        bNumEndpoints: 1
+        bInterfaceClass: 0x0e      # USB_CLASS_VIDEO
+        bInterfaceSubClass: 0x01   # USB_SUBCLASS_VIDEO_CONTROL
+        bInterfaceProtocol: 0x00
+        iInterface: 5
+
+        vc_interface_header:
+          hex: "0D240100014200808D5B000101"
+
+        vc_input_terminal_camera:
+          hex: "1124020101020000000000000000020000"
+
+        vc_input_terminal_composite:
+          hex: "0824020201040000"
+
+        vc_output_terminal:
+          hex: "092403030101000500"
+
+        vc_selector_unit:
+          hex: "0824040402010200"
+
+        vc_processing_unit:
+          hex: "0B24050504000002000000"
+
+        endpoints:
+          - bLength: 7
+            bDescriptorType: 0x05
+            bEndpointAddress: 0x81
+            bmAttributes: 0x03       # Interrupt
+            wMaxPacketSize: 8
+            bInterval: 0xff
+
+        vc_cs_endpoint:
+          hex: "0525030800"
+
+      # Interface 1, Alt 0: VideoStreaming, zero-bandwidth (idle)
+      - bLength: 9
+        bDescriptorType: 0x04
+        bInterfaceNumber: 1
+        bAlternateSetting: 0
+        bNumEndpoints: 0
+        bInterfaceClass: 0x0e
+        bInterfaceSubClass: 0x02    # USB_SUBCLASS_VIDEO_STREAMING
+        bInterfaceProtocol: 0x00
+        iInterface: 6
+
+        vs_input_header:
+          hex: "0E2401013F008200030000000100"
+
+        vs_format_mjpeg:
+          hex: "0B24060101010100000000"
+
+        vs_frame_mjpeg:
+          hex: "26240701008002E0010040190100401901006009001516050000151605001516050000000000"
+
+      # Interface 1, Alt 1: VideoStreaming, active (isochronous video data)
+      - bLength: 9
+        bDescriptorType: 0x04
+        bInterfaceNumber: 1
+        bAlternateSetting: 1
+        bNumEndpoints: 1
+        bInterfaceClass: 0x0e
+        bInterfaceSubClass: 0x02
+        bInterfaceProtocol: 0x00
+        iInterface: 6
+
+        endpoints:
+          - bLength: 7
+            bDescriptorType: 0x05
+            bEndpointAddress: 0x82
+            bmAttributes: 0x05       # Isochronous, asynchronous
+            wMaxPacketSize: 1023
+            bInterval: 1
+
+probe_commit_response:
+  hex: "00000101151605000000000000000100200000600900FF030000"
+
+selector_input_response:
+  hex: "01"

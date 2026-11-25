@@ -28,7 +28,7 @@ states:
           - respond_with_status: 0
 
       # UVC VS PROBE_CONTROL (cs=0x01) GET_CUR / GET_MIN / GET_MAX / GET_DEF
-      # Handled for both class interface request types (0xA1 and 0x81)
+      # Handled for class interface request types (0xA1 and 0x81)
       - match:
           bmRequestType: 0xA1
           bRequest: 0x81  # UVC_GET_CUR
@@ -90,7 +90,21 @@ states:
         actions:
           - respond_with_status: 0
       - match:
+          bmRequestType: 0x01
+          bRequest: 0x01
+          wValue: 0x0100
+          wIndex: 0x0001
+        actions:
+          - respond_with_status: 0
+      - match:
           bmRequestType: 0x21
+          bRequest: 0x01
+          wValue: 0x0200
+          wIndex: 0x0001
+        actions:
+          - respond_with_status: 0
+      - match:
+          bmRequestType: 0x01
           bRequest: 0x01
           wValue: 0x0200
           wIndex: 0x0001
@@ -114,6 +128,13 @@ states:
           - respond_with: "$device.selector_input_response"
       - match:
           bmRequestType: 0x21
+          bRequest: 0x01
+          wValue: 0x0100
+          wIndex: 0x0004
+        actions:
+          - respond_with_status: 0
+      - match:
+          bmRequestType: 0x01
           bRequest: 0x01
           wValue: 0x0100
           wIndex: 0x0004

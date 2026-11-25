@@ -336,7 +336,7 @@ static void handle_set_configuration(int sock, usb_device_t *dev, int64_t id,
  * replying with STALL in that case -- it does not let the host skip
  * asking). Every interface we serve has exactly one altsetting, so there is
  * nothing to actually switch: just echo back success. */
-static void handle_set_alt_setting(int sock, int64_t id,
+static void handle_set_alt_setting(int sock, usb_device_t *dev, int64_t id,
                                    const uint8_t *payload, size_t len,
                                    const usb_record_ctx_t *ctx)
 {
@@ -345,6 +345,18 @@ static void handle_set_alt_setting(int sock, int64_t id,
     if (len >= sizeof(req))
         memcpy(&req, payload, sizeof(req));
     LOG_DEBUG("set alt setting iface=%u alt=%u", req.interface, req.alt);
+
+    if (dev->ops->control) {
+        usb_control_packet_header_t setup;
+        memset(&setup, 0, sizeof(setup));
+        setup.request     = USB_REQ_SET_INTERFACE;
+        setup.requesttype = 0x01;
+        setup.value       = req.alt;
+        setup.index       = req.interface;
+        uint8_t data[USB_VCR_BUF_SIZE];
+        uint16_t n = 0;
+        dev->ops->control(dev, &setup, data, &n);  /* drive flow; reply unused */
+    }
 
     usb_alt_setting_status_header_t rstatus = {
         .status    = 0,
@@ -374,7 +386,7 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
         break;
 
     case RT_SET_ALT_SETTING:
-        handle_set_alt_setting(sock, hdr->id, payload, len, ctx);
+        handle_set_alt_setting(sock, dev, hdr->id, payload, len, ctx);
         break;
 
     case RT_START_INTERRUPT_RECEIVING:

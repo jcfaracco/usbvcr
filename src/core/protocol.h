@@ -105,8 +105,9 @@ enum {
 #define USB_DESC_HID_REPORT 0x22
 
 /* Standard control requests (bRequest). */
-#define USB_REQ_GET_DESCRIPTOR  0x06
+#define USB_REQ_GET_DESCRIPTOR    0x06
 #define USB_REQ_SET_CONFIGURATION 0x09
+#define USB_REQ_SET_INTERFACE     0x0B
 
 /* bmRequestType bits. */
 #define USB_DIR_IN   0x80   /* device-to-host */

@@ -13,6 +13,8 @@ lib_sources = files(
   'codec.c',
   'flow.c',
   'version.c',
+  'stream/mjpeg_parser.c',
+  'stream/stream_provider.c',
 )
 
 if have_local_engine

@@ -342,6 +342,22 @@ static void build_map(yaml_document_t *doc, yaml_node_t *map,
     }
 }
 
+static gboolean is_same_file(const char *path1, const char *path2)
+{
+    char *c1, *c2;
+    gboolean same;
+
+    if (!path1 || !path2)
+        return FALSE;
+
+    c1 = g_canonicalize_filename(path1, NULL);
+    c2 = g_canonicalize_filename(path2, NULL);
+    same = (g_strcmp0(c1, c2) == 0);
+    g_free(c1);
+    g_free(c2);
+    return same;
+}
+
 static char *resolve_extends_path(const char *current_path, const char *ref)
 {
     char *dir;
@@ -355,7 +371,7 @@ static char *resolve_extends_path(const char *current_path, const char *ref)
 
     if (g_path_is_absolute(ref))
     {
-        if (g_file_test(ref, G_FILE_TEST_EXISTS))
+        if (g_file_test(ref, G_FILE_TEST_EXISTS) && !is_same_file(ref, current_path))
         {
             return g_strdup(ref);
         }
@@ -367,7 +383,7 @@ static char *resolve_extends_path(const char *current_path, const char *ref)
     if (strchr(ref, '/') || g_str_has_suffix(ref, ".yaml") || g_str_has_suffix(ref, ".yml"))
     {
         path = g_build_filename(dir, ref, NULL);
-        if (g_file_test(path, G_FILE_TEST_EXISTS))
+        if (g_file_test(path, G_FILE_TEST_EXISTS) && !is_same_file(path, current_path))
         {
             g_free(dir);
             return path;
@@ -376,21 +392,23 @@ static char *resolve_extends_path(const char *current_path, const char *ref)
 
         /* Try directly under datadir */
         path = usbvcr_find_data_file(NULL, ref);
-        if (path != NULL)
+        if (path != NULL && !is_same_file(path, current_path))
         {
             g_free(dir);
             return path;
         }
+        g_free(path);
 
         /* Try under datadir/devices if ref starts with devices/ */
         if (g_str_has_prefix(ref, "devices/") && ref[7] != '\0')
         {
             path = usbvcr_find_data_file("devices", ref + 8);
-            if (path != NULL)
+            if (path != NULL && !is_same_file(path, current_path))
             {
                 g_free(dir);
                 return path;
             }
+            g_free(path);
         }
 
         g_free(dir);
@@ -400,7 +418,7 @@ static char *resolve_extends_path(const char *current_path, const char *ref)
     /* Bare ID (e.g. "keyboard", "mouse"): check local <dir>/devices/<ref>.yaml first */
     filename = g_strdup_printf("%s.yaml", ref);
     path = g_build_filename(dir, "devices", filename, NULL);
-    if (g_file_test(path, G_FILE_TEST_EXISTS))
+    if (g_file_test(path, G_FILE_TEST_EXISTS) && !is_same_file(path, current_path))
     {
         g_free(dir);
         g_free(filename);
@@ -410,7 +428,7 @@ static char *resolve_extends_path(const char *current_path, const char *ref)
 
     /* Check local <dir>/<ref>.yaml */
     path = g_build_filename(dir, filename, NULL);
-    if (g_file_test(path, G_FILE_TEST_EXISTS))
+    if (g_file_test(path, G_FILE_TEST_EXISTS) && !is_same_file(path, current_path))
     {
         g_free(dir);
         g_free(filename);
@@ -421,7 +439,13 @@ static char *resolve_extends_path(const char *current_path, const char *ref)
     g_free(filename);
 
     /* Fallback to datadir/devices/<ref>.yaml */
-    return usbvcr_find_data_file("devices", ref);
+    path = usbvcr_find_data_file("devices", ref);
+    if (path != NULL && is_same_file(path, current_path))
+    {
+        g_free(path);
+        return NULL;
+    }
+    return path;
 }
 
 /* Reject oversized input before handing it to libyaml (bounds memory even
@@ -459,28 +483,48 @@ static gboolean yaml_parse_document(FILE *fp, yaml_parser_t *parser, yaml_docume
     return TRUE;
 }
 
-usb_node_t *yaml_tree_load(const char *path, schema_t *schemas,
-                           GHashTable *codecs, char **ns_out)
+static usb_node_t *yaml_tree_load_recursive(const char *path, schema_t *schemas,
+                                            GHashTable *codecs, char **ns_out,
+                                            GHashTable *visited_paths)
 {
     FILE *fp;
     yaml_parser_t parser;
     yaml_document_t doc;
     usb_node_t *root;
     yaml_node_t *top;
+    char *canonical_path;
+
+    if (path == NULL) {
+        return NULL;
+    }
+
+    canonical_path = g_canonicalize_filename(path, NULL);
+    if (g_hash_table_contains(visited_paths, canonical_path)) {
+        LOG_ERR("yaml_tree: circular extends detected for '%s'", path);
+        g_free(canonical_path);
+        return NULL;
+    }
+    g_hash_table_add(visited_paths, canonical_path);
 
     fp = fopen(path, "r");
     if (!fp) {
         LOG_ERR("Unable to open file '%s'", path);
+        g_hash_table_remove(visited_paths, canonical_path);
+        g_free(canonical_path);
         return NULL;
     }
 
     if (!yaml_file_size_ok(fp, path)) {
         fclose(fp);
+        g_hash_table_remove(visited_paths, canonical_path);
+        g_free(canonical_path);
         return NULL;
     }
 
     if (!yaml_parse_document(fp, &parser, &doc)) {
         fclose(fp);
+        g_hash_table_remove(visited_paths, canonical_path);
+        g_free(canonical_path);
         return NULL;
     }
 
@@ -494,7 +538,7 @@ usb_node_t *yaml_tree_load(const char *path, schema_t *schemas,
                 char *base_path = resolve_extends_path(path, base_ref);
                 if (base_path != NULL) {
                     char *bns = NULL;
-                    usb_node_t *base_tree = yaml_tree_load(base_path, schemas, codecs, &bns);
+                    usb_node_t *base_tree = yaml_tree_load_recursive(base_path, schemas, codecs, &bns, visited_paths);
                     g_free(bns);
                     if (base_tree != NULL) {
                         usb_node_merge(root, base_tree);
@@ -514,5 +558,16 @@ usb_node_t *yaml_tree_load(const char *path, schema_t *schemas,
     yaml_document_delete(&doc);
     yaml_parser_delete(&parser);
     fclose(fp);
+    g_hash_table_remove(visited_paths, canonical_path);
+    g_free(canonical_path);
     return root;
+}
+
+usb_node_t *yaml_tree_load(const char *path, schema_t *schemas,
+                           GHashTable *codecs, char **ns_out)
+{
+    GHashTable *visited_paths = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
+    usb_node_t *tree = yaml_tree_load_recursive(path, schemas, codecs, ns_out, visited_paths);
+    g_hash_table_destroy(visited_paths);
+    return tree;
 }

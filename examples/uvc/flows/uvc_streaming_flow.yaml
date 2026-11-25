@@ -13,9 +13,13 @@ states:
           - respond_with_status: 0
           - transition_state: "streaming"
 
-      # While idle, return NAK on endpoint 0x81
+      # While idle, return NAK on endpoints 0x81 and 0x82
       - match:
           endpoint_poll: 0x81
+        actions:
+          - return_nak_if_queue_empty: true
+      - match:
+          endpoint_poll: 0x82
         actions:
           - return_nak_if_queue_empty: true
 
@@ -30,9 +34,13 @@ states:
           - respond_with_status: 0
           - transition_state: "idle"
 
-      # While streaming, feed sliced MJPEG packets with UVC payload headers
+      # While streaming, feed sliced MJPEG packets with UVC payload headers on 0x82
       - match:
           endpoint_poll: 0x81
+        actions:
+          - return_nak_if_queue_empty: true
+      - match:
+          endpoint_poll: 0x82
         actions:
           - stream_from_file:
               file: "payloads/stream.mjpeg"

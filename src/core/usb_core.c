@@ -209,7 +209,7 @@ static void handle_get_descriptor_fallback(int sock, usb_device_t *dev, int64_t 
 
     if (dev->ops->get_descriptor(dev, dtype, dindex, setup->index,
                                  &desc, &dlen) < 0) {
-        LOG_DEBUG("stall: no descriptor type=0x%02x index=%u", dtype, dindex);
+        LOG_WARN("stall: no descriptor type=0x%02x index=%u", dtype, dindex);
         reply_control(sock, id, setup, 1, NULL, 0, ctx);  /* stall */
         return;
     }

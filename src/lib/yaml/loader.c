@@ -112,6 +112,7 @@ static void dev_entry_free(gpointer p)
         return;
     g_free(e->name);
     g_free(e->flow_path);
+    g_free(e->file);
     usb_node_free(e->tree);
     if (e->flow) { flow_free(e->flow); }
     g_free(e);
@@ -135,6 +136,14 @@ static char *resolve_asset_path(const char *dir, const char *sub, const char *re
         }
         return NULL;
     }
+
+    /* Check directly under dir (e.g. "video.mjpeg", "payloads/video.mjpeg") */
+    path = g_build_filename(dir, ref, NULL);
+    if (g_file_test(path, G_FILE_TEST_EXISTS))
+    {
+        return path;
+    }
+    g_free(path);
 
     if (strchr(ref, '/') || g_str_has_suffix(ref, ".yaml") || g_str_has_suffix(ref, ".yml"))
     {
@@ -263,6 +272,16 @@ static int parse_main(const char *path, yaml_device_t *dev)
     if (parsed_speed >= 0)
         dev->speed = parsed_speed;
 
+    const char *root_file = yaml_scalar(yaml_map_get(&doc, root, "file"));
+    const char *root_loop = yaml_scalar(yaml_map_get(&doc, root, "loop"));
+    char *resolved_file = root_file ? resolve_asset_path(dir, "payloads", root_file) : NULL;
+    gboolean parsed_loop = FALSE;
+    if (root_loop) {
+        parsed_loop = (g_ascii_strcasecmp(root_loop, "true") == 0 ||
+                       g_ascii_strcasecmp(root_loop, "yes") == 0 ||
+                       strcmp(root_loop, "1") == 0);
+    }
+
     /* Top-level `pcap:` — alternate to `devices:`, resolved relative to the
      * project dir like device/flow refs below. */
     g_free(dev->pcap);
@@ -308,12 +327,26 @@ static int parse_main(const char *path, yaml_device_t *dev)
 
             yaml_dev_entry_t *e = g_new0(yaml_dev_entry_t, 1);
             const char *dspeed = yaml_scalar(yaml_map_get(&doc, item, "speed"));
+            const char *efile = yaml_scalar(yaml_map_get(&doc, item, "file"));
+            const char *eloop = yaml_scalar(yaml_map_get(&doc, item, "loop"));
             int item_speed = usb_parse_speed(dspeed);
             e->name      = g_strdup(dref);
             e->flow_path = fref ? resolve_asset_path(dir, "flows", fref) : NULL;
             e->tree      = tree;   /* entry owns it */
             e->flow      = e->flow_path ? flow_load(e->flow_path) : NULL;
             e->speed     = (item_speed >= 0) ? item_speed : dev->speed;
+            if (efile) {
+                e->file = resolve_asset_path(dir, "payloads", efile);
+            } else if (resolved_file) {
+                e->file = g_strdup(resolved_file);
+            }
+            if (eloop) {
+                e->loop = (g_ascii_strcasecmp(eloop, "true") == 0 ||
+                           g_ascii_strcasecmp(eloop, "yes") == 0 ||
+                           strcmp(eloop, "1") == 0);
+            } else {
+                e->loop = parsed_loop;
+            }
             dev->devices = g_list_append(dev->devices, e);
             LOG_DEBUG("[Manifest] device '%s' flow '%s'",
                       dref, fref ? fref : "(none)");
@@ -327,10 +360,17 @@ static int parse_main(const char *path, yaml_device_t *dev)
         yaml_dev_entry_t *first = dev->devices->data;
         dev->tree = first->tree;   /* alias, not owned */
         dev->flow = first->flow;
+        dev->file = first->file;   /* alias, not owned */
+        dev->loop = first->loop;
         if (first->speed >= 0)
             dev->speed = first->speed;
+    } else {
+        dev->file = resolved_file; /* standalone device owns it */
+        dev->loop = parsed_loop;
+        resolved_file = NULL;
     }
 
+    g_free(resolved_file);
     g_free(dir);
     yaml_document_delete(&doc);
     yaml_parser_delete(&parser);
@@ -448,6 +488,8 @@ void yaml_device_free(yaml_device_t *dev)
     g_free(dev->port);
     g_free(dev->record);
     g_free(dev->pcap);
+    if (dev->devices == NULL)
+        g_free(dev->file);
     /* Entries own their trees/flows; dev->tree/flow are just aliases. */
     g_list_free_full(dev->devices, dev_entry_free);
     schema_free(dev->schemas);

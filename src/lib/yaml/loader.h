@@ -35,6 +35,8 @@ yaml_scope_t yaml_scope_from_path(const char *path);
 typedef struct {
     char       *name;       /* device file path from the manifest (identity) */
     char       *flow_path;  /* resolved flows/ path from the manifest, or NULL */
+    char       *file;       /* backing data file (e.g. video.mjpeg, disk.img) */
+    gboolean    loop;       /* whether backing data stream loops */
     usb_node_t *tree;       /* device/config/interface/endpoint descriptor tree */
     void       *flow;       /* Flow* (see flow.h), built from flow_path (TODO) */
     int         speed;      /* speed override (USB_VCR_SPEED_*), or -1 */
@@ -70,6 +72,8 @@ typedef struct {
      * device callers keep working. yaml_backend owns the flow join. */
     usb_node_t *tree;
     void       *flow;
+    char       *file;       /* backing data file (e.g. video.mjpeg, disk.img) */
+    gboolean    loop;       /* whether backing data stream loops */
     int         speed;      /* speed override (USB_VCR_SPEED_*), or -1 */
 } yaml_device_t;
 

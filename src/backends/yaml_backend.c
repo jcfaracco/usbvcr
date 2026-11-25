@@ -12,6 +12,7 @@
 #include "yaml/loader.h"
 #include "usb_node.h"
 #include "flow.h"
+#include "stream/stream_provider.h"
 #include "log.h"
 
 #include <stdlib.h>
@@ -19,6 +20,7 @@
 
 typedef struct {
     yaml_device_t *dev;
+    stream_provider_t *stream;
     GByteArray *desc_buf;    /* scratch for control ($device.*) resolution */
     GHashTable *desc_bufs;   /* descriptor type -> its own GByteArray */
 } yaml_backend_state_t;
@@ -239,6 +241,14 @@ static int yb_control(usb_device_t *dev,
 static int yb_ep_in(usb_device_t *dev, uint8_t ep, uint8_t *buf, size_t cap)
 {
     yaml_backend_state_t *st = dev->state;
+    if (st->stream != NULL)
+    {
+        int n = stream_provider_produce_packet(st->stream, ep, buf, cap);
+        if (n >= 0)
+        {
+            return n;
+        }
+    }
     return flow_ep_in(st->dev->flow, ep, buf, cap);
 }
 
@@ -251,6 +261,10 @@ static int yb_ep_out(usb_device_t *dev, uint8_t ep, const uint8_t *buf, size_t l
 static void yb_tick(usb_device_t *dev)
 {
     yaml_backend_state_t *st = dev->state;
+    if (st->stream != NULL)
+    {
+        stream_provider_tick(st->stream);
+    }
     flow_tick(st->dev->flow);
 }
 
@@ -307,6 +321,10 @@ usb_device_t *yaml_backend_create(const char *path)
     st->desc_buf = g_byte_array_new();
     st->desc_bufs = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                           NULL, (GDestroyNotify)g_byte_array_unref);
+    if (yd->file != NULL)
+    {
+        st->stream = stream_provider_new(yd->file, yd->loop, 0);
+    }
     dev->ops = &yaml_ops;
     dev->state = st;
     return dev;
@@ -324,6 +342,10 @@ void yaml_backend_destroy(usb_device_t *dev)
     st = (yaml_backend_state_t *)dev->state;
     if (st != NULL)
     {
+        if (st->stream != NULL)
+        {
+            stream_provider_free(st->stream);
+        }
         if (st->desc_buf != NULL)
         {
             g_byte_array_unref(st->desc_buf);

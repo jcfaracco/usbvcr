@@ -11,6 +11,7 @@
 #include "yaml/util.h"
 #include "codec.h"
 #include "log.h"
+#include "utils.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -314,9 +315,94 @@ static void build_map(yaml_document_t *doc, yaml_node_t *map,
         yaml_node_t *v = yaml_document_get_node(doc, p->value);
         if (!k || !v || k->type != YAML_SCALAR_NODE)
             continue;
-        build_value(doc, (const char *) k->data.scalar.value, v,
+        const char *key_str = (const char *) k->data.scalar.value;
+        if (depth == 0 && strcmp(key_str, "extends") == 0)
+            continue;
+        build_value(doc, key_str, v,
                     schemas, codecs, out, ns, depth);
     }
+}
+
+static char *resolve_extends_path(const char *current_path, const char *ref)
+{
+    char *dir;
+    char *path;
+    char *filename;
+
+    if (!ref)
+    {
+        return NULL;
+    }
+
+    if (g_path_is_absolute(ref))
+    {
+        if (g_file_test(ref, G_FILE_TEST_EXISTS))
+        {
+            return g_strdup(ref);
+        }
+        return NULL;
+    }
+
+    dir = g_path_get_dirname(current_path);
+
+    if (strchr(ref, '/') || g_str_has_suffix(ref, ".yaml") || g_str_has_suffix(ref, ".yml"))
+    {
+        path = g_build_filename(dir, ref, NULL);
+        if (g_file_test(path, G_FILE_TEST_EXISTS))
+        {
+            g_free(dir);
+            return path;
+        }
+        g_free(path);
+
+        /* Try directly under datadir */
+        path = usbvcr_find_data_file(NULL, ref);
+        if (path != NULL)
+        {
+            g_free(dir);
+            return path;
+        }
+
+        /* Try under datadir/devices if ref starts with devices/ */
+        if (g_str_has_prefix(ref, "devices/") && ref[7] != '\0')
+        {
+            path = usbvcr_find_data_file("devices", ref + 8);
+            if (path != NULL)
+            {
+                g_free(dir);
+                return path;
+            }
+        }
+
+        g_free(dir);
+        return NULL;
+    }
+
+    /* Bare ID (e.g. "keyboard", "mouse"): check local <dir>/devices/<ref>.yaml first */
+    filename = g_strdup_printf("%s.yaml", ref);
+    path = g_build_filename(dir, "devices", filename, NULL);
+    if (g_file_test(path, G_FILE_TEST_EXISTS))
+    {
+        g_free(dir);
+        g_free(filename);
+        return path;
+    }
+    g_free(path);
+
+    /* Check local <dir>/<ref>.yaml */
+    path = g_build_filename(dir, filename, NULL);
+    if (g_file_test(path, G_FILE_TEST_EXISTS))
+    {
+        g_free(dir);
+        g_free(filename);
+        return path;
+    }
+    g_free(path);
+    g_free(dir);
+    g_free(filename);
+
+    /* Fallback to datadir/devices/<ref>.yaml */
+    return usbvcr_find_data_file("devices", ref);
 }
 
 /* Reject oversized input before handing it to libyaml (bounds memory even
@@ -357,7 +443,13 @@ static gboolean yaml_parse_document(FILE *fp, yaml_parser_t *parser, yaml_docume
 usb_node_t *yaml_tree_load(const char *path, schema_t *schemas,
                            GHashTable *codecs, char **ns_out)
 {
-    FILE *fp = fopen(path, "r");
+    FILE *fp;
+    yaml_parser_t parser;
+    yaml_document_t doc;
+    usb_node_t *root;
+    yaml_node_t *top;
+
+    fp = fopen(path, "r");
     if (!fp) {
         LOG_ERR("Unable to open file '%s'", path);
         return NULL;
@@ -368,17 +460,37 @@ usb_node_t *yaml_tree_load(const char *path, schema_t *schemas,
         return NULL;
     }
 
-    yaml_parser_t parser;
-    yaml_document_t doc;
     if (!yaml_parse_document(fp, &parser, &doc)) {
         fclose(fp);
         return NULL;
     }
 
-    usb_node_t *root = usb_node_create();
-    yaml_node_t *top = yaml_document_get_root_node(&doc);
-    if (top)
+    root = usb_node_create();
+    top = yaml_document_get_root_node(&doc);
+    if (top) {
+        if (top->type == YAML_MAPPING_NODE) {
+            yaml_node_t *ext_node = yaml_map_get(&doc, top, "extends");
+            if (ext_node && ext_node->type == YAML_SCALAR_NODE) {
+                const char *base_ref = yaml_scalar(ext_node);
+                char *base_path = resolve_extends_path(path, base_ref);
+                if (base_path != NULL) {
+                    char *bns = NULL;
+                    usb_node_t *base_tree = yaml_tree_load(base_path, schemas, codecs, &bns);
+                    g_free(bns);
+                    if (base_tree != NULL) {
+                        usb_node_merge(root, base_tree);
+                        usb_node_free(base_tree);
+                    } else {
+                        LOG_WARN("yaml_tree: could not load base device '%s'", base_path);
+                    }
+                    g_free(base_path);
+                } else {
+                    LOG_WARN("yaml_tree: cannot resolve extends '%s'", base_ref);
+                }
+            }
+        }
         build_map(&doc, top, schemas, codecs, root, ns_out, 0);
+    }
 
     yaml_document_delete(&doc);
     yaml_parser_delete(&parser);

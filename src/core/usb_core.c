@@ -252,6 +252,22 @@ static void handle_control(int sock, usb_device_t *dev, int64_t id,
         return;
     }
 
+    if (setup.request == USB_REQ_GET_STATUS) {
+        uint8_t status_bytes[2] = {0, 0};
+        if ((setup.requesttype & 0x1f) == 0x00) {
+            status_bytes[0] = 0x01; /* Bit 0: Self Powered */
+        }
+        uint16_t n = 2;
+        if (n > setup.length) n = setup.length;
+        reply_control(sock, id, &setup, 0, status_bytes, n, ctx);
+        return;
+    }
+
+    if (setup.request == USB_REQ_CLEAR_FEATURE || setup.request == USB_REQ_SET_FEATURE) {
+        reply_control(sock, id, &setup, 0, NULL, 0, ctx);
+        return;
+    }
+
     LOG_DEBUG("stall: unhandled control req=0x%02x type=0x%02x",
               setup.request, setup.requesttype);
     reply_control(sock, id, &setup, 1, NULL, 0, ctx);  /* stall */
@@ -306,9 +322,9 @@ static void push_iso_packets(int sock, usb_device_t *dev, uint8_t ep,
     if (!dev->ops->ep_in)
         return;
 
-    /* Push available packets up to a reasonable burst.
+    /* Push up to 2 packets per 10ms tick (~30 fps for 640x480 MJPEG).
      * High-speed isochronous endpoints use at most 1023 bytes per packet. */
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < 2; i++) {
         uint8_t data[1023];
         int n = dev->ops->ep_in(dev, ep, data, sizeof(data));
         if (n <= 0)

@@ -52,8 +52,8 @@ int connect_to_server(const char *host, const char *port)
         return -1;
     }
 
-    /* Receive timeout so we don't block forever */
-    struct timeval timeout = {5, 0};
+    /* Receive timeout so we don't block forever and can tick periodic streaming */
+    struct timeval timeout = {0, 10000}; /* 10ms for smooth streaming and ticks */
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     if (connect(sock, res->ai_addr, res->ai_addrlen) < 0) {

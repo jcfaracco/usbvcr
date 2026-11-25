@@ -300,6 +300,43 @@ static void poll_interrupt_endpoints(int sock, usb_device_t *dev,
     }
 }
 
+static void push_iso_packets(int sock, usb_device_t *dev, uint8_t ep,
+                             const usb_record_ctx_t *ctx)
+{
+    if (!dev->ops->ep_in)
+        return;
+
+    /* Push available packets up to a reasonable burst */
+    for (int i = 0; i < 16; i++) {
+        uint8_t data[USB_VCR_BUF_SIZE];
+        int n = dev->ops->ep_in(dev, ep, data, sizeof(data));
+        if (n <= 0)
+            break;
+
+        uint8_t buf[USB_VCR_BUF_SIZE];
+        usb_iso_packet_header_t h = { ep, 0, (uint16_t)n };
+        memcpy(buf, &h, sizeof(h));
+        memcpy(buf + sizeof(h), data, (size_t)n);
+
+        if (usb_conn_send(sock, RT_ISO_PACKET, 0, buf, sizeof(h) + n, ctx) < 0)
+            break;
+        LOG_OUT("iso packet on ep 0x%02x (%d bytes)", ep, n);
+    }
+}
+
+static void poll_iso_endpoints(int sock, usb_device_t *dev,
+                               const bool *active,
+                               const usb_record_ctx_t *ctx)
+{
+    for (int i = 0; i < 32; i++) {
+        if (!active[i])
+            continue;
+        /* Reverse of usb_ep_index: reconstruct bEndpointAddress. */
+        uint8_t ep = (i & 0x0f) | ((i & 0x10) << 3);
+        push_iso_packets(sock, dev, ep, ctx);
+    }
+}
+
 /* ------------------------------------------------------------------ *
  * Standalone configuration / interface requests                       *
  * ------------------------------------------------------------------ */
@@ -367,6 +404,48 @@ static void handle_set_alt_setting(int sock, usb_device_t *dev, int64_t id,
                  (uint8_t *)&rstatus, sizeof(rstatus), ctx);
 }
 
+static void handle_start_iso_stream(int sock, int64_t id,
+                                    const uint8_t *payload, size_t len,
+                                    bool *iso_ep_active,
+                                    const usb_record_ctx_t *ctx)
+{
+    uint8_t ep = 0;
+    if (len >= 1)
+        ep = payload[0];
+
+    LOG_DEBUG("start iso stream on ep 0x%02x", ep);
+    if (ep)
+        iso_ep_active[usb_ep_index(ep)] = true;
+
+    usb_iso_stream_status_header_t rstatus = {
+        .status   = 0,
+        .endpoint = ep,
+    };
+    usb_conn_send(sock, RT_ISO_STREAM_STATUS, id,
+                  (uint8_t *)&rstatus, sizeof(rstatus), ctx);
+}
+
+static void handle_stop_iso_stream(int sock, int64_t id,
+                                   const uint8_t *payload, size_t len,
+                                   bool *iso_ep_active,
+                                   const usb_record_ctx_t *ctx)
+{
+    uint8_t ep = 0;
+    if (len >= 1)
+        ep = payload[0];
+
+    LOG_DEBUG("stop iso stream on ep 0x%02x", ep);
+    if (ep)
+        iso_ep_active[usb_ep_index(ep)] = false;
+
+    usb_iso_stream_status_header_t rstatus = {
+        .status   = 0,
+        .endpoint = ep,
+    };
+    usb_conn_send(sock, RT_ISO_STREAM_STATUS, id,
+                  (uint8_t *)&rstatus, sizeof(rstatus), ctx);
+}
+
 /* ------------------------------------------------------------------ *
  * Main dispatch loop                                                  *
  * ------------------------------------------------------------------ */
@@ -374,7 +453,8 @@ static void handle_set_alt_setting(int sock, usb_device_t *dev, int64_t id,
 /* Dispatch one received, non-idle packet to its handler. */
 static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr,
                             const uint8_t *payload, size_t len,
-                            bool *int_ep_active, const usb_record_ctx_t *ctx)
+                            bool *int_ep_active, bool *iso_ep_active,
+                            const usb_record_ctx_t *ctx)
 {
     switch (hdr->type) {
     case RT_CONTROL_PACKET:
@@ -387,6 +467,14 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
 
     case RT_SET_ALT_SETTING:
         handle_set_alt_setting(sock, dev, hdr->id, payload, len, ctx);
+        break;
+
+    case RT_START_ISO_STREAM:
+        handle_start_iso_stream(sock, hdr->id, payload, len, iso_ep_active, ctx);
+        break;
+
+    case RT_STOP_ISO_STREAM:
+        handle_stop_iso_stream(sock, hdr->id, payload, len, iso_ep_active, ctx);
         break;
 
     case RT_START_INTERRUPT_RECEIVING:
@@ -427,6 +515,7 @@ int usb_core_run(int sock, usb_device_t *dev)
     size_t len;
     uint32_t caps;
     bool int_ep_active[32] = {false};
+    bool iso_ep_active[32] = {false};
 
     /* Build recording context. bus=0 and device=1 are reasonable defaults for
      * an emulated device; the USB device descriptor carries no bus/devnum. */
@@ -446,11 +535,12 @@ int usb_core_run(int sock, usb_device_t *dev)
         if (rc < 0)
             break;              /* EOF / hard error: peer gone */
         if (rc == 0)            /* got a request: rc == 1 means idle */
-            dispatch_packet(sock, dev, &hdr, payload, len, int_ep_active, &ctx);
+            dispatch_packet(sock, dev, &hdr, payload, len, int_ep_active, iso_ep_active, &ctx);
 
         if (dev->ops->tick)
             dev->ops->tick(dev);
         poll_interrupt_endpoints(sock, dev, int_ep_active, &ctx);
+        poll_iso_endpoints(sock, dev, iso_ep_active, &ctx);
     }
 
     return 0;

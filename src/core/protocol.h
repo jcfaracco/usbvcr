@@ -36,6 +36,9 @@ enum {
     RT_SET_ALT_SETTING          = 9,
     RT_GET_ALT_SETTING          = 10,
     RT_ALT_SETTING_STATUS       = 11,
+    RT_START_ISO_STREAM         = 12,
+    RT_STOP_ISO_STREAM          = 13,
+    RT_ISO_STREAM_STATUS        = 14,
     RT_START_INTERRUPT_RECEIVING = 15,
     RT_STOP_INTERRUPT_RECEIVING  = 16,
     RT_CONTROL_PACKET           = 100,
@@ -182,6 +185,31 @@ typedef struct {
     uint8_t  status;
     uint16_t length;
 } usb_interrupt_packet_header_t;
+
+/* RT_START_ISO_STREAM payload */
+typedef struct {
+    uint8_t endpoint;
+    uint8_t pkts_per_urb;
+    uint8_t no_urbs;
+} usb_start_iso_stream_header_t;
+
+/* RT_STOP_ISO_STREAM payload */
+typedef struct {
+    uint8_t endpoint;
+} usb_stop_iso_stream_header_t;
+
+/* RT_ISO_STREAM_STATUS reply payload */
+typedef struct {
+    uint8_t status;      /* 0 = success */
+    uint8_t endpoint;
+} usb_iso_stream_status_header_t;
+
+/* RT_ISO_PACKET header, followed by stream data */
+typedef struct {
+    uint8_t  endpoint;
+    uint8_t  status;
+    uint16_t length;
+} usb_iso_packet_header_t;
 
 #pragma pack(pop)
 

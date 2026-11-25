@@ -13,7 +13,7 @@ if check_dep.found()
       '../src/lib/utils.c',
     ),
     include_directories : [lib],
-    dependencies : [check_dep],
+    dependencies : [check_dep, glib_dep],
   )
   test('version', test_version)
 
@@ -24,7 +24,7 @@ if check_dep.found()
       '../src/lib/utils.c',
     ),
     include_directories : [lib],
-    dependencies : [check_dep],
+    dependencies : [check_dep, glib_dep],
   )
   test('utils', test_utils)
 

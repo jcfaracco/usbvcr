@@ -171,6 +171,84 @@ START_TEST(test_parse_from_file_connection)
 }
 END_TEST
 
+START_TEST(test_bare_id_resolution)
+{
+    g_autofree char *dir = g_dir_make_tmp("usbvcr-test-bare-XXXXXX", NULL);
+    g_autofree char *path = g_build_filename(dir, "project.yaml", NULL);
+    ck_assert(g_file_set_contents(path,
+        "version: \"1.0\"\n"
+        "name: \"bare-id-test\"\n"
+        "devices:\n"
+        "  - device: keyboard\n"
+        "    flow: enumeration_flow\n",
+        -1, NULL));
+
+    yaml_device_t *dev = yaml_parse_from_file(path);
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_str_eq(dev->name, "bare-id-test");
+    ck_assert_int_eq(g_list_length(dev->devices), 1);
+    ck_assert_ptr_nonnull(dev->tree);
+    yaml_device_free(dev);
+
+    g_remove(path);
+    g_rmdir(dir);
+}
+END_TEST
+
+START_TEST(test_extends_device)
+{
+    g_autofree char *dir = g_dir_make_tmp("usbvcr-test-extends-XXXXXX", NULL);
+    g_autofree char *dev_path = g_build_filename(dir, "custom_kbd.yaml", NULL);
+    g_autofree char *proj_path = g_build_filename(dir, "project.yaml", NULL);
+
+    ck_assert(g_file_set_contents(dev_path,
+        "extends: keyboard\n"
+        "device_descriptor:\n"
+        "  idVendor: 0x1234\n"
+        "  idProduct: 0x5678\n",
+        -1, NULL));
+
+    ck_assert(g_file_set_contents(proj_path,
+        "version: \"1.0\"\n"
+        "name: \"extends-test\"\n"
+        "devices:\n"
+        "  - device: \"custom_kbd.yaml\"\n"
+        "    flow: enumeration_flow\n",
+        -1, NULL));
+
+    yaml_device_t *dev = yaml_parse_from_file(proj_path);
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_ptr_nonnull(dev->tree);
+
+    /* Verify overridden vendor and product IDs */
+    usb_prop_t *p_desc = NULL;
+    for (GList *l = dev->tree->props; l; l = l->next) {
+        usb_prop_t *p = l->data;
+        if (strcmp(p->name, "device_descriptor") == 0) {
+            p_desc = p;
+            break;
+        }
+    }
+    ck_assert_ptr_nonnull(p_desc);
+    ck_assert_int_eq(p_desc->type, USB_PROP_NODE);
+
+    uint16_t vid = 0, pid = 0;
+    for (GList *l = p_desc->val.node->props; l; l = l->next) {
+        usb_prop_t *p = l->data;
+        if (strcmp(p->name, "idVendor") == 0) vid = p->val.u16;
+        if (strcmp(p->name, "idProduct") == 0) pid = p->val.u16;
+    }
+    ck_assert_int_eq(vid, 0x1234);
+    ck_assert_int_eq(pid, 0x5678);
+
+    yaml_device_free(dev);
+
+    g_remove(dev_path);
+    g_remove(proj_path);
+    g_rmdir(dir);
+}
+END_TEST
+
 static Suite *yaml_loader_suite(void)
 {
     Suite *s = suite_create("yaml_loader");
@@ -192,6 +270,8 @@ static Suite *yaml_loader_suite(void)
     tcase_add_test(tc_load, test_parse_from_file_no_name);
     tcase_add_test(tc_load, test_parse_from_file_no_connection);
     tcase_add_test(tc_load, test_parse_from_file_connection);
+    tcase_add_test(tc_load, test_bare_id_resolution);
+    tcase_add_test(tc_load, test_extends_device);
     suite_add_tcase(s, tc_load);
 
     return s;

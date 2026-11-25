@@ -104,10 +104,10 @@ static const usb_device_ops_t fuzz_ops = {
 
 usb_device_t *fuzz_wrap(usb_device_t *base, const fuzz_cfg_t *cfg)
 {
-    usb_device_t *dev = g_new(usb_device_t, 1);
-    fuzz_state_t *fs = g_new(fuzz_state_t, 1);
+    usb_device_t *dev = g_new0(usb_device_t, 1);
+    fuzz_state_t *fs = g_new0(fuzz_state_t, 1);
     if (!dev || !fs) {
-        free(dev); free(fs);
+        g_free(dev); g_free(fs);
         LOG_ERR("fuzz_wrap: out of memory");
         return NULL;
     }

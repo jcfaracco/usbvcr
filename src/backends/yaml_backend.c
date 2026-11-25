@@ -309,8 +309,8 @@ usb_device_t *yaml_backend_create(const char *path)
         return NULL;
     }
 
-    yaml_backend_state_t *st = g_new(yaml_backend_state_t, 1);
-    usb_device_t *dev = g_new(usb_device_t, 1);
+    yaml_backend_state_t *st = g_new0(yaml_backend_state_t, 1);
+    usb_device_t *dev = g_new0(usb_device_t, 1);
     if (!st || !dev) {
         g_free(st);
         g_free(dev);

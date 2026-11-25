@@ -69,6 +69,7 @@ int desc_parse_config(const uint8_t *cfg, size_t len,
 {
     memset(ii, 0, sizeof(*ii));
     memset(ei, 0, sizeof(*ei));
+    memset(ei->type, 255, sizeof(ei->type)); /* 255 = usb_redir_type_invalid */
 
     uint8_t cur_iface = 0;   /* interface owning the endpoints we see */
     size_t offset = 0;
@@ -88,6 +89,9 @@ int desc_parse_config(const uint8_t *cfg, size_t len,
         }
 
         switch (btype) {
+            case USB_DESC_CONFIG:
+                /* Configuration descriptor header - skip */
+                break;
             case USB_DESC_INTERFACE:
                if (blen < 9) {
                    LOG_WARN("descriptor: INTERFACE at offset %zu has bLength=%u (expected >= 9), skipping",

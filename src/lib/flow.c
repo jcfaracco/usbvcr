@@ -3,6 +3,7 @@
 #include "log.h"
 #include "utils.h"
 #include "stream/stream_provider.h"
+#include "storage/disk_provider.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -25,7 +26,8 @@ typedef enum {
     ACT_TRANSITION_STATE,
     ACT_RETURN_NAK_IF_QUEUE_EMPTY,
     ACT_QUEUE_ENDPOINT_DATA,
-    ACT_STREAM_FROM_FILE
+    ACT_STREAM_FROM_FILE,
+    ACT_DISK_FROM_FILE
 } flow_action_type_t;
 
 typedef struct {
@@ -40,6 +42,8 @@ typedef struct {
     char *stream_file;
     gboolean stream_loop;
     stream_provider_t *stream_provider;
+    char *disk_file;
+    disk_provider_t *disk_provider;
 } flow_action_t;
 
 typedef struct {
@@ -71,9 +75,13 @@ static void flow_action_free(flow_action_t *act) {
         g_byte_array_unref(act->respond_bytes);
     g_free(act->transition_state);
     g_free(act->stream_file);
+    g_free(act->disk_file);
 
     if (act->stream_provider)
         stream_provider_free(act->stream_provider);
+
+    if (act->disk_provider)
+        disk_provider_free(act->disk_provider);
 
     if (act->payloads)
         g_queue_free_full(act->payloads, (GDestroyNotify)g_byte_array_unref);
@@ -292,6 +300,45 @@ static flow_action_t *parse_stream_action(yaml_document_t *doc, yaml_node_t *v, 
     return a;
 }
 
+static flow_action_t *parse_disk_action(yaml_document_t *doc, yaml_node_t *v, uint8_t ep_hint,
+                                        const char *flow_dir, const char *base_dir)
+{
+    flow_action_t *a = g_new0(flow_action_t, 1);
+    const char *file_str = NULL;
+    uint8_t ep_in = 0x81;
+    uint8_t ep_out = (ep_hint != 0) ? ep_hint : 0x02;
+
+    a->type = ACT_DISK_FROM_FILE;
+    a->ep = ep_hint;
+
+    if (v->type == YAML_MAPPING_NODE) {
+        yaml_node_t *fn = yaml_map_get(doc, v, "file");
+        yaml_node_t *ein = yaml_map_get(doc, v, "endpoint_in");
+        yaml_node_t *eout = yaml_map_get(doc, v, "endpoint_out");
+        if (fn != NULL)
+            file_str = yaml_scalar(fn);
+        if (ein != NULL) {
+            const char *s = yaml_scalar(ein);
+            if (s) ep_in = (uint8_t)strtoul(s, NULL, 0);
+        }
+        if (eout != NULL) {
+            const char *s = yaml_scalar(eout);
+            if (s) ep_out = (uint8_t)strtoul(s, NULL, 0);
+        }
+    } else if (v->type == YAML_SCALAR_NODE) {
+        file_str = yaml_scalar(v);
+    }
+
+    if (file_str != NULL) {
+        char *resolved = resolve_flow_asset(base_dir, flow_dir, file_str);
+        a->disk_file = g_strdup(file_str);
+        a->disk_provider = disk_provider_new(resolved, ep_in, ep_out);
+        g_free(resolved);
+    }
+
+    return a;
+}
+
 static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq, uint8_t ep_hint,
                             const char *flow_dir, const char *base_dir) {
     GList *list = NULL;
@@ -330,6 +377,9 @@ static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq, uint8_t ep_h
         } else if ((v = yaml_map_get(doc, item, "stream_from_file")) ||
                    (v = yaml_map_get(doc, item, "stream"))) {
             a = parse_stream_action(doc, v, ep_hint, flow_dir, base_dir);
+        } else if ((v = yaml_map_get(doc, item, "disk_from_file")) ||
+                   (v = yaml_map_get(doc, item, "attach_disk"))) {
+            a = parse_disk_action(doc, v, ep_hint, flow_dir, base_dir);
         }
 
         if (a && a->type == ACT_STREAM_FROM_FILE && (v = yaml_map_get(doc, item, "loop"))) {
@@ -446,7 +496,8 @@ flow_t *flow_load_with_dir(const char *path, const char *base_dir) {
     return f;
 }
 
-static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t *len, int *handled) {
+static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t *len,
+                            const uint8_t *ep_buf, size_t ep_len, int *handled) {
     for (GList *l = actions; l; l = l->next) {
         flow_action_t *a = l->data;
         switch (a->type) {
@@ -505,6 +556,18 @@ static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t
                 break;
             case ACT_STREAM_FROM_FILE:
                 break;
+            case ACT_DISK_FROM_FILE:
+                if (a->disk_provider != NULL && ep_buf != NULL && ep_len > 0) {
+                    uint8_t in_ep = disk_provider_get_ep_in(a->disk_provider);
+                    GQueue *q = g_hash_table_lookup(flow->ep_queues, GUINT_TO_POINTER((guint)in_ep));
+                    if (!q) {
+                        q = g_queue_new();
+                        g_hash_table_insert(flow->ep_queues, GUINT_TO_POINTER((guint)in_ep), q);
+                    }
+                    disk_provider_handle_out(a->disk_provider, ep_buf, ep_len, q);
+                    if (handled) *handled = 1;
+                }
+                break;
         }
     }
 }
@@ -532,7 +595,7 @@ int flow_control(flow_t *flow, const uint8_t *setup,
         
         if (match) {
             int handled = 0;
-            execute_actions(flow, r->actions, out, len, &handled);
+            execute_actions(flow, r->actions, out, len, NULL, 0, &handled);
             if (handled) return 0;
         }
     }
@@ -557,19 +620,25 @@ int flow_ep_in(flow_t *flow, uint8_t ep, uint8_t *buf, size_t cap)
                         }
                     }
                 }
-                execute_actions(flow, r->actions, NULL, NULL, NULL);
+                execute_actions(flow, r->actions, NULL, NULL, NULL, 0, NULL);
             }
         }
     }
 
     GQueue *q = g_hash_table_lookup(flow->ep_queues, GUINT_TO_POINTER((guint)ep));
     if (q && !g_queue_is_empty(q)) {
-        GByteArray *arr = g_queue_pop_head(q);
-        size_t len = arr->len;
-        if (len > cap) len = cap;
-        memcpy(buf, arr->data, len);
-        g_byte_array_unref(arr);
-        return len;
+        GByteArray *arr = g_queue_peek_head(q);
+        if (arr->len <= cap) {
+            g_queue_pop_head(q);
+            size_t len = arr->len;
+            memcpy(buf, arr->data, len);
+            g_byte_array_unref(arr);
+            return (int)len;
+        } else {
+            memcpy(buf, arr->data, cap);
+            g_byte_array_remove_range(arr, 0, (guint)cap);
+            return (int)cap;
+        }
     }
     
     return 0; // NAK
@@ -615,7 +684,7 @@ int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
                         continue;
                 }
                 int handled = 0;
-                execute_actions(flow, r->actions, NULL, NULL, &handled);
+                execute_actions(flow, r->actions, NULL, NULL, buf, len, &handled);
             }
         }
     }
@@ -650,7 +719,7 @@ void flow_tick(flow_t *flow)
         
         flow_state_t *st = g_hash_table_lookup(flow->states, flow->state);
         if (st && st->on_enter) {
-            execute_actions(flow, st->on_enter, NULL, NULL, NULL);
+            execute_actions(flow, st->on_enter, NULL, NULL, NULL, 0, NULL);
         }
     }
 }

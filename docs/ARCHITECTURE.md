@@ -110,6 +110,7 @@ src/lib/            # pure: no socket/engine deps
   flow.{c,h}          # states, rules, match, actions, transitions, when: eval, endpoint queues
   stream_provider.{c,h} # packet-sliced streaming provider (e.g. UVC video over isochronous EPs)
   video_parser.{c,h}  # container-agnostic video frame parser (e.g. Motion-JPEG)
+  disk_provider.{c,h} # SCSI transparent command set (SPC/SBC) disk provider for MSC BOT
   log.{c,h} utils.{c,h}
   pcap/               # pcap record/replay (pcap.{c,h}, record.{c,h})
 
@@ -141,7 +142,7 @@ of YAML; `backends` bridges. Keeps `fuzz_wrap` working for free.
   `respond_with_status`.
 - `ep_in` — drain current state's `queue_endpoint_data` or produce stream
   packets via `stream_provider` when configured with `stream_from_file`.
-- `ep_out` — feed OUT data to flow (e.g. keyboard LEDs).
+- `ep_out` — feed OUT data to flow (e.g. keyboard LEDs, or SCSI CBWs dispatched to `disk_provider` via `disk_from_file`).
 - `tick` — run `on_enter`, advance transitions.
 - `state` — current flow state + per-endpoint queues.
 

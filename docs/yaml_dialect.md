@@ -188,6 +188,7 @@ Actions:
 | `queue_endpoint_data` | queue `payloads` (list of `hex:`) to an `endpoint:` |
 | `return_nak_if_queue_empty` | NAK polls when the endpoint queue is drained |
 | `stream_from_file` | stream periodic video or isochronous/bulk packets from a file (e.g. `{ file: "payloads/stream.mjpeg", loop: true }`) |
+| `disk_from_file` | attach backing storage image for USB Mass Storage (SCSI over Bulk-Only Transport) (e.g. `{ file: "payloads/disk.img" }`) |
 
 ```yaml
 states:

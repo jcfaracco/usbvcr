@@ -7,7 +7,8 @@ This example demonstrates how to emulate a USB Mass Storage Class (MSC) flash dr
 
 - `project.yaml`: Project manifest specifying connection and devices.
 - `devices/msc_disk.yaml`: Device descriptor, MSC interface descriptor (Class `0x08`, Subclass `0x06`, Protocol `0x50`), Bulk IN endpoint `0x81`, and Bulk OUT endpoint `0x02`.
-- `flows/msc_flow.yaml`: State machine handling enumeration and Bulk-Only Transport class requests (`GET_MAX_LUN`, `BOT Reset`).
+- `flows/msc_flow.yaml`: State machine handling enumeration and Bulk-Only Transport class requests (`GET_MAX_LUN`, `BOT Reset`), with `disk_from_file` attaching `payloads/disk.img`.
+- `payloads/disk.img`: 10 MiB disk image formatted with an MBR partition table and FAT16 filesystem containing `HELLO.TXT`.
 
 ## Features
 
@@ -47,4 +48,7 @@ qemu-system-x86_64 \
 ```bash
 lsusb -v -d 0781:5567
 dmesg | grep -i "usb-storage"
+sudo fdisk -l /dev/sdb
+sudo mkdir -p /mnt/usb && sudo mount /dev/sdb1 /mnt/usb
+cat /mnt/usb/HELLO.TXT
 ```

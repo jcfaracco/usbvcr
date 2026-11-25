@@ -539,9 +539,12 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
                 uint8_t resp[sizeof(usb_bulk_packet_header_t) + USB_VCR_BUF_SIZE];
                 usb_bulk_packet_header_t rh = bh;
                 int n = 0;
+                size_t req_len = (size_t)bh.length | ((size_t)bh.length_high << 16);
+                if (req_len == 0 || req_len > sizeof(in_buf))
+                    req_len = sizeof(in_buf);
 
                 if (dev->ops->ep_in) {
-                    n = dev->ops->ep_in(dev, ep, in_buf, sizeof(in_buf));
+                    n = dev->ops->ep_in(dev, ep, in_buf, req_len);
                     if (n < 0) n = 0;
                 }
 
@@ -561,8 +564,8 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
                 /* ACK bulk OUT completion */
                 usb_bulk_packet_header_t rh = bh;
                 rh.status = 0; /* usb_redir_success */
-                rh.length = 0;
-                rh.length_high = 0;
+                rh.length = bh.length;
+                rh.length_high = bh.length_high;
                 usb_conn_send(sock, RT_BULK_PACKET, hdr->id, &rh, sizeof(rh), ctx);
             }
         }

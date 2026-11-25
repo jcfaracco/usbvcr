@@ -189,6 +189,32 @@ START_TEST(test_find_data_file)
 }
 END_TEST
 
+/* ── usb_parse_speed ── */
+
+START_TEST(test_usb_parse_speed)
+{
+    ck_assert_int_eq(usb_parse_speed("low"), USB_VCR_SPEED_LOW);
+    ck_assert_int_eq(usb_parse_speed("Low"), USB_VCR_SPEED_LOW);
+    ck_assert_int_eq(usb_parse_speed("0"), USB_VCR_SPEED_LOW);
+
+    ck_assert_int_eq(usb_parse_speed("full"), USB_VCR_SPEED_FULL);
+    ck_assert_int_eq(usb_parse_speed("FULL"), USB_VCR_SPEED_FULL);
+    ck_assert_int_eq(usb_parse_speed("1"), USB_VCR_SPEED_FULL);
+
+    ck_assert_int_eq(usb_parse_speed("high"), USB_VCR_SPEED_HIGH);
+    ck_assert_int_eq(usb_parse_speed("High"), USB_VCR_SPEED_HIGH);
+    ck_assert_int_eq(usb_parse_speed("2"), USB_VCR_SPEED_HIGH);
+
+    ck_assert_int_eq(usb_parse_speed("super"), USB_VCR_SPEED_SUPER);
+    ck_assert_int_eq(usb_parse_speed("SuperSpeed"), USB_VCR_SPEED_SUPER);
+    ck_assert_int_eq(usb_parse_speed("3"), USB_VCR_SPEED_SUPER);
+
+    ck_assert_int_eq(usb_parse_speed(NULL), -1);
+    ck_assert_int_eq(usb_parse_speed("invalid"), -1);
+    ck_assert_int_eq(usb_parse_speed(""), -1);
+}
+END_TEST
+
 static Suite *utils_suite(void)
 {
     Suite *s = suite_create("utils");
@@ -224,6 +250,7 @@ static Suite *utils_suite(void)
     TCase *tc_data = tcase_create("data_discovery");
     tcase_add_test(tc_data, test_data_dir_lookup);
     tcase_add_test(tc_data, test_find_data_file);
+    tcase_add_test(tc_data, test_usb_parse_speed);
     suite_add_tcase(s, tc_data);
 
     return s;

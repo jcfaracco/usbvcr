@@ -12,6 +12,7 @@
 #include <glib/gstdio.h>
 
 #include "yaml/loader.h"
+#include "utils.h"
 
 /* meson passes -DTEST_DATA_DIR="<srcdir>/data"; fall back for ad-hoc builds. */
 #ifndef TEST_DATA_DIR
@@ -249,6 +250,34 @@ START_TEST(test_extends_device)
 }
 END_TEST
 
+START_TEST(test_parse_speed)
+{
+    g_autofree char *dir = g_dir_make_tmp("usbvcr-test-speed-XXXXXX", NULL);
+    g_autofree char *path = g_build_filename(dir, "project.yaml", NULL);
+
+    ck_assert(g_file_set_contents(path,
+        "version: \"1.0\"\n"
+        "name: \"speed-test\"\n"
+        "connection:\n"
+        "  speed: high\n"
+        "devices:\n"
+        "  - device: keyboard\n"
+        "    speed: full\n",
+        -1, NULL));
+
+    yaml_device_t *dev = yaml_parse_from_file(path);
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_int_eq(dev->speed, USB_VCR_SPEED_FULL);
+
+    yaml_dev_entry_t *entry = dev->devices->data;
+    ck_assert_int_eq(entry->speed, USB_VCR_SPEED_FULL);
+
+    yaml_device_free(dev);
+    g_remove(path);
+    g_rmdir(dir);
+}
+END_TEST
+
 static Suite *yaml_loader_suite(void)
 {
     Suite *s = suite_create("yaml_loader");
@@ -272,6 +301,7 @@ static Suite *yaml_loader_suite(void)
     tcase_add_test(tc_load, test_parse_from_file_connection);
     tcase_add_test(tc_load, test_bare_id_resolution);
     tcase_add_test(tc_load, test_extends_device);
+    tcase_add_test(tc_load, test_parse_speed);
     suite_add_tcase(s, tc_load);
 
     return s;

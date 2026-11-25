@@ -66,6 +66,107 @@ START_TEST(test_flow_free_null)
 }
 END_TEST
 
+START_TEST(test_flow_stream_from_file_state_machine)
+{
+    char *tmpdir = g_dir_make_tmp("test_flow_XXXXXX", NULL);
+    ck_assert_ptr_nonnull(tmpdir);
+
+    char *mjpeg_path = g_build_filename(tmpdir, "stream.mjpeg", NULL);
+    char *flow_path = g_build_filename(tmpdir, "flow.yaml", NULL);
+
+    /* 6-byte synthetic JPEG frame */
+    static const uint8_t frame_data[] = { 0xFF, 0xD8, 0xAA, 0xBB, 0xFF, 0xD9 };
+    g_file_set_contents(mjpeg_path, (const char *)frame_data, sizeof(frame_data), NULL);
+
+    char *flow_yaml = g_strdup_printf(
+        "version: \"1.0\"\n"
+        "states:\n"
+        "  - name: \"idle\"\n"
+        "    rules:\n"
+        "      - match:\n"
+        "          bmRequestType: 0x01\n"
+        "          bRequest: 0x0B\n"
+        "          wValue: 0x0001\n"
+        "        actions:\n"
+        "          - respond_with_status: 0\n"
+        "          - transition_state: \"streaming\"\n"
+        "      - match:\n"
+        "          endpoint_poll: 0x81\n"
+        "        actions:\n"
+        "          - return_nak_if_queue_empty: true\n"
+        "  - name: \"streaming\"\n"
+        "    rules:\n"
+        "      - match:\n"
+        "          bmRequestType: 0x01\n"
+        "          bRequest: 0x0B\n"
+        "          wValue: 0x0000\n"
+        "        actions:\n"
+        "          - respond_with_status: 0\n"
+        "          - transition_state: \"idle\"\n"
+        "      - match:\n"
+        "          endpoint_poll: 0x81\n"
+        "        actions:\n"
+        "          - stream_from_file:\n"
+        "              file: \"stream.mjpeg\"\n"
+        "              loop: true\n",
+        mjpeg_path);
+    g_file_set_contents(flow_path, flow_yaml, -1, NULL);
+    g_free(flow_yaml);
+
+    flow_t *f = flow_load(flow_path);
+    ck_assert_ptr_nonnull(f);
+
+    /* 1. Initial state is 'idle' */
+    ck_assert_str_eq(flow_current_state(f), "idle");
+
+    /* EP 0x81 should NAK in idle */
+    uint8_t buf[64];
+    int n = flow_ep_in(f, 0x81, buf, sizeof(buf));
+    ck_assert_int_eq(n, 0);
+
+    /* 2. SET_INTERFACE altsetting=1 -> transition to 'streaming' */
+    uint8_t setup_start[8] = { 0x01, 0x0B, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00 };
+    uint8_t out[128];
+    uint16_t out_len = 0;
+    int rc = flow_control(f, setup_start, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+
+    flow_tick(f);
+    ck_assert_str_eq(flow_current_state(f), "streaming");
+
+    /* 3. EP 0x81 should now produce stream packet with UVC header */
+    n = flow_ep_in(f, 0x81, buf, sizeof(buf));
+    ck_assert_int_eq(n, 8); /* 2 byte header + 6 byte frame */
+    ck_assert_int_eq(buf[0], 0x02); /* UVC header len */
+    ck_assert_int_eq(buf[1], 0x02); /* FID=0, EOF=1 */
+    ck_assert_int_eq(buf[2], 0xFF); /* SOI */
+    ck_assert_int_eq(buf[3], 0xD8);
+    ck_assert_int_eq(buf[6], 0xFF); /* EOI */
+    ck_assert_int_eq(buf[7], 0xD9);
+
+    /* 4. SET_INTERFACE altsetting=0 -> transition back to 'idle' */
+    uint8_t setup_stop[8] = { 0x01, 0x0B, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00 };
+    rc = flow_control(f, setup_stop, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+
+    flow_tick(f);
+    ck_assert_str_eq(flow_current_state(f), "idle");
+
+    /* EP 0x81 should NAK again */
+    n = flow_ep_in(f, 0x81, buf, sizeof(buf));
+    ck_assert_int_eq(n, 0);
+
+    flow_free(f);
+
+    unlink(mjpeg_path);
+    unlink(flow_path);
+    g_free(mjpeg_path);
+    g_free(flow_path);
+    g_rmdir(tmpdir);
+    g_free(tmpdir);
+}
+END_TEST
+
 static Suite *flow_suite(void)
 {
     Suite *s = suite_create("flow");
@@ -74,6 +175,7 @@ static Suite *flow_suite(void)
     tcase_add_test(tc_core, test_flow_load_null);
     tcase_add_test(tc_core, test_flow_load_missing);
     tcase_add_test(tc_core, test_flow_load_example1);
+    tcase_add_test(tc_core, test_flow_stream_from_file_state_machine);
     tcase_add_test(tc_core, test_flow_free_null);
     suite_add_tcase(s, tc_core);
 

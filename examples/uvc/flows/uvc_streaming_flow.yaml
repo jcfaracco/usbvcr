@@ -2,9 +2,38 @@ version: "1.0"
 name: "uvc_streaming_flow"
 
 states:
-  - name: "operational"
+  - name: "idle"
     rules:
+      # Host requests alternate setting 1 to activate video streaming bandwidth
+      - match:
+          bmRequestType: 0x01
+          bRequest: 0x0B
+          wValue: 0x0001
+        actions:
+          - respond_with_status: 0
+          - transition_state: "streaming"
+
+      # While idle, return NAK on endpoint 0x81
       - match:
           endpoint_poll: 0x81
         actions:
           - return_nak_if_queue_empty: true
+
+  - name: "streaming"
+    rules:
+      # Host requests alternate setting 0 to stop video streaming
+      - match:
+          bmRequestType: 0x01
+          bRequest: 0x0B
+          wValue: 0x0000
+        actions:
+          - respond_with_status: 0
+          - transition_state: "idle"
+
+      # While streaming, feed sliced MJPEG packets with UVC payload headers
+      - match:
+          endpoint_poll: 0x81
+        actions:
+          - stream_from_file:
+              file: "payloads/stream.mjpeg"
+              loop: true

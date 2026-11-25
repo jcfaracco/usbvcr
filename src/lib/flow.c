@@ -2,6 +2,7 @@
 #include "yaml/util.h" // for yaml_map_get, yaml_scalar
 #include "log.h"
 #include "utils.h"
+#include "stream/stream_provider.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -21,7 +22,8 @@ typedef enum {
     ACT_RESPOND_WITH_STATUS,
     ACT_TRANSITION_STATE,
     ACT_RETURN_NAK_IF_QUEUE_EMPTY,
-    ACT_QUEUE_ENDPOINT_DATA
+    ACT_QUEUE_ENDPOINT_DATA,
+    ACT_STREAM_FROM_FILE
 } flow_action_type_t;
 
 typedef struct {
@@ -32,6 +34,9 @@ typedef struct {
     int return_nak_if_queue_empty;
     uint8_t ep;
     GQueue *payloads; // of GByteArray*
+    char *stream_file;
+    gboolean stream_loop;
+    stream_provider_t *stream_provider;
 } flow_action_t;
 
 typedef struct {
@@ -58,6 +63,10 @@ static void flow_action_free(flow_action_t *act) {
 
     g_free(act->respond_with);
     g_free(act->transition_state);
+    g_free(act->stream_file);
+
+    if (act->stream_provider)
+        stream_provider_free(act->stream_provider);
 
     if (act->payloads)
         g_queue_free_full(act->payloads, (GDestroyNotify)g_byte_array_unref);
@@ -189,7 +198,83 @@ static flow_action_t* parse_queue_endpoint_data(yaml_document_t *doc, yaml_node_
     return a;
 }
 
-static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq) {
+static char *resolve_flow_asset(const char *base_dir, const char *flow_dir, const char *file)
+{
+    char *p = NULL;
+
+    if (file == NULL)
+        return NULL;
+
+    if (g_path_is_absolute(file))
+        return g_strdup(file);
+
+    if (base_dir != NULL) {
+        p = g_build_filename(base_dir, file, NULL);
+        if (g_file_test(p, G_FILE_TEST_EXISTS))
+            return p;
+        g_free(p);
+    }
+
+    if (flow_dir != NULL) {
+        p = g_build_filename(flow_dir, file, NULL);
+        if (g_file_test(p, G_FILE_TEST_EXISTS))
+            return p;
+        g_free(p);
+
+        p = g_build_filename(flow_dir, "..", file, NULL);
+        if (g_file_test(p, G_FILE_TEST_EXISTS))
+            return p;
+        g_free(p);
+    }
+
+    if (g_file_test(file, G_FILE_TEST_EXISTS))
+        return g_strdup(file);
+
+    if (base_dir != NULL)
+        return g_build_filename(base_dir, file, NULL);
+
+    if (flow_dir != NULL)
+        return g_build_filename(flow_dir, "..", file, NULL);
+
+    return g_strdup(file);
+}
+
+static flow_action_t *parse_stream_action(yaml_document_t *doc, yaml_node_t *v, uint8_t ep,
+                                          const char *flow_dir, const char *base_dir)
+{
+    flow_action_t *a = g_new0(flow_action_t, 1);
+    const char *file_str = NULL;
+    gboolean loop_val = TRUE;
+
+    a->type = ACT_STREAM_FROM_FILE;
+    a->ep = ep;
+
+    if (v->type == YAML_MAPPING_NODE) {
+        yaml_node_t *fn = yaml_map_get(doc, v, "file");
+        yaml_node_t *ln = yaml_map_get(doc, v, "loop");
+        if (fn != NULL)
+            file_str = yaml_scalar(fn);
+        if (ln != NULL) {
+            const char *ls = yaml_scalar(ln);
+            loop_val = (g_strcmp0(ls, "false") != 0 && g_strcmp0(ls, "0") != 0 && g_strcmp0(ls, "no") != 0);
+        }
+    } else if (v->type == YAML_SCALAR_NODE) {
+        file_str = yaml_scalar(v);
+    }
+
+    if (file_str != NULL) {
+        char *resolved = resolve_flow_asset(base_dir, flow_dir, file_str);
+        a->stream_file = g_strdup(file_str);
+        a->stream_loop = loop_val;
+        a->stream_provider = stream_provider_new(resolved, loop_val, ep);
+        g_free(resolved);
+    }
+
+    return a;
+}
+
+static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq, uint8_t ep_hint,
+                            const char *flow_dir, const char *base_dir) {
     GList *list = NULL;
     if (!seq || seq->type != YAML_SEQUENCE_NODE) return NULL;
 
@@ -217,6 +302,17 @@ static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq) {
             a->return_nak_if_queue_empty = (g_strcmp0(yaml_scalar(v), "true") == 0);
         } else if ((v = yaml_map_get(doc, item, "queue_endpoint_data"))) {
             a = parse_queue_endpoint_data(doc, v);
+        } else if ((v = yaml_map_get(doc, item, "stream_from_file")) ||
+                   (v = yaml_map_get(doc, item, "stream"))) {
+            a = parse_stream_action(doc, v, ep_hint, flow_dir, base_dir);
+        }
+
+        if (a && a->type == ACT_STREAM_FROM_FILE && (v = yaml_map_get(doc, item, "loop"))) {
+            const char *ls = yaml_scalar(v);
+            a->stream_loop = (g_strcmp0(ls, "false") != 0 && g_strcmp0(ls, "0") != 0 && g_strcmp0(ls, "no") != 0);
+            if (a->stream_provider != NULL) {
+                a->stream_provider->loop = a->stream_loop;
+            }
         }
 
         if (a)
@@ -225,7 +321,8 @@ static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq) {
     return list;
 }
 
-static GList* parse_rules(yaml_document_t *doc, yaml_node_t *seq) {
+static GList* parse_rules(yaml_document_t *doc, yaml_node_t *seq,
+                          const char *flow_dir, const char *base_dir) {
     GList *list = NULL;
     if (!seq || seq->type != YAML_SEQUENCE_NODE) return NULL;
     
@@ -240,7 +337,7 @@ static GList* parse_rules(yaml_document_t *doc, yaml_node_t *seq) {
         }
         yaml_node_t *a_node = yaml_map_get(doc, item, "actions");
         if (a_node) {
-            r->actions = parse_actions(doc, a_node);
+            r->actions = parse_actions(doc, a_node, r->match.endpoint_poll, flow_dir, base_dir);
         }
         list = g_list_append(list, r);
     }
@@ -248,7 +345,12 @@ static GList* parse_rules(yaml_document_t *doc, yaml_node_t *seq) {
 }
 
 flow_t *flow_load(const char *path) {
+    return flow_load_with_dir(path, NULL);
+}
+
+flow_t *flow_load_with_dir(const char *path, const char *base_dir) {
     FILE *fp = NULL;
+    char *flow_dir = NULL;
 
     if (!path)
         return NULL;
@@ -256,8 +358,11 @@ flow_t *flow_load(const char *path) {
     fp = fopen(path, "rb");
     if (!fp) return NULL;
 
+    flow_dir = g_path_get_dirname(path);
+
     yaml_parser_t parser;
     if (!yaml_parser_initialize(&parser)) {
+        g_free(flow_dir);
         fclose(fp);
         return NULL;
     }
@@ -266,6 +371,7 @@ flow_t *flow_load(const char *path) {
     yaml_document_t doc;
     if (!yaml_parser_load(&parser, &doc)) {
         yaml_parser_delete(&parser);
+        g_free(flow_dir);
         fclose(fp);
         return NULL;
     }
@@ -274,6 +380,7 @@ flow_t *flow_load(const char *path) {
     if (!top || top->type != YAML_MAPPING_NODE) {
         yaml_document_delete(&doc);
         yaml_parser_delete(&parser);
+        g_free(flow_dir);
         fclose(fp);
         return NULL;
     }
@@ -293,10 +400,10 @@ flow_t *flow_load(const char *path) {
             }
             
             yaml_node_t *enter_n = yaml_map_get(&doc, item, "on_enter");
-            if (enter_n) st->on_enter = parse_actions(&doc, enter_n);
+            if (enter_n) st->on_enter = parse_actions(&doc, enter_n, 0, flow_dir, base_dir);
             
             yaml_node_t *rules_n = yaml_map_get(&doc, item, "rules");
-            if (rules_n) st->rules = parse_rules(&doc, rules_n);
+            if (rules_n) st->rules = parse_rules(&doc, rules_n, flow_dir, base_dir);
             
             if (st->name) {
                 if (!f->state) f->state = g_strdup(st->name); // first state is default
@@ -307,6 +414,7 @@ flow_t *flow_load(const char *path) {
         }
     }
 
+    g_free(flow_dir);
     yaml_document_delete(&doc);
     yaml_parser_delete(&parser);
     fclose(fp);
@@ -396,6 +504,15 @@ int flow_ep_in(flow_t *flow, uint8_t ep, uint8_t *buf, size_t cap)
         for (GList *l = st->rules; l; l = l->next) {
             flow_rule_t *r = l->data;
             if (r->match.has_endpoint_poll && r->match.endpoint_poll == ep) {
+                for (GList *al = r->actions; al; al = al->next) {
+                    flow_action_t *a = al->data;
+                    if (a->type == ACT_STREAM_FROM_FILE && a->stream_provider != NULL) {
+                        int n = stream_provider_produce_packet(a->stream_provider, ep, buf, cap);
+                        if (n >= 0) {
+                            return n;
+                        }
+                    }
+                }
                 execute_actions(flow, r->actions, NULL, NULL, NULL);
             }
         }
@@ -443,6 +560,21 @@ void flow_tick(flow_t *flow)
 {
     if (!flow)
         return;
+
+    if (flow->state) {
+        flow_state_t *st = g_hash_table_lookup(flow->states, flow->state);
+        if (st) {
+            for (GList *l = st->rules; l; l = l->next) {
+                flow_rule_t *r = l->data;
+                for (GList *al = r->actions; al; al = al->next) {
+                    flow_action_t *a = al->data;
+                    if (a->type == ACT_STREAM_FROM_FILE && a->stream_provider != NULL) {
+                        stream_provider_tick(a->stream_provider);
+                    }
+                }
+            }
+        }
+    }
 
     if (flow->next_state) {
         g_free(flow->state);

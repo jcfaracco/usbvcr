@@ -9,5 +9,3 @@ connection:
 devices:
   - device: "devices/uvc_camera.yaml"
     flow: "flows/uvc_streaming_flow.yaml"
-    file: "payloads/stream.mjpeg"
-    loop: true

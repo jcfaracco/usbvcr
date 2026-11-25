@@ -414,7 +414,7 @@ def decompile_hid_report(raw: bytes, codec: dict):
 # Flow synthesis
 # ---------------------------------------------------------------------------
 
-def build_flow(control_pairs, interrupt_payloads_by_endpoint, report_raw_file=None) -> dict:
+def build_flow(control_pairs, interrupt_payloads_by_endpoint, report_raw_file=None, raw_file=None, video_ep=0x81) -> dict:
     rules = []
     seen = set()
 
@@ -479,6 +479,17 @@ def build_flow(control_pairs, interrupt_payloads_by_endpoint, report_raw_file=No
         rules.append({
             "match": {"endpoint_poll": Hex(ep)},
             "actions": [{"return_nak_if_queue_empty": True}],
+        })
+
+    if raw_file and video_ep is not None:
+        rules.append({
+            "match": {"endpoint_poll": Hex(video_ep)},
+            "actions": [{
+                "stream_from_file": {
+                    "file": raw_file,
+                    "loop": True,
+                }
+            }],
         })
 
     return {"version": "1.0", "states": [{"name": "operational", "rules": rules}]}
@@ -577,12 +588,14 @@ def main(argv=None) -> int:
 
     interrupt_payloads = {}
     video_frames = []
+    video_ep = None
     current_video_frame = bytearray()
 
     for t in transfers:
         if t.xfer == XFER_INT and t.event_type == "C" and t.direction_in and t.data:
             interrupt_payloads.setdefault(t.endpoint, []).append(t.data.hex().upper())
         elif t.xfer in (XFER_ISO, XFER_BULK) and t.event_type == "C" and t.direction_in and t.data:
+            video_ep = t.endpoint
             if len(t.data) >= 2:
                 hdr_len = t.data[0]
                 if 2 <= hdr_len <= len(t.data):
@@ -606,7 +619,7 @@ def main(argv=None) -> int:
     device = build_device(name, device_desc, config, report_items, raw_file)
     if report_raw_file and config["interfaces"]:
         config["interfaces"][0]["report_descriptor"] = {"raw_file": report_raw_file}
-    flow = build_flow(control_pairs, interrupt_payloads, report_raw_file)
+    flow = build_flow(control_pairs, interrupt_payloads, report_raw_file, raw_file, video_ep)
     project = build_project(name, args.vendor, args.product, slug, raw_file)
 
     out = pathlib.Path(args.output)

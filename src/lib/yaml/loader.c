@@ -333,7 +333,7 @@ static int parse_main(const char *path, yaml_device_t *dev)
             e->name      = g_strdup(dref);
             e->flow_path = fref ? resolve_asset_path(dir, "flows", fref) : NULL;
             e->tree      = tree;   /* entry owns it */
-            e->flow      = e->flow_path ? flow_load(e->flow_path) : NULL;
+            e->flow      = e->flow_path ? flow_load_with_dir(e->flow_path, dir) : NULL;
             e->speed     = (item_speed >= 0) ? item_speed : dev->speed;
             if (efile) {
                 e->file = resolve_asset_path(dir, "payloads", efile);

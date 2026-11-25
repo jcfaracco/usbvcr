@@ -526,10 +526,45 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
         break;
 
     case RT_BULK_PACKET:  /* Bulk transfer (e.g. MSC SCSI command / data) */
-        if (dev->ops->ep_out && len > sizeof(usb_interrupt_packet_header_t)) {
-            usb_interrupt_packet_header_t h;
-            memcpy(&h, payload, sizeof(h));
-            dev->ops->ep_out(dev, h.endpoint, payload + sizeof(h), len - sizeof(h));
+        if (len >= sizeof(usb_bulk_packet_header_t)) {
+            usb_bulk_packet_header_t bh;
+            memcpy(&bh, payload, sizeof(bh));
+            uint8_t ep = bh.endpoint;
+            size_t data_len = len - sizeof(bh);
+            const uint8_t *data = payload + sizeof(bh);
+
+            if (ep & 0x80) {
+                /* Bulk IN request from host */
+                uint8_t in_buf[USB_VCR_BUF_SIZE];
+                uint8_t resp[sizeof(usb_bulk_packet_header_t) + USB_VCR_BUF_SIZE];
+                usb_bulk_packet_header_t rh = bh;
+                int n = 0;
+
+                if (dev->ops->ep_in) {
+                    n = dev->ops->ep_in(dev, ep, in_buf, sizeof(in_buf));
+                    if (n < 0) n = 0;
+                }
+
+                rh.status = 0; /* usb_redir_success */
+                rh.length = (uint16_t)(n & 0xffff);
+                rh.length_high = (uint16_t)(n >> 16);
+                memcpy(resp, &rh, sizeof(rh));
+                if (n > 0)
+                    memcpy(resp + sizeof(rh), in_buf, n);
+
+                usb_conn_send(sock, RT_BULK_PACKET, hdr->id, resp, sizeof(rh) + n, ctx);
+            } else {
+                /* Bulk OUT from host (e.g. SCSI CBW) */
+                if (dev->ops->ep_out)
+                    dev->ops->ep_out(dev, ep, data, data_len);
+
+                /* ACK bulk OUT completion */
+                usb_bulk_packet_header_t rh = bh;
+                rh.status = 0; /* usb_redir_success */
+                rh.length = 0;
+                rh.length_high = 0;
+                usb_conn_send(sock, RT_BULK_PACKET, hdr->id, &rh, sizeof(rh), ctx);
+            }
         }
         break;
 

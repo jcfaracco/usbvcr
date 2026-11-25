@@ -190,6 +190,15 @@ typedef struct {
     uint16_t length;
 } usb_interrupt_packet_header_t;
 
+/* RT_BULK_PACKET header */
+typedef struct {
+    uint8_t  endpoint;
+    uint8_t  status;
+    uint16_t length;
+    uint32_t stream_id;
+    uint16_t length_high;
+} usb_bulk_packet_header_t;
+
 /* RT_START_ISO_STREAM payload */
 typedef struct {
     uint8_t endpoint;

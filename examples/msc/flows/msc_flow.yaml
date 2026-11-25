@@ -77,3 +77,35 @@ states:
           wValue: 1
         actions:
           - respond_with_status: 0
+
+      # SCSI INQUIRY (Opcode 0x12) on Bulk OUT 0x02
+      # Returns 36 bytes standard SCSI INQUIRY response + 13-byte CSW on Bulk IN 0x81
+      - match:
+          endpoint_out: 0x02
+        actions:
+          - queue_endpoint_data:
+              endpoint: 0x81
+              payloads:
+                # 36-byte SCSI INQUIRY data:
+                # Peripheral Device Type = 0x00 (Direct Access Block Device / Disk)
+                # Removable = 0x80 (RMB=1)
+                # Vendor: "SanDisk ", Product: "Cruzer Blade    ", Rev: "1.00"
+                - hex: "008002021f00000053616e4469736b204372757a657220426c61646520202020312e3030"
+                # 13-byte CSW ("USBS", tag auto-matched from CBW, residue=0, status=0)
+                - hex: "55534253000000000000000000"
+
+                # 8-byte SCSI READ CAPACITY (10) data (1 GB drive: 2097152 sectors of 512 bytes):
+                # Last Logical Block Address = 0x001FFFFF (2097151)
+                # Block Length in bytes = 0x00000200 (512)
+                - hex: "001fffff00000200"
+                # CSW for READ CAPACITY
+                - hex: "55534253000000000000000000"
+
+                # 4-byte SCSI MODE SENSE (6) data:
+                # Mode data length = 0x03, Medium type = 0x00, Device-specific = 0x00 (not write-protected), Block desc = 0x00
+                - hex: "03000000"
+                # CSW for MODE SENSE
+                - hex: "55534253000000000000000000"
+
+                # CSW for TEST UNIT READY (Ready)
+                - hex: "55534253000000000000000000"

@@ -15,6 +15,8 @@ typedef struct {
     int has_wValue;        uint16_t wValue;
     int has_wIndex;        uint16_t wIndex;
     int has_endpoint_poll; uint8_t endpoint_poll;
+    int has_endpoint_out;  uint8_t endpoint_out;
+    GByteArray *match_payload;
 } flow_match_t;
 
 typedef enum {
@@ -56,6 +58,8 @@ struct flow {
     char *next_state;
     GHashTable *states; // name -> flow_state_t*
     GHashTable *ep_queues; // ep (uint8_t) -> GQueue of GByteArray*
+    uint8_t last_cbw_tag[4];
+    gboolean has_cbw_tag;
 };
 
 static void flow_action_free(flow_action_t *act) {
@@ -81,6 +85,8 @@ static void flow_rule_free(flow_rule_t *rule) {
     if (!rule)
         return;
 
+    if (rule->match.match_payload)
+        g_byte_array_unref(rule->match.match_payload);
     g_list_free_full(rule->actions, (GDestroyNotify)flow_action_free);
     g_free(rule);
 }
@@ -139,6 +145,21 @@ static uint32_t parse_int(const char *s) {
     return s ? strtoul(s, NULL, 0) : 0;
 }
 
+static GByteArray* parse_hex_string(const char *hex_str) {
+    GByteArray *arr = g_byte_array_new();
+
+    if (!hex_str)
+        return arr;
+
+    size_t len = strlen(hex_str);
+    for (size_t i = 0; i + 1 < len; i += 2) {
+        char buf[3] = {hex_str[i], hex_str[i+1], 0};
+        uint8_t byte = (uint8_t)strtoul(buf, NULL, 16);
+        g_byte_array_append(arr, &byte, 1);
+    }
+    return arr;
+}
+
 static flow_match_t parse_match(yaml_document_t *doc, yaml_node_t *n) {
     flow_match_t m = { 0 };
 
@@ -161,22 +182,17 @@ static flow_match_t parse_match(yaml_document_t *doc, yaml_node_t *n) {
     if ((v = yaml_map_get(doc, n, "endpoint_poll"))) {
         m.has_endpoint_poll = 1; m.endpoint_poll = parse_int(yaml_scalar(v));
     }
-    return m;
-}
-
-static GByteArray* parse_hex_string(const char *hex_str) {
-    GByteArray *arr = g_byte_array_new();
-
-    if (!hex_str)
-        return arr;
-
-    size_t len = strlen(hex_str);
-    for (size_t i = 0; i + 1 < len; i += 2) {
-        char buf[3] = {hex_str[i], hex_str[i+1], 0};
-        uint8_t byte = (uint8_t)strtoul(buf, NULL, 16);
-        g_byte_array_append(arr, &byte, 1);
+    if ((v = yaml_map_get(doc, n, "endpoint_out"))) {
+        m.has_endpoint_out = 1; m.endpoint_out = parse_int(yaml_scalar(v));
     }
-    return arr;
+    if ((v = yaml_map_get(doc, n, "payload"))) {
+        yaml_node_t *hex_n = yaml_map_get(doc, v, "hex");
+        if (hex_n)
+            m.match_payload = parse_hex_string(yaml_scalar(hex_n));
+    } else if ((v = yaml_map_get(doc, n, "hex"))) {
+        m.match_payload = parse_hex_string(yaml_scalar(v));
+    }
+    return m;
 }
 
 static flow_action_t* parse_queue_endpoint_data(yaml_document_t *doc, yaml_node_t *v) {
@@ -472,7 +488,16 @@ static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t
                 }
                 for (GList *pl = a->payloads->head; pl; pl = pl->next) {
                     GByteArray *arr = pl->data;
-                    g_queue_push_tail(q, g_byte_array_ref(arr));
+                    /* If this is a 13-byte CSW ("USBS" at offset 0) and we tracked a CBW tag,
+                     * dynamically update CSW tag at offset 4..7 to match CBW tag */
+                    if (arr->len == 13 && memcmp(arr->data, "USBS", 4) == 0 && flow->has_cbw_tag) {
+                        GByteArray *csw_copy = g_byte_array_sized_new(13);
+                        g_byte_array_append(csw_copy, arr->data, 13);
+                        memcpy(csw_copy->data + 4, flow->last_cbw_tag, 4);
+                        g_queue_push_tail(q, csw_copy);
+                    } else {
+                        g_queue_push_tail(q, g_byte_array_ref(arr));
+                    }
                 }
                 break;
             }
@@ -503,7 +528,7 @@ int flow_control(flow_t *flow, const uint8_t *setup,
         if (r->match.has_bRequest && r->match.bRequest != bRequest) match = 0;
         if (r->match.has_wValue && r->match.wValue != wValue) match = 0;
         if (r->match.has_wIndex && r->match.wIndex != wIndex) match = 0;
-        if (r->match.has_endpoint_poll) match = 0;
+        if (r->match.has_endpoint_poll || r->match.has_endpoint_out) match = 0;
         
         if (match) {
             int handled = 0;
@@ -555,10 +580,6 @@ int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
     if (!flow)
         return -1;
 
-    /* Host-to-device transfer: HID output report (e.g. keyboard LED state via
-     * SET_REPORT) or an interrupt OUT endpoint. The flow schema has no OUT
-     * match/action yet, so the data is consumed and logged for visibility
-     * rather than routed to a rule. */
     if (buf && len) {
         char hex[3 * 32 + 4];
         size_t shown = len < 32 ? len : 32;
@@ -568,8 +589,35 @@ int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
         if (len > shown)
             snprintf(hex + o, sizeof(hex) - o, "...");
         LOG_IN("ep 0x%02x OUT %zu bytes: %s", ep, len, hex);
+
+        /* If this is a 31-byte MSC Command Block Wrapper ("USBC" at offset 0),
+         * capture its 4-byte Tag at offset 4..7 */
+        if (len >= 31 && memcmp(buf, "USBC", 4) == 0) {
+            memcpy(flow->last_cbw_tag, buf + 4, 4);
+            flow->has_cbw_tag = TRUE;
+        }
     } else {
         LOG_IN("ep 0x%02x OUT %zu bytes", ep, len);
+    }
+
+    if (!flow->state)
+        return 0;
+
+    flow_state_t *st = g_hash_table_lookup(flow->states, flow->state);
+    if (st) {
+        for (GList *l = st->rules; l; l = l->next) {
+            flow_rule_t *r = l->data;
+            if (r->match.has_endpoint_out && r->match.endpoint_out == ep) {
+                if (r->match.match_payload != NULL) {
+                    /* If match payload specified, check if buf contains or matches prefix */
+                    if (len < r->match.match_payload->len ||
+                        memcmp(buf, r->match.match_payload->data, r->match.match_payload->len) != 0)
+                        continue;
+                }
+                int handled = 0;
+                execute_actions(flow, r->actions, NULL, NULL, &handled);
+            }
+        }
     }
 
     return 0;

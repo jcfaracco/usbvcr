@@ -1,0 +1,30 @@
+version: "1.0"
+states:
+  - name: "idle"
+    rules:
+      - match:
+          bmRequestType: 0x01
+          bRequest: 0x0B
+          wValue: 0x0001
+        actions:
+          - respond_with_status: 0
+          - transition_state: "streaming"
+      - match:
+          endpoint_poll: 0x81
+        actions:
+          - return_nak_if_queue_empty: true
+  - name: "streaming"
+    rules:
+      - match:
+          bmRequestType: 0x01
+          bRequest: 0x0B
+          wValue: 0x0000
+        actions:
+          - respond_with_status: 0
+          - transition_state: "idle"
+      - match:
+          endpoint_poll: 0x81
+        actions:
+          - stream_from_file:
+              file: "stream.mjpeg"
+              loop: true

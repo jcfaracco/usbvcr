@@ -461,6 +461,8 @@ static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t
             }
             case ACT_RETURN_NAK_IF_QUEUE_EMPTY:
                 break;
+            case ACT_STREAM_FROM_FILE:
+                break;
         }
     }
 }

@@ -1,6 +1,8 @@
 #include <stdlib.h>
+#include <stdint.h>
 #include <check.h>
 #include <string.h>
+#include <glib.h>
 
 #include "flow.h"
 
@@ -60,60 +62,9 @@ START_TEST(test_flow_load_example1)
 }
 END_TEST
 
-START_TEST(test_flow_free_null)
-{
-    flow_free(NULL);
-}
-END_TEST
-
 START_TEST(test_flow_stream_from_file_state_machine)
 {
-    char *tmpdir = g_dir_make_tmp("test_flow_XXXXXX", NULL);
-    ck_assert_ptr_nonnull(tmpdir);
-
-    char *mjpeg_path = g_build_filename(tmpdir, "stream.mjpeg", NULL);
-    char *flow_path = g_build_filename(tmpdir, "flow.yaml", NULL);
-
-    /* 6-byte synthetic JPEG frame */
-    static const uint8_t frame_data[] = { 0xFF, 0xD8, 0xAA, 0xBB, 0xFF, 0xD9 };
-    g_file_set_contents(mjpeg_path, (const char *)frame_data, sizeof(frame_data), NULL);
-
-    char *flow_yaml = g_strdup_printf(
-        "version: \"1.0\"\n"
-        "states:\n"
-        "  - name: \"idle\"\n"
-        "    rules:\n"
-        "      - match:\n"
-        "          bmRequestType: 0x01\n"
-        "          bRequest: 0x0B\n"
-        "          wValue: 0x0001\n"
-        "        actions:\n"
-        "          - respond_with_status: 0\n"
-        "          - transition_state: \"streaming\"\n"
-        "      - match:\n"
-        "          endpoint_poll: 0x81\n"
-        "        actions:\n"
-        "          - return_nak_if_queue_empty: true\n"
-        "  - name: \"streaming\"\n"
-        "    rules:\n"
-        "      - match:\n"
-        "          bmRequestType: 0x01\n"
-        "          bRequest: 0x0B\n"
-        "          wValue: 0x0000\n"
-        "        actions:\n"
-        "          - respond_with_status: 0\n"
-        "          - transition_state: \"idle\"\n"
-        "      - match:\n"
-        "          endpoint_poll: 0x81\n"
-        "        actions:\n"
-        "          - stream_from_file:\n"
-        "              file: \"stream.mjpeg\"\n"
-        "              loop: true\n",
-        mjpeg_path);
-    g_file_set_contents(flow_path, flow_yaml, -1, NULL);
-    g_free(flow_yaml);
-
-    flow_t *f = flow_load(flow_path);
+    flow_t *f = flow_load(TEST_DATA_DIR "/stream/streaming_flow.yaml");
     ck_assert_ptr_nonnull(f);
 
     /* 1. Initial state is 'idle' */
@@ -157,13 +108,12 @@ START_TEST(test_flow_stream_from_file_state_machine)
     ck_assert_int_eq(n, 0);
 
     flow_free(f);
+}
+END_TEST
 
-    unlink(mjpeg_path);
-    unlink(flow_path);
-    g_free(mjpeg_path);
-    g_free(flow_path);
-    g_rmdir(tmpdir);
-    g_free(tmpdir);
+START_TEST(test_flow_free_null)
+{
+    flow_free(NULL);
 }
 END_TEST
 

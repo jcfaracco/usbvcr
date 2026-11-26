@@ -159,7 +159,6 @@ Complete, ready-to-run device emulation projects demonstrating full enumeration,
 
 - [**Joystick**](examples/joystick/README.md) — 4-axis analog joystick with 12 digital buttons (HID class).
 - [**Mass Storage**](examples/msc/README.md) — Flash drive (pendrive) using Bulk-Only Transport (BOT) and SCSI commands backed by a FAT16 disk image.
-- [**UVC Webcam**](examples/uvc/README.md) — USB Video Class webcam streaming Motion-JPEG video over isochronous endpoints.
 - [**Composite Device**](examples/composite/README.md) — Multi-interface UVC webcam and telemetry device demonstrating concurrent orthogonal state machines, global common rules, state inheritance, and dynamic streaming.
 
 See [`examples/README.md`](examples/README.md) for detailed descriptions, running instructions, and guest verification steps.

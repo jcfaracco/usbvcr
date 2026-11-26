@@ -163,6 +163,17 @@ if check_dep.found()
   )
   test('transport', test_transport)
 
+  test_fuzz = executable(
+    'test_fuzz',
+    'core/test_fuzz.c',
+    files(
+      '../src/fuzz/fuzz.c',
+    ),
+    include_directories : [core, fuzz],
+    dependencies : [check_dep, glib_dep],
+  )
+  test('fuzz', test_fuzz)
+
   test_pcap_roundtrip = executable(
     'test_pcap_roundtrip',
     'integration/test_pcap_roundtrip.c',

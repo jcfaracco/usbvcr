@@ -187,19 +187,6 @@ allocations and string parsing during USB enumeration.
 
 ---
 
-### `[flow/transitions]` Synchronous state transitions on packet handling
-**File:** `src/lib/flow.c:529-533, 715-724`
-**Complexity:** Low
-
-`ACT_TRANSITION_STATE` only updates `flow->next_state`. The actual state change and
-execution of `on_enter` actions are deferred until the next `flow_tick()` call.
-In scenarios where subsequent packets arrive before the tick executes, or where
-an action requires immediate state progression, this can lead to subtle race conditions
-or dropped packet matches. Transitions should be applied synchronously upon action
-completion or provide explicit atomic transition semantics.
-
----
-
 ### `[flow/timing]` Asynchronous tick-driven delayed responses and state dwell times
 **File:** `src/lib/flow.c:34-47, 504-573, 695-725`, `src/lib/flow.h`, `src/core/usb_core.c:250-289, 638-650`
 **Complexity:** Medium

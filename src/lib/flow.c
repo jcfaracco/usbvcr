@@ -498,6 +498,45 @@ flow_t *flow_load_with_dir(const char *path, const char *base_dir) {
 }
 
 static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t *len,
+                            const uint8_t *ep_buf, size_t ep_len, int *handled);
+
+int flow_transition_to(flow_t *flow, const char *new_state)
+{
+    flow_state_t *st;
+    char *copy;
+
+    if (!flow || !new_state)
+        return -1;
+
+    st = g_hash_table_lookup(flow->states, new_state);
+    if (!st) {
+        LOG_WARN("[flow] Transition target state '%s' does not exist", new_state);
+        return -1;
+    }
+
+    if (g_strcmp0(flow->state, new_state) == 0)
+        return 0;
+
+    LOG_DEBUG("[flow] Transition '%s' -> '%s'",
+              flow->state ? flow->state : "(none)", new_state);
+
+    copy = g_strdup(new_state);
+    g_free(flow->state);
+    flow->state = copy;
+
+    if (flow->next_state) {
+        g_free(flow->next_state);
+        flow->next_state = NULL;
+    }
+
+    if (st->on_enter) {
+        execute_actions(flow, st->on_enter, NULL, NULL, NULL, 0, NULL);
+    }
+
+    return 0;
+}
+
+static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t *len,
                             const uint8_t *ep_buf, size_t ep_len, int *handled) {
     for (GList *l = actions; l; l = l->next) {
         flow_action_t *a = l->data;
@@ -528,9 +567,8 @@ static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t
                 }
                 break;
             case ACT_TRANSITION_STATE:
-                LOG_DEBUG("[flow] ACT_TRANSITION_STATE");
-                g_free(flow->next_state);
-                flow->next_state = g_strdup(a->transition_state);
+                LOG_DEBUG("[flow] ACT_TRANSITION_STATE to '%s'", a->transition_state);
+                flow_transition_to(flow, a->transition_state);
                 break;
             case ACT_QUEUE_ENDPOINT_DATA: {
                 GQueue *q = g_hash_table_lookup(flow->ep_queues, GUINT_TO_POINTER((guint)a->ep));
@@ -714,13 +752,9 @@ void flow_tick(flow_t *flow)
     }
 
     if (flow->next_state) {
-        g_free(flow->state);
-        flow->state = flow->next_state;
+        char *target = flow->next_state;
         flow->next_state = NULL;
-        
-        flow_state_t *st = g_hash_table_lookup(flow->states, flow->state);
-        if (st && st->on_enter) {
-            execute_actions(flow, st->on_enter, NULL, NULL, NULL, 0, NULL);
-        }
+        flow_transition_to(flow, target);
+        g_free(target);
     }
 }

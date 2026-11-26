@@ -35,6 +35,9 @@ int flow_ep_in(flow_t *flow, uint8_t ep, uint8_t *buf, size_t cap);
 /* Feed OUT data to the flow (e.g. keyboard LED report). */
 int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len);
 
+/* Explicitly transition flow to a named state (synchronous). Returns 0 on success, -1 if state unknown. */
+int flow_transition_to(flow_t *flow, const char *new_state);
+
 /* Run on_enter actions and advance transitions. */
 void flow_tick(flow_t *flow);
 

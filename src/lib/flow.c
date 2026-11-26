@@ -27,8 +27,7 @@ typedef enum {
     ACT_TRANSITION_STATE,
     ACT_RETURN_NAK_IF_QUEUE_EMPTY,
     ACT_QUEUE_ENDPOINT_DATA,
-    ACT_STREAM_FROM_FILE,
-    ACT_DISK_FROM_FILE
+    ACT_ENDPOINT_PROVIDER
 } flow_action_type_t;
 
 typedef struct {
@@ -41,11 +40,8 @@ typedef struct {
     int return_nak_if_queue_empty;
     uint8_t ep;
     GQueue *payloads; // of GByteArray*
-    char *stream_file;
-    gboolean stream_loop;
-    stream_provider_t *stream_provider;
-    char *disk_file;
-    disk_provider_t *disk_provider;
+    flow_endpoint_ops_t provider_ops;
+    void *provider_ctx;
 } flow_action_t;
 
 typedef struct {
@@ -68,14 +64,19 @@ typedef struct flow_machine {
     GHashTable *states; // name -> flow_state_t*
 } flow_machine_t;
 
+typedef struct {
+    uint8_t ep;
+    flow_endpoint_ops_t ops;
+    void *ctx;
+} flow_endpoint_binding_t;
+
 struct flow {
     GList *machines; // of flow_machine_t*
     GHashTable *machine_map; // name -> flow_machine_t*
     flow_machine_t *default_machine;
     GList *common_rules; // of flow_rule_t*
     GHashTable *ep_queues; // ep (uint8_t) -> GQueue of GByteArray*
-    uint8_t last_cbw_tag[4];
-    gboolean has_cbw_tag;
+    GHashTable *ep_bindings; // ep (uint8_t) -> flow_endpoint_binding_t*
 };
 
 static void flow_action_free(flow_action_t *act) {
@@ -87,19 +88,26 @@ static void flow_action_free(flow_action_t *act) {
         g_byte_array_unref(act->respond_bytes);
     g_free(act->transition_machine);
     g_free(act->transition_state);
-    g_free(act->stream_file);
-    g_free(act->disk_file);
 
-    if (act->stream_provider)
-        stream_provider_free(act->stream_provider);
-
-    if (act->disk_provider)
-        disk_provider_free(act->disk_provider);
+    if (act->provider_ops.free && act->provider_ctx) {
+        act->provider_ops.free(act->provider_ctx);
+        act->provider_ctx = NULL;
+    }
 
     if (act->payloads)
         g_queue_free_full(act->payloads, (GDestroyNotify)g_byte_array_unref);
 
     g_free(act);
+}
+
+static void flow_endpoint_binding_free(flow_endpoint_binding_t *b)
+{
+    if (!b)
+        return;
+
+    if (b->ops.free && b->ctx)
+        b->ops.free(b->ctx);
+    g_free(b);
 }
 
 static void flow_rule_free(flow_rule_t *rule) {
@@ -152,6 +160,7 @@ flow_t *flow_create(void)
 
     f->machine_map = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
     f->ep_queues = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)g_queue_free);
+    f->ep_bindings = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)flow_endpoint_binding_free);
 
     return f;
 }
@@ -177,6 +186,7 @@ void flow_free(flow_t *flow)
         }        
     }
     g_hash_table_destroy(flow->ep_queues);
+    g_hash_table_destroy(flow->ep_bindings);
 
     if (flow->machines)
         g_list_free_full(flow->machines, (GDestroyNotify)flow_machine_free);
@@ -184,6 +194,30 @@ void flow_free(flow_t *flow)
         g_hash_table_destroy(flow->machine_map);
 
     g_free(flow);
+}
+
+int flow_bind_endpoint(flow_t *flow, uint8_t ep, const flow_endpoint_ops_t *ops, void *ctx)
+{
+    flow_endpoint_binding_t *b;
+
+    if (!flow || !ops)
+        return -1;
+
+    b = g_new0(flow_endpoint_binding_t, 1);
+    b->ep = ep;
+    b->ops = *ops;
+    b->ctx = ctx;
+
+    g_hash_table_insert(flow->ep_bindings, GUINT_TO_POINTER((guint)ep), b);
+    return 0;
+}
+
+void flow_unbind_endpoint(flow_t *flow, uint8_t ep)
+{
+    if (!flow || !flow->ep_bindings)
+        return;
+
+    g_hash_table_remove(flow->ep_bindings, GUINT_TO_POINTER((guint)ep));
 }
 
 const char *flow_current_state(flow_t *flow)
@@ -322,19 +356,21 @@ static char *resolve_flow_asset(const char *base_dir, const char *flow_dir, cons
     return g_strdup(file);
 }
 
-static flow_action_t *parse_stream_action(yaml_document_t *doc, yaml_node_t *v, uint8_t ep,
+static flow_action_t *parse_stream_action(yaml_document_t *doc, yaml_node_t *item,
+                                          yaml_node_t *v, uint8_t ep,
                                           const char *flow_dir, const char *base_dir)
 {
     flow_action_t *a = g_new0(flow_action_t, 1);
     const char *file_str = NULL;
     gboolean loop_val = TRUE;
+    yaml_node_t *ln;
 
-    a->type = ACT_STREAM_FROM_FILE;
+    a->type = ACT_ENDPOINT_PROVIDER;
     a->ep = ep;
 
     if (v->type == YAML_MAPPING_NODE) {
         yaml_node_t *fn = yaml_map_get(doc, v, "file");
-        yaml_node_t *ln = yaml_map_get(doc, v, "loop");
+        ln = yaml_map_get(doc, v, "loop");
         if (fn != NULL)
             file_str = yaml_scalar(fn);
         if (ln != NULL) {
@@ -345,11 +381,16 @@ static flow_action_t *parse_stream_action(yaml_document_t *doc, yaml_node_t *v, 
         file_str = yaml_scalar(v);
     }
 
+    if (item && (ln = yaml_map_get(doc, item, "loop"))) {
+        const char *ls = yaml_scalar(ln);
+        loop_val = (g_strcmp0(ls, "false") != 0 && g_strcmp0(ls, "0") != 0 && g_strcmp0(ls, "no") != 0);
+    }
+
     if (file_str != NULL) {
         char *resolved = resolve_flow_asset(base_dir, flow_dir, file_str);
-        a->stream_file = g_strdup(file_str);
-        a->stream_loop = loop_val;
-        a->stream_provider = stream_provider_new(resolved, loop_val, ep);
+        stream_provider_t *sp = stream_provider_new(resolved, loop_val, ep);
+        a->provider_ops = *stream_provider_get_ops();
+        a->provider_ctx = sp;
         g_free(resolved);
     }
 
@@ -364,8 +405,8 @@ static flow_action_t *parse_disk_action(yaml_document_t *doc, yaml_node_t *v, ui
     uint8_t ep_in = 0x81;
     uint8_t ep_out = (ep_hint != 0) ? ep_hint : 0x02;
 
-    a->type = ACT_DISK_FROM_FILE;
-    a->ep = ep_hint;
+    a->type = ACT_ENDPOINT_PROVIDER;
+    a->ep = ep_out;
 
     if (v->type == YAML_MAPPING_NODE) {
         yaml_node_t *fn = yaml_map_get(doc, v, "file");
@@ -387,8 +428,9 @@ static flow_action_t *parse_disk_action(yaml_document_t *doc, yaml_node_t *v, ui
 
     if (file_str != NULL) {
         char *resolved = resolve_flow_asset(base_dir, flow_dir, file_str);
-        a->disk_file = g_strdup(file_str);
-        a->disk_provider = disk_provider_new(resolved, ep_in, ep_out);
+        disk_provider_t *dp = disk_provider_new(resolved, ep_in, ep_out);
+        a->provider_ops = *disk_provider_get_ops();
+        a->provider_ctx = dp;
         g_free(resolved);
     }
 
@@ -441,18 +483,10 @@ static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq, uint8_t ep_h
             a = parse_queue_endpoint_data(doc, v);
         } else if ((v = yaml_map_get(doc, item, "stream_from_file")) ||
                    (v = yaml_map_get(doc, item, "stream"))) {
-            a = parse_stream_action(doc, v, ep_hint, flow_dir, base_dir);
+            a = parse_stream_action(doc, item, v, ep_hint, flow_dir, base_dir);
         } else if ((v = yaml_map_get(doc, item, "disk_from_file")) ||
                    (v = yaml_map_get(doc, item, "attach_disk"))) {
             a = parse_disk_action(doc, v, ep_hint, flow_dir, base_dir);
-        }
-
-        if (a && a->type == ACT_STREAM_FROM_FILE && (v = yaml_map_get(doc, item, "loop"))) {
-            const char *ls = yaml_scalar(v);
-            a->stream_loop = (g_strcmp0(ls, "false") != 0 && g_strcmp0(ls, "0") != 0 && g_strcmp0(ls, "no") != 0);
-            if (a->stream_provider != NULL) {
-                a->stream_provider->loop = a->stream_loop;
-            }
         }
 
         if (a)
@@ -787,33 +821,22 @@ static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t
                 }
                 for (GList *pl = a->payloads->head; pl; pl = pl->next) {
                     GByteArray *arr = pl->data;
-                    /* If this is a 13-byte CSW ("USBS" at offset 0) and we tracked a CBW tag,
-                     * dynamically update CSW tag at offset 4..7 to match CBW tag */
-                    if (arr->len == 13 && memcmp(arr->data, "USBS", 4) == 0 && flow->has_cbw_tag) {
-                        GByteArray *csw_copy = g_byte_array_sized_new(13);
-                        g_byte_array_append(csw_copy, arr->data, 13);
-                        memcpy(csw_copy->data + 4, flow->last_cbw_tag, 4);
-                        g_queue_push_tail(q, csw_copy);
-                    } else {
-                        g_queue_push_tail(q, g_byte_array_ref(arr));
-                    }
+                    g_queue_push_tail(q, g_byte_array_ref(arr));
                 }
                 break;
             }
             case ACT_RETURN_NAK_IF_QUEUE_EMPTY:
                 break;
-            case ACT_STREAM_FROM_FILE:
-                break;
-            case ACT_DISK_FROM_FILE:
-                if (a->disk_provider != NULL && ep_buf != NULL && ep_len > 0) {
-                    uint8_t in_ep = disk_provider_get_ep_in(a->disk_provider);
-                    GQueue *q = g_hash_table_lookup(flow->ep_queues, GUINT_TO_POINTER((guint)in_ep));
+            case ACT_ENDPOINT_PROVIDER:
+                if (a->provider_ops.consume_out && a->provider_ctx && ep_buf && ep_len > 0) {
+                    GQueue *q = g_hash_table_lookup(flow->ep_queues, GUINT_TO_POINTER((guint)0x81));
                     if (!q) {
                         q = g_queue_new();
-                        g_hash_table_insert(flow->ep_queues, GUINT_TO_POINTER((guint)in_ep), q);
+                        g_hash_table_insert(flow->ep_queues, GUINT_TO_POINTER((guint)0x81), q);
                     }
-                    disk_provider_handle_out(a->disk_provider, ep_buf, ep_len, q);
-                    if (handled) *handled = 1;
+                    if (a->provider_ops.consume_out(a->provider_ctx, a->ep, ep_buf, ep_len, q) == 0) {
+                        if (handled) *handled = 1;
+                    }
                 }
                 break;
         }
@@ -921,8 +944,8 @@ static int match_and_execute_ep_in(flow_t *flow, GList *rules,
             for (al = r->actions; al; al = al->next) {
                 flow_action_t *a = al->data;
 
-                if (a->type == ACT_STREAM_FROM_FILE && a->stream_provider != NULL) {
-                    int n = stream_provider_produce_packet(a->stream_provider, ep, buf, cap);
+                if (a->type == ACT_ENDPOINT_PROVIDER && a->provider_ops.produce_in && a->provider_ctx) {
+                    int n = a->provider_ops.produce_in(a->provider_ctx, ep, buf, cap);
                     if (n >= 0)
                         return n;
                 }
@@ -939,6 +962,7 @@ int flow_ep_in(flow_t *flow, uint8_t ep, uint8_t *buf, size_t cap)
 {
     GList *ml;
     GQueue *q;
+    flow_endpoint_binding_t *b;
     int handled = 0;
 
     if (!flow)
@@ -976,6 +1000,16 @@ int flow_ep_in(flow_t *flow, uint8_t ep, uint8_t *buf, size_t cap)
 
     if (!handled && flow->common_rules) {
         int n = match_and_execute_ep_in(flow, flow->common_rules, ep, buf, cap, &handled);
+        if (n >= 0)
+            return n;
+    }
+
+    /* Check directly bound endpoint providers */
+    b = g_hash_table_lookup(flow->ep_bindings, GUINT_TO_POINTER((guint)ep));
+    if (!b)
+        b = g_hash_table_lookup(flow->ep_bindings, GUINT_TO_POINTER(0));
+    if (b && b->ops.produce_in && b->ctx) {
+        int n = b->ops.produce_in(b->ctx, ep, buf, cap);
         if (n >= 0)
             return n;
     }
@@ -1026,6 +1060,7 @@ static int match_and_execute_ep_out(flow_t *flow, GList *rules,
 int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
 {
     GList *ml;
+    flow_endpoint_binding_t *b;
     int handled = 0;
 
     if (!flow)
@@ -1040,13 +1075,6 @@ int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
         if (len > shown)
             snprintf(hex + o, sizeof(hex) - o, "...");
         LOG_IN("ep 0x%02x OUT %zu bytes: %s", ep, len, hex);
-
-        /* If this is a 31-byte MSC Command Block Wrapper ("USBC" at offset 0),
-         * capture its 4-byte Tag at offset 4..7 */
-        if (len >= 31 && memcmp(buf, "USBC", 4) == 0) {
-            memcpy(flow->last_cbw_tag, buf + 4, 4);
-            flow->has_cbw_tag = TRUE;
-        }
     } else {
         LOG_IN("ep 0x%02x OUT %zu bytes", ep, len);
     }
@@ -1080,7 +1108,22 @@ int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
     }
 
     if (!handled && flow->common_rules) {
-        match_and_execute_ep_out(flow, flow->common_rules, ep, buf, len);
+        handled = match_and_execute_ep_out(flow, flow->common_rules, ep, buf, len);
+    }
+
+    if (!handled) {
+        b = g_hash_table_lookup(flow->ep_bindings, GUINT_TO_POINTER((guint)ep));
+        if (!b)
+            b = g_hash_table_lookup(flow->ep_bindings, GUINT_TO_POINTER(0));
+        if (b && b->ops.consume_out && b->ctx) {
+            GQueue *q = g_hash_table_lookup(flow->ep_queues, GUINT_TO_POINTER((guint)0x81));
+            if (!q) {
+                q = g_queue_new();
+                g_hash_table_insert(flow->ep_queues, GUINT_TO_POINTER((guint)0x81), q);
+            }
+            if (b->ops.consume_out(b->ctx, ep, buf, len, q) == 0)
+                handled = 1;
+        }
     }
 
     return 0;
@@ -1097,8 +1140,8 @@ static void tick_rules(GList *rules)
         for (al = r->actions; al; al = al->next) {
             flow_action_t *a = al->data;
 
-            if (a->type == ACT_STREAM_FROM_FILE && a->stream_provider != NULL) {
-                stream_provider_tick(a->stream_provider);
+            if (a->type == ACT_ENDPOINT_PROVIDER && a->provider_ops.tick && a->provider_ctx) {
+                a->provider_ops.tick(a->provider_ctx);
             }
         }
     }
@@ -1107,6 +1150,8 @@ static void tick_rules(GList *rules)
 void flow_tick(flow_t *flow)
 {
     GList *ml;
+    GHashTableIter iter;
+    gpointer key, value;
 
     if (!flow)
         return;
@@ -1134,6 +1179,15 @@ void flow_tick(flow_t *flow)
     }
 
     tick_rules(flow->common_rules);
+
+    /* Tick bound endpoint providers */
+    g_hash_table_iter_init(&iter, flow->ep_bindings);
+    while (g_hash_table_iter_next(&iter, &key, &value)) {
+        flow_endpoint_binding_t *b = value;
+        if (b && b->ops.tick && b->ctx) {
+            b->ops.tick(b->ctx);
+        }
+    }
 
     for (ml = flow->machines; ml; ml = ml->next) {
         flow_machine_t *m = ml->data;

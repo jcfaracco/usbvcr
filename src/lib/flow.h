@@ -12,13 +12,36 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <glib.h>
 
 typedef struct flow flow_t;
+
+/* Generic endpoint provider operations (decouples protocol providers like
+ * storage BOT/SCSI and MJPEG video streaming from the core flow engine). */
+typedef struct flow_endpoint_ops {
+    /* Called when IN packet is requested on ep (0 for NAK, > 0 bytes written, -1 unhandled) */
+    int  (*produce_in)(void *ctx, uint8_t ep, uint8_t *buf, size_t cap);
+
+    /* Called when OUT packet is received on ep (0 handled, -1 unhandled) */
+    int  (*consume_out)(void *ctx, uint8_t ep, const uint8_t *buf, size_t len, GQueue *in_queue);
+
+    /* Called periodically on flow_tick() */
+    void (*tick)(void *ctx);
+
+    /* Called when provider is unbound or flow is destroyed (optional) */
+    void (*free)(void *ctx);
+} flow_endpoint_ops_t;
 
 flow_t *flow_create(void);
 flow_t *flow_load(const char *path);
 flow_t *flow_load_with_dir(const char *path, const char *base_dir);
 void  flow_free(flow_t *flow);
+
+/* Bind an endpoint to a generic provider */
+int  flow_bind_endpoint(flow_t *flow, uint8_t ep, const flow_endpoint_ops_t *ops, void *ctx);
+
+/* Unbind a previously bound endpoint provider */
+void flow_unbind_endpoint(flow_t *flow, uint8_t ep);
 
 /* Current state name of default machine (NULL if none). */
 const char *flow_current_state(flow_t *flow);

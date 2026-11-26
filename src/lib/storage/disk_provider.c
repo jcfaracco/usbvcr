@@ -320,3 +320,26 @@ int disk_provider_handle_out(disk_provider_t *dp, const uint8_t *buf, size_t len
 
     return 0;
 }
+
+static int disk_consume_out(void *ctx, uint8_t ep, const uint8_t *buf, size_t len, GQueue *in_queue)
+{
+    (void)ep;
+    return disk_provider_handle_out((disk_provider_t *)ctx, buf, len, in_queue);
+}
+
+static void disk_free_op(void *ctx)
+{
+    disk_provider_free((disk_provider_t *)ctx);
+}
+
+static const flow_endpoint_ops_t disk_endpoint_ops = {
+    .produce_in = NULL,
+    .consume_out = disk_consume_out,
+    .tick = NULL,
+    .free = disk_free_op,
+};
+
+const flow_endpoint_ops_t *disk_provider_get_ops(void)
+{
+    return &disk_endpoint_ops;
+}

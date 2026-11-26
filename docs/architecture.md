@@ -298,5 +298,4 @@ The test harness runs suites against `usb_core` and the execution backends.
 
 Active and upcoming architectural improvements are tracked in [TODO.md](../TODO.md). Key areas include:
 - Standardizing engines around an `engine_ops_t` interface.
-- Decoupling flow state machine execution from storage and streaming providers.
 - Asynchronous tick-driven delayed responses and state dwell times.

@@ -31,26 +31,6 @@ This makes debugging malformed manifests difficult because it provides:
 
 ---
 
-### `[flow/decouple]` Decouple protocol-specific logic (MSC BOT / SCSI) and streaming from generic flow engine
-**File:** `src/lib/flow.c:65, 542-551, 662-667`, `src/lib/flow.h`, `src/lib/storage/disk_provider.c`, `src/lib/stream/stream_provider.c`
-**Complexity:** High
-
-The generic flow engine currently has device-class-specific framing and protocol logic
-hardcoded directly into its structures and packet handlers:
-* `flow_t` carries USB Mass Storage (MSC) Command Block Wrapper (CBW) tracking state (`last_cbw_tag[4]` and `has_cbw_tag`).
-* `flow_ep_out()` inspects payload length and checks `memcmp(buf, "USBC", 4) == 0` to intercept MSC CBW tags.
-* `execute_actions()` (`ACT_QUEUE_ENDPOINT_DATA`) dynamically rewrites bytes 4..7 of 13-byte Command Status Wrappers (`USBS`) to match the intercepted CBW tag.
-* `ACT_DISK_FROM_FILE` and `ACT_STREAM_FROM_FILE` are baked as monolithic action types into `flow_action_type_t`, embedding SCSI command execution (`disk_provider`) and MJPEG parsing (`stream_provider`) inside `flow.c`.
-* `stream_provider` is duplicated: checked both as a flow action and separately on `yaml_backend_state_t` (`yb_ep_in` and `yb_tick`).
-
-**Target Improvements:**
-* Remove CBW/CSW tag tracking and magic byte checks from `flow.c`.
-* Replace `ACT_DISK_FROM_FILE` and `ACT_STREAM_FROM_FILE` with a generic endpoint provider/filter interface (`flow_bind_endpoint(ep, provider_ops)`).
-* Encapsulate BOT framing and SCSI CDB handling entirely inside `disk_provider`.
-* Unify endpoint streaming and packet consumption into a single dispatch path.
-
----
-
 ### `[yaml/loader]` `parse_tests()` is a no-op stub
 **File:** `src/lib/yaml/loader.c:101-105`
 **Complexity:** Medium

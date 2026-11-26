@@ -113,24 +113,6 @@ directly up to CLI diagnostic outputs and test suites.
 
 ---
 
-### `[flow/rules]` Common/global rules and state inheritance for flow FSM
-**File:** `src/lib/flow.c:575-603`, `src/lib/flow.h`
-**Complexity:** Medium
-
-The flow engine matches rules strictly within the current state (`flow->state`).
-Because USB hosts can re-request descriptors or standard requests (`GET_DESCRIPTOR`,
-`SET_CONFIGURATION`, `GET_REPORT`) at any time, every state in a multi-state flow
-(such as `idle` and `streaming` in UVC) is forced to duplicate ~150 lines of
-standard enumeration rules. In simpler devices (e.g. keyboards), authors are forced
-to collapse the entire device into a single monolithic state.
-
-**Target Improvements:**
-* Add a `common_rules:` block in YAML flow definitions that applies across all states.
-* Support state inheritance (`states: - name: streaming, extends: idle`).
-* In `flow_control()`, evaluate `st->rules` first; if unhandled, fall through to `common_rules`.
-
----
-
 ### `[flow]` Orthogonal (and hierarchical) state machine support
 **File:** `src/lib/flow.c`, `src/lib/flow.h`
 **Complexity:** High

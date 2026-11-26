@@ -54,6 +54,7 @@ typedef struct {
 
 typedef struct {
     char *name;
+    char *extends;
     GList *on_enter; // of flow_action_t*
     GList *rules;    // of flow_rule_t*
 } flow_state_t;
@@ -62,6 +63,7 @@ struct flow {
     char *state; // current state name
     char *next_state;
     GHashTable *states; // name -> flow_state_t*
+    GList *common_rules; // of flow_rule_t*
     GHashTable *ep_queues; // ep (uint8_t) -> GQueue of GByteArray*
     uint8_t last_cbw_tag[4];
     gboolean has_cbw_tag;
@@ -105,6 +107,7 @@ static void flow_state_free(flow_state_t *st) {
         return;
 
     g_free(st->name);
+    g_free(st->extends);
     g_list_free_full(st->on_enter, (GDestroyNotify)flow_action_free);
     g_list_free_full(st->rules, (GDestroyNotify)flow_rule_free);
     g_free(st);
@@ -127,6 +130,9 @@ void flow_free(flow_t *flow)
 
     g_free(flow->state);
     g_free(flow->next_state);
+
+    if (flow->common_rules)
+        g_list_free_full(flow->common_rules, (GDestroyNotify)flow_rule_free);
     
     GHashTableIter iter;
     gpointer key, value;
@@ -462,6 +468,11 @@ flow_t *flow_load_with_dir(const char *path, const char *base_dir) {
     }
 
     flow_t *f = flow_create();
+
+    yaml_node_t *common_n = yaml_map_get(&doc, top, "common_rules");
+    if (common_n)
+        f->common_rules = parse_rules(&doc, common_n, flow_dir, base_dir);
+
     yaml_node_t *states_n = yaml_map_get(&doc, top, "states");
     if (states_n && states_n->type == YAML_SEQUENCE_NODE) {
         for (yaml_node_item_t *i = states_n->data.sequence.items.start; i < states_n->data.sequence.items.top; i++) {
@@ -473,6 +484,12 @@ flow_t *flow_load_with_dir(const char *path, const char *base_dir) {
             if (name_n) {
                 const char *s = yaml_scalar(name_n);
                 if (s) st->name = g_strdup(s);
+            }
+
+            yaml_node_t *ext_n = yaml_map_get(&doc, item, "extends");
+            if (ext_n) {
+                const char *s = yaml_scalar(ext_n);
+                if (s) st->extends = g_strdup(s);
             }
             
             yaml_node_t *enter_n = yaml_map_get(&doc, item, "on_enter");
@@ -611,65 +628,158 @@ static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t
     }
 }
 
+static int match_and_execute_control(flow_t *flow, GList *rules,
+                                     uint8_t bmRequestType, uint8_t bRequest,
+                                     uint16_t wValue, uint16_t wIndex,
+                                     uint8_t *out, uint16_t *len)
+{
+    GList *l;
+
+    for (l = rules; l; l = l->next) {
+        flow_rule_t *r = l->data;
+        int match = 1;
+
+        if (r->match.has_bmRequestType && r->match.bmRequestType != bmRequestType)
+            match = 0;
+        if (r->match.has_bRequest && r->match.bRequest != bRequest)
+            match = 0;
+        if (r->match.has_wValue && r->match.wValue != wValue)
+            match = 0;
+        if (r->match.has_wIndex && r->match.wIndex != wIndex)
+            match = 0;
+        if (r->match.has_endpoint_poll || r->match.has_endpoint_out)
+            match = 0;
+
+        if (match) {
+            int handled = 0;
+
+            execute_actions(flow, r->actions, out, len, NULL, 0, &handled);
+            if (handled)
+                return 0;
+        }
+    }
+
+    return -1;
+}
+
 int flow_control(flow_t *flow, const uint8_t *setup,
                  uint8_t *out, uint16_t *len)
 {
-    if (!flow || !flow->state) return -1;
-    flow_state_t *st = g_hash_table_lookup(flow->states, flow->state);
-    if (!st) return -1;
-    
-    uint8_t bmRequestType = setup[0];
-    uint8_t bRequest = setup[1];
-    uint16_t wValue = get_u16le(&setup[2]);
-    uint16_t wIndex = get_u16le(&setup[4]);
+    flow_state_t *st;
+    flow_state_t *curr;
+    uint8_t bmRequestType;
+    uint8_t bRequest;
+    uint16_t wValue;
+    uint16_t wIndex;
+    int depth;
 
-    for (GList *l = st->rules; l; l = l->next) {
+    if (!flow || !flow->state)
+        return -1;
+
+    st = g_hash_table_lookup(flow->states, flow->state);
+    if (!st)
+        return -1;
+
+    bmRequestType = setup[0];
+    bRequest = setup[1];
+    wValue = get_u16le(&setup[2]);
+    wIndex = get_u16le(&setup[4]);
+
+    curr = st;
+    depth = 0;
+    while (curr && depth++ < 16) {
+        if (match_and_execute_control(flow, curr->rules, bmRequestType, bRequest,
+                                      wValue, wIndex, out, len) == 0)
+            return 0;
+
+        if (curr->extends)
+            curr = g_hash_table_lookup(flow->states, curr->extends);
+        else
+            break;
+    }
+
+    if (flow->common_rules) {
+        if (match_and_execute_control(flow, flow->common_rules, bmRequestType, bRequest,
+                                      wValue, wIndex, out, len) == 0)
+            return 0;
+    }
+
+    return -1;
+}
+
+static int match_and_execute_ep_in(flow_t *flow, GList *rules,
+                                   uint8_t ep, uint8_t *buf, size_t cap,
+                                   int *handled)
+{
+    GList *l;
+
+    for (l = rules; l; l = l->next) {
         flow_rule_t *r = l->data;
-        int match = 1;
-        if (r->match.has_bmRequestType && r->match.bmRequestType != bmRequestType) match = 0;
-        if (r->match.has_bRequest && r->match.bRequest != bRequest) match = 0;
-        if (r->match.has_wValue && r->match.wValue != wValue) match = 0;
-        if (r->match.has_wIndex && r->match.wIndex != wIndex) match = 0;
-        if (r->match.has_endpoint_poll || r->match.has_endpoint_out) match = 0;
-        
-        if (match) {
-            int handled = 0;
-            execute_actions(flow, r->actions, out, len, NULL, 0, &handled);
-            if (handled) return 0;
+
+        if (r->match.has_endpoint_poll && r->match.endpoint_poll == ep) {
+            GList *al;
+
+            *handled = 1;
+            for (al = r->actions; al; al = al->next) {
+                flow_action_t *a = al->data;
+
+                if (a->type == ACT_STREAM_FROM_FILE && a->stream_provider != NULL) {
+                    int n = stream_provider_produce_packet(a->stream_provider, ep, buf, cap);
+                    if (n >= 0)
+                        return n;
+                }
+            }
+            execute_actions(flow, r->actions, NULL, NULL, NULL, 0, NULL);
+            return -1;
         }
     }
+
     return -1;
 }
 
 int flow_ep_in(flow_t *flow, uint8_t ep, uint8_t *buf, size_t cap)
 {
-    if (!flow || !flow->state) return 0;
-    
-    flow_state_t *st = g_hash_table_lookup(flow->states, flow->state);
-    if (st) {
-        for (GList *l = st->rules; l; l = l->next) {
-            flow_rule_t *r = l->data;
-            if (r->match.has_endpoint_poll && r->match.endpoint_poll == ep) {
-                for (GList *al = r->actions; al; al = al->next) {
-                    flow_action_t *a = al->data;
-                    if (a->type == ACT_STREAM_FROM_FILE && a->stream_provider != NULL) {
-                        int n = stream_provider_produce_packet(a->stream_provider, ep, buf, cap);
-                        if (n >= 0) {
-                            return n;
-                        }
-                    }
-                }
-                execute_actions(flow, r->actions, NULL, NULL, NULL, 0, NULL);
-            }
-        }
+    flow_state_t *st;
+    flow_state_t *curr;
+    GQueue *q;
+    int depth;
+    int handled;
+
+    if (!flow || !flow->state)
+        return 0;
+
+    st = g_hash_table_lookup(flow->states, flow->state);
+    curr = st;
+    depth = 0;
+    handled = 0;
+
+    while (curr && depth++ < 16) {
+        int n = match_and_execute_ep_in(flow, curr->rules, ep, buf, cap, &handled);
+        if (n >= 0)
+            return n;
+        if (handled)
+            break;
+
+        if (curr->extends)
+            curr = g_hash_table_lookup(flow->states, curr->extends);
+        else
+            break;
     }
 
-    GQueue *q = g_hash_table_lookup(flow->ep_queues, GUINT_TO_POINTER((guint)ep));
+    if (!handled && flow->common_rules) {
+        int n = match_and_execute_ep_in(flow, flow->common_rules, ep, buf, cap, &handled);
+        if (n >= 0)
+            return n;
+    }
+
+    q = g_hash_table_lookup(flow->ep_queues, GUINT_TO_POINTER((guint)ep));
     if (q && !g_queue_is_empty(q)) {
         GByteArray *arr = g_queue_peek_head(q);
+
         if (arr->len <= cap) {
-            g_queue_pop_head(q);
             size_t len = arr->len;
+
+            g_queue_pop_head(q);
             memcpy(buf, arr->data, len);
             g_byte_array_unref(arr);
             return (int)len;
@@ -679,12 +789,39 @@ int flow_ep_in(flow_t *flow, uint8_t ep, uint8_t *buf, size_t cap)
             return (int)cap;
         }
     }
-    
+
     return 0; // NAK
+}
+
+static int match_and_execute_ep_out(flow_t *flow, GList *rules,
+                                    uint8_t ep, const uint8_t *buf, size_t len)
+{
+    GList *l;
+    int handled = 0;
+
+    for (l = rules; l; l = l->next) {
+        flow_rule_t *r = l->data;
+
+        if (r->match.has_endpoint_out && r->match.endpoint_out == ep) {
+            if (r->match.match_payload != NULL) {
+                if (len < r->match.match_payload->len ||
+                    memcmp(buf, r->match.match_payload->data, r->match.match_payload->len) != 0)
+                    continue;
+            }
+            execute_actions(flow, r->actions, NULL, NULL, buf, len, &handled);
+        }
+    }
+
+    return handled;
 }
 
 int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
 {
+    flow_state_t *st;
+    flow_state_t *curr;
+    int depth;
+    int handled;
+
     if (!flow)
         return -1;
 
@@ -711,48 +848,75 @@ int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
     if (!flow->state)
         return 0;
 
-    flow_state_t *st = g_hash_table_lookup(flow->states, flow->state);
-    if (st) {
-        for (GList *l = st->rules; l; l = l->next) {
-            flow_rule_t *r = l->data;
-            if (r->match.has_endpoint_out && r->match.endpoint_out == ep) {
-                if (r->match.match_payload != NULL) {
-                    /* If match payload specified, check if buf contains or matches prefix */
-                    if (len < r->match.match_payload->len ||
-                        memcmp(buf, r->match.match_payload->data, r->match.match_payload->len) != 0)
-                        continue;
-                }
-                int handled = 0;
-                execute_actions(flow, r->actions, NULL, NULL, buf, len, &handled);
-            }
-        }
+    st = g_hash_table_lookup(flow->states, flow->state);
+    curr = st;
+    depth = 0;
+    handled = 0;
+
+    while (curr && depth++ < 16) {
+        handled = match_and_execute_ep_out(flow, curr->rules, ep, buf, len);
+        if (handled)
+            break;
+
+        if (curr->extends)
+            curr = g_hash_table_lookup(flow->states, curr->extends);
+        else
+            break;
+    }
+
+    if (!handled && flow->common_rules) {
+        match_and_execute_ep_out(flow, flow->common_rules, ep, buf, len);
     }
 
     return 0;
 }
 
+static void tick_rules(GList *rules)
+{
+    GList *l;
+
+    for (l = rules; l; l = l->next) {
+        flow_rule_t *r = l->data;
+        GList *al;
+
+        for (al = r->actions; al; al = al->next) {
+            flow_action_t *a = al->data;
+
+            if (a->type == ACT_STREAM_FROM_FILE && a->stream_provider != NULL) {
+                stream_provider_tick(a->stream_provider);
+            }
+        }
+    }
+}
+
 void flow_tick(flow_t *flow)
 {
+    flow_state_t *st;
+    flow_state_t *curr;
+    int depth;
+
     if (!flow)
         return;
 
     if (flow->state) {
-        flow_state_t *st = g_hash_table_lookup(flow->states, flow->state);
-        if (st) {
-            for (GList *l = st->rules; l; l = l->next) {
-                flow_rule_t *r = l->data;
-                for (GList *al = r->actions; al; al = al->next) {
-                    flow_action_t *a = al->data;
-                    if (a->type == ACT_STREAM_FROM_FILE && a->stream_provider != NULL) {
-                        stream_provider_tick(a->stream_provider);
-                    }
-                }
-            }
+        st = g_hash_table_lookup(flow->states, flow->state);
+        curr = st;
+        depth = 0;
+
+        while (curr && depth++ < 16) {
+            tick_rules(curr->rules);
+            if (curr->extends)
+                curr = g_hash_table_lookup(flow->states, curr->extends);
+            else
+                break;
         }
     }
 
+    tick_rules(flow->common_rules);
+
     if (flow->next_state) {
         char *target = flow->next_state;
+
         flow->next_state = NULL;
         flow_transition_to(flow, target);
         g_free(target);

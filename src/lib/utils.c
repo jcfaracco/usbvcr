@@ -80,22 +80,29 @@ int usb_parse_speed(const char *str)
 }
 
 
-/* TODO: Check if there is an option instead of developing it. */
-void trim_string(char *dst, const char *src, size_t dst_size) {
+void trim_string(char *dst, const char *src, size_t dst_size)
+{
+    g_autofree char *tmp = NULL;
+    const char *hash = NULL;
     size_t len = 0;
 
-    while (isspace((unsigned char)*src))
-        src++;
-
-    while (src[len] != '\0' && src[len] != '#' && len < dst_size - 1) {
-        len++;
+    if (dst == NULL || dst_size == 0)
+    {
+        return;
     }
 
-    while (len > 0 && isspace((unsigned char)src[len - 1]))
-        len--;
+    dst[0] = '\0';
+    if (src == NULL)
+    {
+        return;
+    }
 
-    strncpy(dst, src, len);
-    dst[len] = '\0';
+    hash = strchr(src, '#');
+    len = hash != NULL ? (size_t)(hash - src) : strlen(src);
+
+    tmp = g_strndup(src, len);
+    g_strstrip(tmp);
+    g_strlcpy(dst, tmp, dst_size);
 }
 
 

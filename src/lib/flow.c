@@ -2,6 +2,7 @@
 #include "yaml/util.h" // for yaml_map_get, yaml_scalar
 #include "log.h"
 #include "utils.h"
+#include "bytes.h"
 #include "stream/stream_provider.h"
 #include "storage/disk_provider.h"
 
@@ -581,8 +582,8 @@ int flow_control(flow_t *flow, const uint8_t *setup,
     
     uint8_t bmRequestType = setup[0];
     uint8_t bRequest = setup[1];
-    uint16_t wValue = setup[2] | (setup[3] << 8);
-    uint16_t wIndex = setup[4] | (setup[5] << 8);
+    uint16_t wValue = get_u16le(&setup[2]);
+    uint16_t wIndex = get_u16le(&setup[4]);
 
     for (GList *l = st->rules; l; l = l->next) {
         flow_rule_t *r = l->data;

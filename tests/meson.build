@@ -62,7 +62,7 @@ if check_dep.found()
       '../src/lib/storage/disk_provider.c',
       '../src/lib/log.c',
     ),
-    include_directories : [lib],
+    include_directories : [lib, core],
     dependencies : [check_dep, glib_dep, yaml_dep],
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
@@ -85,7 +85,7 @@ if check_dep.found()
       '../src/lib/storage/disk_provider.c',
       '../src/lib/log.c',
     ),
-    include_directories : [lib],
+    include_directories : [lib, core],
     dependencies : [check_dep, glib_dep, yaml_dep],
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )

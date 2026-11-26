@@ -400,6 +400,108 @@ START_TEST(test_flow_orthogonal_state_machines)
 }
 END_TEST
 
+typedef struct {
+    int produce_called;
+    int consume_called;
+    int tick_called;
+    int free_called;
+    uint8_t last_consumed_byte;
+} mock_provider_ctx_t;
+
+static int mock_produce_in(void *ctx, uint8_t ep, uint8_t *buf, size_t cap)
+{
+    (void)ep;
+    mock_provider_ctx_t *m = ctx;
+    m->produce_called++;
+    if (cap < 4) return -1;
+    buf[0] = 0xAA;
+    buf[1] = 0xBB;
+    buf[2] = 0xCC;
+    buf[3] = 0xDD;
+    return 4;
+}
+
+static int mock_consume_out(void *ctx, uint8_t ep, const uint8_t *buf, size_t len, GQueue *in_queue)
+{
+    (void)ep;
+    (void)in_queue;
+    mock_provider_ctx_t *m = ctx;
+    m->consume_called++;
+    if (len > 0)
+        m->last_consumed_byte = buf[0];
+    return 0;
+}
+
+static void mock_tick(void *ctx)
+{
+    mock_provider_ctx_t *m = ctx;
+    m->tick_called++;
+}
+
+static void mock_free(void *ctx)
+{
+    mock_provider_ctx_t *m = ctx;
+    m->free_called++;
+}
+
+static const flow_endpoint_ops_t mock_ops = {
+    .produce_in = mock_produce_in,
+    .consume_out = mock_consume_out,
+    .tick = mock_tick,
+    .free = mock_free,
+};
+
+START_TEST(test_flow_endpoint_provider_binding)
+{
+    flow_t *f = flow_create();
+    mock_provider_ctx_t ctx1 = {0};
+    mock_provider_ctx_t ctx2 = {0};
+    uint8_t buf[64];
+    uint8_t out_pkt[2] = { 0x42, 0x43 };
+    int n;
+
+    /* Invalid args */
+    ck_assert_int_eq(flow_bind_endpoint(NULL, 0x82, &mock_ops, &ctx1), -1);
+    ck_assert_int_eq(flow_bind_endpoint(f, 0x82, NULL, &ctx1), -1);
+
+    /* Bind ctx1 to ep 0x82 */
+    ck_assert_int_eq(flow_bind_endpoint(f, 0x82, &mock_ops, &ctx1), 0);
+
+    /* Produce on ep 0x82 */
+    n = flow_ep_in(f, 0x82, buf, sizeof(buf));
+    ck_assert_int_eq(n, 4);
+    ck_assert_int_eq(buf[0], 0xAA);
+    ck_assert_int_eq(ctx1.produce_called, 1);
+
+    /* Consume on ep 0x82 */
+    ck_assert_int_eq(flow_ep_out(f, 0x82, out_pkt, sizeof(out_pkt)), 0);
+    ck_assert_int_eq(ctx1.consume_called, 1);
+    ck_assert_int_eq(ctx1.last_consumed_byte, 0x42);
+
+    /* Tick calls provider tick */
+    flow_tick(f);
+    ck_assert_int_eq(ctx1.tick_called, 1);
+
+    /* Unbind ep 0x82 -> free is called */
+    flow_unbind_endpoint(f, 0x82);
+    ck_assert_int_eq(ctx1.free_called, 1);
+
+    /* Subsequent in on 0x82 returns 0 (no queue, no provider) */
+    n = flow_ep_in(f, 0x82, buf, sizeof(buf));
+    ck_assert_int_eq(n, 0);
+
+    /* Wildcard binding on ep 0 */
+    ck_assert_int_eq(flow_bind_endpoint(f, 0, &mock_ops, &ctx2), 0);
+    n = flow_ep_in(f, 0x85, buf, sizeof(buf));
+    ck_assert_int_eq(n, 4);
+    ck_assert_int_eq(ctx2.produce_called, 1);
+
+    /* Freeing flow destroys wildcard binding and calls free */
+    flow_free(f);
+    ck_assert_int_eq(ctx2.free_called, 1);
+}
+END_TEST
+
 START_TEST(test_flow_free_null)
 {
     flow_free(NULL);
@@ -419,6 +521,7 @@ static Suite *flow_suite(void)
     tcase_add_test(tc_core, test_flow_transition_to_api);
     tcase_add_test(tc_core, test_flow_rules_inheritance);
     tcase_add_test(tc_core, test_flow_orthogonal_state_machines);
+    tcase_add_test(tc_core, test_flow_endpoint_provider_binding);
     tcase_add_test(tc_core, test_flow_free_null);
     suite_add_tcase(s, tc_core);
 

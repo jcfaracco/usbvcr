@@ -57,6 +57,7 @@ static void pcap_decode_usbmon_header(const usbmon_header_t *h, pcap_packet_t *p
     pkt->dir         = (h->epnum & 0x80) ? PCAP_DIR_IN : PCAP_DIR_OUT;
     pkt->xfer        = (pcap_xfer_t)h->xfer_type;
     pkt->event_type  = (char)h->type;
+    pkt->ndesc       = h->ndesc;
 
     /* usbmon convention: flag_setup == 0 means s.setup holds a real setup
      * packet (see pcap_init_usbmon_header for how the writer sets it). */

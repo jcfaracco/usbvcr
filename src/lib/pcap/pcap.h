@@ -53,6 +53,7 @@ typedef struct {
     uint8_t     setup[8];
     const uint8_t *data;
     size_t      data_len;
+    uint32_t    ndesc;        /* Number of isochronous descriptors (usbmon) */
 } pcap_packet_t;
 
 /* PCAP global header */

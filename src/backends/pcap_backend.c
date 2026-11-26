@@ -28,7 +28,17 @@ typedef struct {
     GQueue       *control_queue; /* pcap_control_txn_t* */
     GHashTable   *ep_in_queues;  /* guint (ep) -> GQueue* of GByteArray* */
     GHashTable   *ep_out_queues; /* guint (ep) -> GQueue* of GByteArray* */
+    GHashTable   *isoc_endpoints;/* guint (ep) -> NULL (set) */
+    GHashTable   *control_cache; /* guint64 (key) -> GByteArray* */
 } pcap_backend_state_t;
+
+static guint64 make_control_key(uint8_t reqtype, uint8_t req, uint16_t val, uint16_t idx)
+{
+    return ((guint64)reqtype << 48) |
+           ((guint64)req << 40) |
+           ((guint64)val << 16) |
+           ((guint64)idx);
+}
 
 static pcap_control_txn_t *pcap_control_txn_new(const uint8_t setup[8],
                                                 const uint8_t *data,
@@ -147,6 +157,18 @@ static void index_control_pair(pcap_backend_state_t *st,
                           (uint8_t)(wvalue & 0xff), data, data_len);
     }
 
+    if (data != NULL && data_len > 0)
+    {
+        guint64 key = make_control_key(submit->setup[0], submit->setup[1],
+                                       (uint16_t)submit->setup[2] | ((uint16_t)submit->setup[3] << 8),
+                                       (uint16_t)submit->setup[4] | ((uint16_t)submit->setup[5] << 8));
+        GByteArray *arr = g_byte_array_sized_new((guint)data_len);
+        g_byte_array_append(arr, data, (guint)data_len);
+        guint64 *pkey = g_new(guint64, 1);
+        *pkey = key;
+        g_hash_table_insert(st->control_cache, pkey, arr);
+    }
+
     txn = pcap_control_txn_new(submit->setup, data, data_len);
     g_queue_push_tail(st->control_queue, txn);
 }
@@ -196,6 +218,44 @@ static void pcap_backend_index_trace(pcap_backend_state_t *st)
             else if (p->dir == PCAP_DIR_OUT && p->event_type == 'S' && p->data_len > 0)
             {
                 push_ep_payload(st->ep_out_queues, p->endpoint, p->data, p->data_len);
+            }
+        }
+        else if (p->xfer == PCAP_XFER_ISO)
+        {
+            if (p->dir == PCAP_DIR_IN && p->event_type == 'C' && p->data_len > 0)
+            {
+                g_hash_table_add(st->isoc_endpoints, GUINT_TO_POINTER((guint)p->endpoint));
+                if (p->ndesc > 0)
+                {
+                    size_t desc_bytes = (size_t)p->ndesc * 16;
+                    if (p->data_len >= desc_bytes)
+                    {
+                        const uint8_t *data_buf = p->data + desc_bytes;
+                        size_t total_buf_len = p->data_len - desc_bytes;
+
+                        for (uint32_t d = 0; d < p->ndesc; d++)
+                        {
+                            const uint8_t *desc_ptr = p->data + (d * 16);
+                            uint32_t off = (uint32_t)desc_ptr[4] |
+                                           ((uint32_t)desc_ptr[5] << 8) |
+                                           ((uint32_t)desc_ptr[6] << 16) |
+                                           ((uint32_t)desc_ptr[7] << 24);
+                            uint32_t flen = (uint32_t)desc_ptr[8] |
+                                            ((uint32_t)desc_ptr[9] << 8) |
+                                            ((uint32_t)desc_ptr[10] << 16) |
+                                            ((uint32_t)desc_ptr[11] << 24);
+
+                            if (flen > 0 && (size_t)off + flen <= total_buf_len)
+                            {
+                                push_ep_payload(st->ep_in_queues, p->endpoint, data_buf + off, flen);
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    push_ep_payload(st->ep_in_queues, p->endpoint, p->data, p->data_len);
+                }
             }
         }
     }
@@ -329,6 +389,39 @@ static int pb_control(usb_device_t *dev,
     txn = pop_matching_control_txn(st->control_queue, setup);
     if (txn == NULL)
     {
+        guint64 key = make_control_key(setup->requesttype, setup->request, setup->value, setup->index);
+        GByteArray *cached = g_hash_table_lookup(st->control_cache, &key);
+        if (cached != NULL)
+        {
+            copy_len = (cached->len < setup->length) ? (uint16_t)cached->len : setup->length;
+#if USB_VCR_BUF_SIZE < 65536
+            if (copy_len > USB_VCR_BUF_SIZE)
+            {
+                copy_len = (uint16_t)USB_VCR_BUF_SIZE;
+            }
+#endif
+            if (data != NULL && copy_len > 0)
+            {
+                memcpy(data, cached->data, copy_len);
+            }
+            if (len != NULL)
+            {
+                *len = copy_len;
+            }
+            return 0;
+        }
+
+        /* Fallback: acknowledge SET_CONFIGURATION or SET_INTERFACE commands with status 0 */
+        if ((setup->request == USB_REQ_SET_CONFIGURATION ||
+             setup->request == USB_REQ_SET_INTERFACE) && setup->length == 0)
+        {
+            if (len != NULL)
+            {
+                *len = 0;
+            }
+            return 0;
+        }
+
         LOG_DEBUG("pcap_backend: unhandled control setup req=0x%02x type=0x%02x val=0x%04x idx=0x%04x",
                   setup->request, setup->requesttype, setup->value, setup->index);
         return -1;
@@ -386,7 +479,16 @@ static int pb_ep_in(usb_device_t *dev, uint8_t ep, uint8_t *buf, size_t cap)
     {
         memcpy(buf, arr->data, copy_len);
     }
-    g_byte_array_unref(arr);
+
+    if (g_hash_table_contains(st->isoc_endpoints, GUINT_TO_POINTER((guint)ep)))
+    {
+        /* Loop continuous isochronous streaming packets */
+        g_queue_push_tail(q, arr);
+    }
+    else
+    {
+        g_byte_array_unref(arr);
+    }
 
     return (int)copy_len;
 }
@@ -473,6 +575,14 @@ void pcap_backend_destroy(usb_device_t *dev)
         {
             g_hash_table_destroy(st->ep_out_queues);
         }
+        if (st->isoc_endpoints != NULL)
+        {
+            g_hash_table_destroy(st->isoc_endpoints);
+        }
+        if (st->control_cache != NULL)
+        {
+            g_hash_table_destroy(st->control_cache);
+        }
         if (st->trace != NULL)
         {
             pcap_trace_free(st->trace);
@@ -506,6 +616,9 @@ usb_device_t *pcap_backend_create(const char *path)
                                              NULL, ep_queue_free);
     st->ep_out_queues = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                               NULL, ep_queue_free);
+    st->isoc_endpoints = g_hash_table_new(g_direct_hash, g_direct_equal);
+    st->control_cache = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                                              g_free, (GDestroyNotify)g_byte_array_unref);
 
     pcap_backend_index_trace(st);
 

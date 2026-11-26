@@ -113,25 +113,6 @@ directly up to CLI diagnostic outputs and test suites.
 
 ---
 
-### `[flow]` Orthogonal (and hierarchical) state machine support
-**File:** `src/lib/flow.c`, `src/lib/flow.h`
-**Complexity:** High
-
-The current flow state machine is flat: it tracks a single global scalar state
-(`flow->state`), which requires duplicating common rules (such as standard
-descriptors and control transfers) across all operational states (`idle`,
-`streaming`, etc.).
-
-For composite USB devices (e.g., webcam with VideoControl, VideoStreaming,
-and Audio interfaces), alternate settings and endpoint lifecycles across
-interfaces are completely independent. Supporting **orthogonal state machines**
-(concurrent, parallel state machines running per interface or component) and
-**hierarchical states** (nested sub-states inheriting rules from parent states)
-will prevent combinatorial state explosion and naturally model independent
-interface behaviors.
-
----
-
 ### `[yaml/loader]` Null `length`/`count` fields are not auto-filled
 **File:** `src/lib/yaml/loader.c:9`
 **Complexity:** Medium

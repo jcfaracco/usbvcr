@@ -36,6 +36,7 @@ typedef struct {
     char *respond_with;
     GByteArray *respond_bytes;
     uint8_t respond_with_status;
+    char *transition_machine;
     char *transition_state;
     int return_nak_if_queue_empty;
     uint8_t ep;
@@ -59,10 +60,18 @@ typedef struct {
     GList *rules;    // of flow_rule_t*
 } flow_state_t;
 
-struct flow {
+typedef struct flow_machine {
+    char *name;
+    int interface_num;
     char *state; // current state name
     char *next_state;
     GHashTable *states; // name -> flow_state_t*
+} flow_machine_t;
+
+struct flow {
+    GList *machines; // of flow_machine_t*
+    GHashTable *machine_map; // name -> flow_machine_t*
+    flow_machine_t *default_machine;
     GList *common_rules; // of flow_rule_t*
     GHashTable *ep_queues; // ep (uint8_t) -> GQueue of GByteArray*
     uint8_t last_cbw_tag[4];
@@ -76,6 +85,7 @@ static void flow_action_free(flow_action_t *act) {
     g_free(act->respond_with);
     if (act->respond_bytes)
         g_byte_array_unref(act->respond_bytes);
+    g_free(act->transition_machine);
     g_free(act->transition_state);
     g_free(act->stream_file);
     g_free(act->disk_file);
@@ -113,11 +123,34 @@ static void flow_state_free(flow_state_t *st) {
     g_free(st);
 }
 
+static flow_machine_t *flow_machine_new(const char *name, int interface_num)
+{
+    flow_machine_t *m = g_new0(flow_machine_t, 1);
+
+    m->name = g_strdup(name ? name : "default");
+    m->interface_num = interface_num;
+    m->states = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, (GDestroyNotify)flow_state_free);
+
+    return m;
+}
+
+static void flow_machine_free(flow_machine_t *m)
+{
+    if (!m)
+        return;
+
+    g_free(m->name);
+    g_free(m->state);
+    g_free(m->next_state);
+    g_hash_table_destroy(m->states);
+    g_free(m);
+}
+
 flow_t *flow_create(void)
 {
     flow_t *f = g_new0(flow_t, 1);
 
-    f->states = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, (GDestroyNotify)flow_state_free);
+    f->machine_map = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
     f->ep_queues = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)g_queue_free);
 
     return f;
@@ -125,19 +158,16 @@ flow_t *flow_create(void)
 
 void flow_free(flow_t *flow)
 {
+    GHashTableIter iter;
+    gpointer key, value;
+
     if (!flow)
         return;
-
-    g_free(flow->state);
-    g_free(flow->next_state);
 
     if (flow->common_rules)
         g_list_free_full(flow->common_rules, (GDestroyNotify)flow_rule_free);
     
-    GHashTableIter iter;
-    gpointer key, value;
     g_hash_table_iter_init(&iter, flow->ep_queues);
-
     while (g_hash_table_iter_next(&iter, &key, &value)) {
         GQueue *q = value;
         if (q) {
@@ -147,13 +177,32 @@ void flow_free(flow_t *flow)
         }        
     }
     g_hash_table_destroy(flow->ep_queues);
-    g_hash_table_destroy(flow->states);
+
+    if (flow->machines)
+        g_list_free_full(flow->machines, (GDestroyNotify)flow_machine_free);
+    if (flow->machine_map)
+        g_hash_table_destroy(flow->machine_map);
+
     g_free(flow);
 }
 
 const char *flow_current_state(flow_t *flow)
 {
-    return flow ? flow->state : NULL;
+    if (!flow || !flow->default_machine)
+        return NULL;
+
+    return flow->default_machine->state;
+}
+
+const char *flow_machine_state(flow_t *flow, const char *machine_name)
+{
+    flow_machine_t *m;
+
+    if (!flow || !machine_name || !flow->machine_map)
+        return NULL;
+
+    m = g_hash_table_lookup(flow->machine_map, machine_name);
+    return m ? m->state : NULL;
 }
 
 static uint32_t parse_int(const char *s) {
@@ -374,7 +423,16 @@ static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq, uint8_t ep_h
         } else if ((v = yaml_map_get(doc, item, "transition_state"))) {
             a = g_new0(flow_action_t, 1);
             a->type = ACT_TRANSITION_STATE;
-            a->transition_state = g_strdup(yaml_scalar(v));
+            if (v->type == YAML_MAPPING_NODE) {
+                yaml_node_t *mn = yaml_map_get(doc, v, "machine");
+                yaml_node_t *sn = yaml_map_get(doc, v, "state");
+                if (mn)
+                    a->transition_machine = g_strdup(yaml_scalar(mn));
+                if (sn)
+                    a->transition_state = g_strdup(yaml_scalar(sn));
+            } else {
+                a->transition_state = g_strdup(yaml_scalar(v));
+            }
         } else if ((v = yaml_map_get(doc, item, "return_nak_if_queue_empty"))) {
             a = g_new0(flow_action_t, 1);
             a->type = ACT_RETURN_NAK_IF_QUEUE_EMPTY;
@@ -426,6 +484,59 @@ static GList* parse_rules(yaml_document_t *doc, yaml_node_t *seq,
     return list;
 }
 
+static void parse_machine_states(yaml_document_t *doc, yaml_node_t *states_n,
+                                 flow_machine_t *m,
+                                 const char *flow_dir, const char *base_dir)
+{
+    yaml_node_item_t *i;
+
+    if (!states_n || states_n->type != YAML_SEQUENCE_NODE)
+        return;
+
+    for (i = states_n->data.sequence.items.start; i < states_n->data.sequence.items.top; i++) {
+        yaml_node_t *item = yaml_document_get_node(doc, *i);
+        flow_state_t *st;
+        yaml_node_t *name_n;
+        yaml_node_t *ext_n;
+        yaml_node_t *enter_n;
+        yaml_node_t *rules_n;
+
+        if (!item || item->type != YAML_MAPPING_NODE)
+            continue;
+
+        st = g_new0(flow_state_t, 1);
+        name_n = yaml_map_get(doc, item, "name");
+        if (name_n) {
+            const char *s = yaml_scalar(name_n);
+            if (s)
+                st->name = g_strdup(s);
+        }
+
+        ext_n = yaml_map_get(doc, item, "extends");
+        if (ext_n) {
+            const char *s = yaml_scalar(ext_n);
+            if (s)
+                st->extends = g_strdup(s);
+        }
+
+        enter_n = yaml_map_get(doc, item, "on_enter");
+        if (enter_n)
+            st->on_enter = parse_actions(doc, enter_n, 0, flow_dir, base_dir);
+
+        rules_n = yaml_map_get(doc, item, "rules");
+        if (rules_n)
+            st->rules = parse_rules(doc, rules_n, flow_dir, base_dir);
+
+        if (st->name) {
+            if (!m->state)
+                m->state = g_strdup(st->name); /* first state is default initial state */
+            g_hash_table_insert(m->states, st->name, st);
+        } else {
+            flow_state_free(st);
+        }
+    }
+}
+
 flow_t *flow_load(const char *path) {
     return flow_load_with_dir(path, NULL);
 }
@@ -475,34 +586,58 @@ flow_t *flow_load_with_dir(const char *path, const char *base_dir) {
 
     yaml_node_t *states_n = yaml_map_get(&doc, top, "states");
     if (states_n && states_n->type == YAML_SEQUENCE_NODE) {
-        for (yaml_node_item_t *i = states_n->data.sequence.items.start; i < states_n->data.sequence.items.top; i++) {
+        flow_machine_t *def_m = flow_machine_new("default", -1);
+        parse_machine_states(&doc, states_n, def_m, flow_dir, base_dir);
+        f->machines = g_list_append(f->machines, def_m);
+        g_hash_table_insert(f->machine_map, def_m->name, def_m);
+        f->default_machine = def_m;
+    }
+
+    yaml_node_t *machines_n = yaml_map_get(&doc, top, "machines");
+    if (machines_n && machines_n->type == YAML_SEQUENCE_NODE) {
+        for (yaml_node_item_t *i = machines_n->data.sequence.items.start; i < machines_n->data.sequence.items.top; i++) {
             yaml_node_t *item = yaml_document_get_node(&doc, *i);
-            if (!item || item->type != YAML_MAPPING_NODE) continue;
-            
-            flow_state_t *st = g_new0(flow_state_t, 1);
-            yaml_node_t *name_n = yaml_map_get(&doc, item, "name");
-            if (name_n) {
-                const char *s = yaml_scalar(name_n);
-                if (s) st->name = g_strdup(s);
+            const char *mname = "machine";
+            int iface_num = -1;
+            yaml_node_t *mn_n;
+            yaml_node_t *iface_n;
+            yaml_node_t *mst_n;
+            yaml_node_t *init_n;
+            flow_machine_t *m;
+
+            if (!item || item->type != YAML_MAPPING_NODE)
+                continue;
+
+            mn_n = yaml_map_get(&doc, item, "name");
+            if (mn_n) {
+                const char *s = yaml_scalar(mn_n);
+                if (s)
+                    mname = s;
             }
 
-            yaml_node_t *ext_n = yaml_map_get(&doc, item, "extends");
-            if (ext_n) {
-                const char *s = yaml_scalar(ext_n);
-                if (s) st->extends = g_strdup(s);
+            iface_n = yaml_map_get(&doc, item, "interface");
+            if (iface_n) {
+                iface_num = (int)parse_int(yaml_scalar(iface_n));
             }
-            
-            yaml_node_t *enter_n = yaml_map_get(&doc, item, "on_enter");
-            if (enter_n) st->on_enter = parse_actions(&doc, enter_n, 0, flow_dir, base_dir);
-            
-            yaml_node_t *rules_n = yaml_map_get(&doc, item, "rules");
-            if (rules_n) st->rules = parse_rules(&doc, rules_n, flow_dir, base_dir);
-            
-            if (st->name) {
-                if (!f->state) f->state = g_strdup(st->name); // first state is default
-                g_hash_table_insert(f->states, st->name, st);
-            } else {
-                flow_state_free(st);
+
+            m = flow_machine_new(mname, iface_num);
+            mst_n = yaml_map_get(&doc, item, "states");
+            if (mst_n)
+                parse_machine_states(&doc, mst_n, m, flow_dir, base_dir);
+
+            init_n = yaml_map_get(&doc, item, "initial_state");
+            if (init_n) {
+                const char *is = yaml_scalar(init_n);
+                if (is && g_hash_table_contains(m->states, is)) {
+                    g_free(m->state);
+                    m->state = g_strdup(is);
+                }
+            }
+
+            f->machines = g_list_append(f->machines, m);
+            g_hash_table_insert(f->machine_map, m->name, m);
+            if (!f->default_machine) {
+                f->default_machine = m;
             }
         }
     }
@@ -517,33 +652,35 @@ flow_t *flow_load_with_dir(const char *path, const char *base_dir) {
 static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t *len,
                             const uint8_t *ep_buf, size_t ep_len, int *handled);
 
-int flow_transition_to(flow_t *flow, const char *new_state)
+static int flow_machine_transition_to(flow_t *flow, flow_machine_t *m, const char *new_state)
 {
     flow_state_t *st;
     char *copy;
 
-    if (!flow || !new_state)
+    if (!flow || !m || !new_state)
         return -1;
 
-    st = g_hash_table_lookup(flow->states, new_state);
+    st = g_hash_table_lookup(m->states, new_state);
     if (!st) {
-        LOG_WARN("[flow] Transition target state '%s' does not exist", new_state);
+        LOG_WARN("[flow] Transition target state '%s' does not exist in machine '%s'",
+                 new_state, m->name ? m->name : "(unnamed)");
         return -1;
     }
 
-    if (g_strcmp0(flow->state, new_state) == 0)
+    if (g_strcmp0(m->state, new_state) == 0)
         return 0;
 
-    LOG_DEBUG("[flow] Transition '%s' -> '%s'",
-              flow->state ? flow->state : "(none)", new_state);
+    LOG_DEBUG("[flow] Machine '%s' transition '%s' -> '%s'",
+              m->name ? m->name : "(unnamed)",
+              m->state ? m->state : "(none)", new_state);
 
     copy = g_strdup(new_state);
-    g_free(flow->state);
-    flow->state = copy;
+    g_free(m->state);
+    m->state = copy;
 
-    if (flow->next_state) {
-        g_free(flow->next_state);
-        flow->next_state = NULL;
+    if (m->next_state) {
+        g_free(m->next_state);
+        m->next_state = NULL;
     }
 
     if (st->on_enter) {
@@ -551,6 +688,57 @@ int flow_transition_to(flow_t *flow, const char *new_state)
     }
 
     return 0;
+}
+
+int flow_transition_machine_to(flow_t *flow, const char *machine_name, const char *new_state)
+{
+    flow_machine_t *m;
+
+    if (!flow || !machine_name || !new_state)
+        return -1;
+
+    m = g_hash_table_lookup(flow->machine_map, machine_name);
+    if (!m) {
+        LOG_WARN("[flow] Machine '%s' not found for transition to '%s'", machine_name, new_state);
+        return -1;
+    }
+
+    return flow_machine_transition_to(flow, m, new_state);
+}
+
+int flow_transition_to(flow_t *flow, const char *new_state)
+{
+    char *dot;
+    GList *l;
+
+    if (!flow || !new_state)
+        return -1;
+
+    /* If target is "machine.state", transition that machine */
+    dot = strchr(new_state, '.');
+    if (dot) {
+        char *mname = g_strndup(new_state, dot - new_state);
+        const char *sname = dot + 1;
+        int rc = flow_transition_machine_to(flow, mname, sname);
+        g_free(mname);
+        return rc;
+    }
+
+    /* Otherwise, check if default machine has this state */
+    if (flow->default_machine && g_hash_table_contains(flow->default_machine->states, new_state)) {
+        return flow_machine_transition_to(flow, flow->default_machine, new_state);
+    }
+
+    /* Next search all machines for this state */
+    for (l = flow->machines; l; l = l->next) {
+        flow_machine_t *m = l->data;
+        if (m != flow->default_machine && g_hash_table_contains(m->states, new_state)) {
+            return flow_machine_transition_to(flow, m, new_state);
+        }
+    }
+
+    LOG_WARN("[flow] Transition target state '%s' does not exist", new_state);
+    return -1;
 }
 
 static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t *len,
@@ -585,7 +773,11 @@ static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t
                 break;
             case ACT_TRANSITION_STATE:
                 LOG_DEBUG("[flow] ACT_TRANSITION_STATE to '%s'", a->transition_state);
-                flow_transition_to(flow, a->transition_state);
+                if (a->transition_machine) {
+                    flow_transition_machine_to(flow, a->transition_machine, a->transition_state);
+                } else {
+                    flow_transition_to(flow, a->transition_state);
+                }
                 break;
             case ACT_QUEUE_ENDPOINT_DATA: {
                 GQueue *q = g_hash_table_lookup(flow->ep_queues, GUINT_TO_POINTER((guint)a->ep));
@@ -665,19 +857,13 @@ static int match_and_execute_control(flow_t *flow, GList *rules,
 int flow_control(flow_t *flow, const uint8_t *setup,
                  uint8_t *out, uint16_t *len)
 {
-    flow_state_t *st;
-    flow_state_t *curr;
+    GList *ml;
     uint8_t bmRequestType;
     uint8_t bRequest;
     uint16_t wValue;
     uint16_t wIndex;
-    int depth;
 
-    if (!flow || !flow->state)
-        return -1;
-
-    st = g_hash_table_lookup(flow->states, flow->state);
-    if (!st)
+    if (!flow)
         return -1;
 
     bmRequestType = setup[0];
@@ -685,17 +871,29 @@ int flow_control(flow_t *flow, const uint8_t *setup,
     wValue = get_u16le(&setup[2]);
     wIndex = get_u16le(&setup[4]);
 
-    curr = st;
-    depth = 0;
-    while (curr && depth++ < 16) {
-        if (match_and_execute_control(flow, curr->rules, bmRequestType, bRequest,
-                                      wValue, wIndex, out, len) == 0)
-            return 0;
+    for (ml = flow->machines; ml; ml = ml->next) {
+        flow_machine_t *m = ml->data;
+        flow_state_t *st;
+        flow_state_t *curr;
+        int depth;
 
-        if (curr->extends)
-            curr = g_hash_table_lookup(flow->states, curr->extends);
-        else
-            break;
+        if (!m || !m->state)
+            continue;
+
+        st = g_hash_table_lookup(m->states, m->state);
+        curr = st;
+        depth = 0;
+
+        while (curr && depth++ < 16) {
+            if (match_and_execute_control(flow, curr->rules, bmRequestType, bRequest,
+                                          wValue, wIndex, out, len) == 0)
+                return 0;
+
+            if (curr->extends)
+                curr = g_hash_table_lookup(m->states, curr->extends);
+            else
+                break;
+        }
     }
 
     if (flow->common_rules) {
@@ -739,30 +937,40 @@ static int match_and_execute_ep_in(flow_t *flow, GList *rules,
 
 int flow_ep_in(flow_t *flow, uint8_t ep, uint8_t *buf, size_t cap)
 {
-    flow_state_t *st;
-    flow_state_t *curr;
+    GList *ml;
     GQueue *q;
-    int depth;
-    int handled;
+    int handled = 0;
 
-    if (!flow || !flow->state)
+    if (!flow)
         return 0;
 
-    st = g_hash_table_lookup(flow->states, flow->state);
-    curr = st;
-    depth = 0;
-    handled = 0;
+    for (ml = flow->machines; ml; ml = ml->next) {
+        flow_machine_t *m = ml->data;
+        flow_state_t *st;
+        flow_state_t *curr;
+        int depth;
 
-    while (curr && depth++ < 16) {
-        int n = match_and_execute_ep_in(flow, curr->rules, ep, buf, cap, &handled);
-        if (n >= 0)
-            return n;
+        if (!m || !m->state)
+            continue;
+
+        st = g_hash_table_lookup(m->states, m->state);
+        curr = st;
+        depth = 0;
+
+        while (curr && depth++ < 16) {
+            int n = match_and_execute_ep_in(flow, curr->rules, ep, buf, cap, &handled);
+            if (n >= 0)
+                return n;
+            if (handled)
+                break;
+
+            if (curr->extends)
+                curr = g_hash_table_lookup(m->states, curr->extends);
+            else
+                break;
+        }
+
         if (handled)
-            break;
-
-        if (curr->extends)
-            curr = g_hash_table_lookup(flow->states, curr->extends);
-        else
             break;
     }
 
@@ -817,10 +1025,8 @@ static int match_and_execute_ep_out(flow_t *flow, GList *rules,
 
 int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
 {
-    flow_state_t *st;
-    flow_state_t *curr;
-    int depth;
-    int handled;
+    GList *ml;
+    int handled = 0;
 
     if (!flow)
         return -1;
@@ -845,22 +1051,31 @@ int flow_ep_out(flow_t *flow, uint8_t ep, const uint8_t *buf, size_t len)
         LOG_IN("ep 0x%02x OUT %zu bytes", ep, len);
     }
 
-    if (!flow->state)
-        return 0;
+    for (ml = flow->machines; ml; ml = ml->next) {
+        flow_machine_t *m = ml->data;
+        flow_state_t *st;
+        flow_state_t *curr;
+        int depth;
 
-    st = g_hash_table_lookup(flow->states, flow->state);
-    curr = st;
-    depth = 0;
-    handled = 0;
+        if (!m || !m->state)
+            continue;
 
-    while (curr && depth++ < 16) {
-        handled = match_and_execute_ep_out(flow, curr->rules, ep, buf, len);
+        st = g_hash_table_lookup(m->states, m->state);
+        curr = st;
+        depth = 0;
+
+        while (curr && depth++ < 16) {
+            handled = match_and_execute_ep_out(flow, curr->rules, ep, buf, len);
+            if (handled)
+                break;
+
+            if (curr->extends)
+                curr = g_hash_table_lookup(m->states, curr->extends);
+            else
+                break;
+        }
+
         if (handled)
-            break;
-
-        if (curr->extends)
-            curr = g_hash_table_lookup(flow->states, curr->extends);
-        else
             break;
     }
 
@@ -891,22 +1106,28 @@ static void tick_rules(GList *rules)
 
 void flow_tick(flow_t *flow)
 {
-    flow_state_t *st;
-    flow_state_t *curr;
-    int depth;
+    GList *ml;
 
     if (!flow)
         return;
 
-    if (flow->state) {
-        st = g_hash_table_lookup(flow->states, flow->state);
+    for (ml = flow->machines; ml; ml = ml->next) {
+        flow_machine_t *m = ml->data;
+        flow_state_t *st;
+        flow_state_t *curr;
+        int depth;
+
+        if (!m || !m->state)
+            continue;
+
+        st = g_hash_table_lookup(m->states, m->state);
         curr = st;
         depth = 0;
 
         while (curr && depth++ < 16) {
             tick_rules(curr->rules);
             if (curr->extends)
-                curr = g_hash_table_lookup(flow->states, curr->extends);
+                curr = g_hash_table_lookup(m->states, curr->extends);
             else
                 break;
         }
@@ -914,11 +1135,15 @@ void flow_tick(flow_t *flow)
 
     tick_rules(flow->common_rules);
 
-    if (flow->next_state) {
-        char *target = flow->next_state;
+    for (ml = flow->machines; ml; ml = ml->next) {
+        flow_machine_t *m = ml->data;
 
-        flow->next_state = NULL;
-        flow_transition_to(flow, target);
-        g_free(target);
+        if (m && m->next_state) {
+            char *target = m->next_state;
+
+            m->next_state = NULL;
+            flow_machine_transition_to(flow, m, target);
+            g_free(target);
+        }
     }
 }

@@ -129,6 +129,7 @@ reference.
 | `src/engine/`     | Transports: usbredir-to-QEMU, and the local FunctionFS/ConfigFS gadget. |
 | `src/fuzz/`       | A `usb_device_ops` wrapper that mutates traffic for any backend. |
 | `tests/`          | `check`-based unit/integration tests + example YAML projects. |
+| `examples/`       | Complete ready-to-run device projects (Joystick, Mass Storage, UVC Webcam). |
 | `docs/`           | Architecture deep-dive and the full YAML dialect reference. |
 | `scripts/`          | pcap → YAML project converter (`pcap_to_yaml.py`). |
 
@@ -151,6 +152,16 @@ IN endpoint data, and (optionally) control transfers. `harness/run_fuzz.sh`
 drives a QEMU guest (ideally KASAN/UBSAN-instrumented) with incrementing
 seeds and saves a reproducer on crash.
 
+## Examples
+
+Complete, ready-to-run device emulation projects demonstrating full enumeration, custom descriptors, declarative flows, and payload streaming are available in the [`examples/`](examples/README.md) directory:
+
+- [**Joystick**](examples/joystick/README.md) — 4-axis analog joystick with 12 digital buttons (HID class).
+- [**Mass Storage**](examples/msc/README.md) — Flash drive (pendrive) using Bulk-Only Transport (BOT) and SCSI commands backed by a FAT16 disk image.
+- [**UVC Webcam**](examples/uvc/README.md) — USB Video Class webcam streaming Motion-JPEG video over isochronous endpoints.
+
+See [`examples/README.md`](examples/README.md) for detailed descriptions, running instructions, and guest verification steps.
+
 ## Documentation
 
 - [`docs/architecture.md`](docs/architecture.md) — design goals, data flow,
@@ -159,6 +170,7 @@ seeds and saves a reproducer on crash.
   QEMU (`usbredir`) and local Linux gadget (`FunctionFS` / `ConfigFS`) execution.
 - [`docs/yaml_dialect.md`](docs/yaml_dialect.md) — canonical YAML directory
   and key reference.
+- [`examples/README.md`](examples/README.md) — guide to the included device examples.
 
 ## License
 

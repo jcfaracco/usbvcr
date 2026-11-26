@@ -163,19 +163,31 @@ fuzzing).
 | Key | Value | Meaning |
 |-----|-------|---------|
 | `version` | string | dialect version |
-| `states` | list | named states, evaluated in order |
+| `common_rules` | list | global `match:` → `actions:` rules evaluated across all states/machines |
+| `states` | list | named states (primary/default machine), evaluated in order |
+| `machines` | list | orthogonal concurrent state machines (per-interface or per-component) |
 
 A state:
 
 | Key | Value | Meaning |
 |-----|-------|---------|
 | `name` | string | state identifier |
+| `extends` | string | optional parent state to inherit rules from |
 | `rules` | list | `match:` → `actions:` pairs |
 | `on_enter` | list | actions run when the state is entered |
 
+An orthogonal machine under `machines:`:
+
+| Key | Value | Meaning |
+|-----|-------|---------|
+| `name` | string | machine identifier (e.g. `"video_streaming"`) |
+| `interface` | integer | optional associated USB interface number |
+| `initial_state` | string | optional initial state (defaults to first state) |
+| `states` | list | state definitions for this machine |
+
 A rule's `match:` keys match an incoming control setup packet:
 `bmRequestType`, `bRequest`, `wValue`, `wIndex` — or `endpoint_poll: 0x81` for
-IN-endpoint polling.
+IN-endpoint polling, or `endpoint_out: 0x02` for OUT packet matching.
 
 Actions:
 
@@ -184,30 +196,42 @@ Actions:
 | `respond_with` | serialize a tree node, e.g. `"$device.device_descriptor"`, `"$device.configurations[0].interfaces[0].report_descriptor"`, or inline `{ hex: "..." }` |
 | `respond_raw` | send an opaque payload: `{ file: "payloads/blob.bin" }` |
 | `respond_with_status` | ACK/stall a setup packet (`0` = ACK) |
-| `transition_state` | switch to another state by name |
+| `transition_state` | switch state synchronously: state name (`"streaming"`), machine-scoped dot notation (`"video_streaming.streaming"`), or mapping `{ machine: "video_streaming", state: "streaming" }` |
 | `queue_endpoint_data` | queue `payloads` (list of `hex:`) to an `endpoint:` |
 | `return_nak_if_queue_empty` | NAK polls when the endpoint queue is drained |
 | `stream_from_file` | stream periodic video or isochronous/bulk packets from a file (e.g. `{ file: "payloads/stream.mjpeg", loop: true }`) |
 | `disk_from_file` | attach backing storage image for USB Mass Storage (SCSI over Bulk-Only Transport) (e.g. `{ file: "payloads/disk.img" }`) |
 
 ```yaml
-states:
-  - name: "enumeration"
-    rules:
-      - match: { bmRequestType: 0x80, bRequest: 6, wValue: 0x0100 }
-        actions:
-          - respond_with: "$device.device_descriptor"
-      - match: { bmRequestType: 0x00, bRequest: 9, wValue: 1 }   # SET_CONFIGURATION
-        actions:
-          - respond_with_status: 0
-          - transition_state: "type_hello_world"
-  - name: "type_hello_world"
-    on_enter:
-      - queue_endpoint_data:
-          endpoint: 0x81
-          payloads:
-            - hex: "02000B0000000000"   # Shift + H
-            - hex: "0000000000000000"   # release
+# Global rules shared across all states and machines
+common_rules:
+  - match: { bmRequestType: 0x80, bRequest: 6, wValue: 0x0100 }
+    actions:
+      - respond_with: "$device.device_descriptor"
+
+# Concurrent, orthogonal state machines (e.g. composite device interfaces)
+machines:
+  - name: "video_streaming"
+    interface: 1
+    states:
+      - name: "idle"
+        rules:
+          - match: { bmRequestType: 0x01, bRequest: 11, wValue: 1, wIndex: 1 }
+            actions:
+              - respond_with_status: 0
+              - transition_state: "streaming"
+      - name: "streaming"
+        extends: "idle"
+        on_enter:
+          - queue_endpoint_data:
+              endpoint: 0x81
+              payloads:
+                - hex: "DEADBEEF"
+        rules:
+          - match: { bmRequestType: 0x01, bRequest: 11, wValue: 0, wIndex: 1 }
+            actions:
+              - respond_with_status: 0
+              - transition_state: "idle"
 ```
 
 ---

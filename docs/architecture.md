@@ -106,13 +106,17 @@ payloads:
 ```
 
 ### 3.3 State Machine Behavior
-Flows express conditional logic via `match:` + `transition_state` and endpoint queues.
+Flows express declarative response logic via states, `match:` rules, synchronous `transition_state`
+transitions, and per-endpoint queues:
+- **Hierarchical states (`extends:`):** Sub-states inherit rules from parent states without duplicating descriptors.
+- **Global rules (`common_rules:`):** Rules evaluated across all states and machines to eliminate boilerplate.
+- **Orthogonal machines (`machines:`):** Concurrent, independent state machines running per interface or component.
+
 Planned additions (tracked in [TODO.md](../TODO.md)), kept **bounded** (no arbitrary expression eval — safety +
 deterministic fuzzing):
 - `vars:` block + `{{ var }}` interpolation.
 - `when:` guards on rules/actions using a limited vocabulary
   (field compare, current state, counters).
-- `common_rules:` block evaluated across all states to reduce duplication.
 
 ---
 
@@ -295,5 +299,4 @@ The test harness runs suites against `usb_core` and the execution backends.
 Active and upcoming architectural improvements are tracked in [TODO.md](../TODO.md). Key areas include:
 - Standardizing engines around an `engine_ops_t` interface.
 - Decoupling flow state machine execution from storage and streaming providers.
-- Supporting global flow rules (`common_rules`) and state inheritance.
-- Orthogonal / concurrent state machines in flows.
+- Asynchronous tick-driven delayed responses and state dwell times.

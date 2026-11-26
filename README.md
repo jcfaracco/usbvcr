@@ -128,8 +128,9 @@ reference.
 | `src/backends/`   | `usb_device_ops` implementations — YAML-driven and pcap-replay. |
 | `src/engine/`     | Transports: usbredir-to-QEMU, and the local FunctionFS/ConfigFS gadget. |
 | `src/fuzz/`       | A `usb_device_ops` wrapper that mutates traffic for any backend. |
-| `tests/`          | `check`-based unit/integration tests + example YAML projects. |
+| `data/`           | Built-in asset library: base schemas, codecs, device templates, and turnkey manifests. |
 | `examples/`       | Complete ready-to-run device projects (Joystick, Mass Storage, UVC Webcam). |
+| `tests/`          | `check`-based unit/integration tests + example YAML projects. |
 | `docs/`           | Architecture deep-dive and the full YAML dialect reference. |
 | `scripts/`          | pcap → YAML project converter (`pcap_to_yaml.py`). |
 
@@ -170,6 +171,7 @@ See [`examples/README.md`](examples/README.md) for detailed descriptions, runnin
   QEMU (`usbredir`) and local Linux gadget (`FunctionFS` / `ConfigFS`) execution.
 - [`docs/yaml_dialect.md`](docs/yaml_dialect.md) — canonical YAML directory
   and key reference.
+- [`data/README.md`](data/README.md) — built-in base schemas, codecs, reference devices, and manifests.
 - [`examples/README.md`](examples/README.md) — guide to the included device examples.
 
 ## License

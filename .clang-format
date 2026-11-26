@@ -1,0 +1,53 @@
+---
+# GNOME / GLib Coding Standards for usbvcr
+Language: Cpp
+Standard: Latest
+BasedOnStyle: GNU
+IndentWidth: 4
+TabWidth: 8
+UseTab: Never
+ColumnLimit: 100
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: false
+  AfterControlStatement: Always
+  AfterEnum: false
+  AfterFunction: true
+  AfterNamespace: false
+  AfterObjCDeclaration: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeLambdaBody: false
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortCaseLabelsOnASingleLine: false
+
+PointerAlignment: Right
+ReferenceAlignment: Right
+SpacesBeforeTrailingComments: 1
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+
+AlignAfterOpenBracket: Align
+AlignConsecutiveMacros: None
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AlignOperands: Align
+AlignTrailingComments: true
+
+SortIncludes: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+...

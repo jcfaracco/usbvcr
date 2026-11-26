@@ -366,13 +366,34 @@ static int pb_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
     return 0;
 }
 
+static uint16_t copy_control_payload(uint8_t *dest, const uint8_t *src,
+                                     size_t src_len, uint16_t max_req_len)
+{
+    if (src == NULL || src_len == 0)
+    {
+        return 0;
+    }
+
+    uint16_t copy_len = (src_len < max_req_len) ? (uint16_t)src_len : max_req_len;
+#if USB_VCR_BUF_SIZE < 65536
+    if (copy_len > USB_VCR_BUF_SIZE)
+    {
+        copy_len = (uint16_t)USB_VCR_BUF_SIZE;
+    }
+#endif
+    if (dest != NULL && copy_len > 0)
+    {
+        memcpy(dest, src, copy_len);
+    }
+    return copy_len;
+}
+
 static int handle_control_get_descriptor(pcap_backend_state_t *st,
                                          const usb_control_packet_header_t *setup,
                                          uint8_t *data,
                                          uint16_t *len)
 {
     GByteArray *desc_buf;
-    uint16_t copy_len;
 
     desc_buf = lookup_cached_descriptor(st->descriptors, setup->value);
     if (desc_buf == NULL)
@@ -380,17 +401,7 @@ static int handle_control_get_descriptor(pcap_backend_state_t *st,
         return -1;
     }
 
-    copy_len = (desc_buf->len < setup->length) ? (uint16_t)desc_buf->len : setup->length;
-#if USB_VCR_BUF_SIZE < 65536
-    if (copy_len > USB_VCR_BUF_SIZE)
-    {
-        copy_len = (uint16_t)USB_VCR_BUF_SIZE;
-    }
-#endif
-    if (data != NULL && copy_len > 0)
-    {
-        memcpy(data, desc_buf->data, copy_len);
-    }
+    uint16_t copy_len = copy_control_payload(data, desc_buf->data, desc_buf->len, setup->length);
     if (len != NULL)
     {
         *len = copy_len;
@@ -427,17 +438,7 @@ static int pb_control(usb_device_t *dev,
         GByteArray *cached = g_hash_table_lookup(st->control_cache, &key);
         if (cached != NULL)
         {
-            copy_len = (cached->len < setup->length) ? (uint16_t)cached->len : setup->length;
-#if USB_VCR_BUF_SIZE < 65536
-            if (copy_len > USB_VCR_BUF_SIZE)
-            {
-                copy_len = (uint16_t)USB_VCR_BUF_SIZE;
-            }
-#endif
-            if (data != NULL && copy_len > 0)
-            {
-                memcpy(data, cached->data, copy_len);
-            }
+            copy_len = copy_control_payload(data, cached->data, cached->len, setup->length);
             if (len != NULL)
             {
                 *len = copy_len;
@@ -461,24 +462,10 @@ static int pb_control(usb_device_t *dev,
         return -1;
     }
 
-    copy_len = 0;
-    if (txn->reply_data != NULL && txn->reply_data->len > 0)
-    {
-        copy_len = (txn->reply_data->len < setup->length)
-                     ? (uint16_t)txn->reply_data->len
-                     : setup->length;
-#if USB_VCR_BUF_SIZE < 65536
-        if (copy_len > USB_VCR_BUF_SIZE)
-        {
-            copy_len = (uint16_t)USB_VCR_BUF_SIZE;
-        }
-#endif
-        if (data != NULL && copy_len > 0)
-        {
-            memcpy(data, txn->reply_data->data, copy_len);
-        }
-    }
-
+    copy_len = copy_control_payload(data,
+                                    txn->reply_data ? txn->reply_data->data : NULL,
+                                    txn->reply_data ? txn->reply_data->len : 0,
+                                    setup->length);
     if (len != NULL)
     {
         *len = copy_len;

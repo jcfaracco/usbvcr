@@ -165,8 +165,8 @@ typedef struct pcap_writer pcap_writer_t;
 /* Open `path` for writing a usbmon capture (pcapng). Returns NULL on error. */
 pcap_writer_t *pcap_writer_open(const char *path);
 
-/* Append one transfer. */
-void pcap_writer_add(pcap_writer_t *w, const pcap_packet_t *pkt);
+/* Append one transfer. Returns 0 on success, -1 on write error. */
+int pcap_writer_add(pcap_writer_t *w, const pcap_packet_t *pkt);
 
 void pcap_writer_close(pcap_writer_t *w);
 

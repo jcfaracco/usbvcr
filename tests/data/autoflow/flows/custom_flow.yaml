@@ -1,0 +1,10 @@
+version: "1.0"
+states:
+  - name: "operational"
+    rules:
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0100
+        actions:
+          - respond_with: "$device.device_descriptor"

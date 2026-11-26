@@ -105,6 +105,10 @@ START_TEST(test_parse_from_file_example1)
         yaml_parse_from_file(TEST_DATA_DIR "/example1/example1.yaml");
     ck_assert_ptr_nonnull(dev);
     ck_assert_ptr_nonnull(dev->tree);
+    ck_assert_ptr_nonnull(dev->flows);
+    ck_assert_ptr_nonnull(dev->flow);
+    ck_assert_ptr_nonnull(yaml_device_find_flow(dev, "hello_world_flow"));
+    ck_assert_ptr_nonnull(yaml_device_find_flow(dev, "flows/hello_world_flow.yaml"));
     ck_assert_str_eq(dev->name, "Hello World Injector Keyboard");
     yaml_device_free(dev);
 }
@@ -307,6 +311,43 @@ START_TEST(test_parse_file_and_loop)
 }
 END_TEST
 
+START_TEST(test_auto_wire_flow_from_datadir)
+{
+    /* A manifest without flow: specified should automatically wire a fallback/matching
+     * flow from dev->flows (e.g. enumeration_flow from datadir). */
+    yaml_device_t *dev =
+        yaml_parse_from_file(TEST_DATA_DIR "/no_flow/no_flow.yaml");
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_ptr_nonnull(dev->tree);
+    ck_assert_ptr_nonnull(dev->flows);
+    ck_assert_ptr_nonnull(dev->flow);
+    ck_assert_ptr_nonnull(yaml_device_find_flow(dev, "enumeration_flow"));
+
+    yaml_dev_entry_t *entry = dev->devices->data;
+    ck_assert_ptr_eq(entry->flow, dev->flow);
+
+    yaml_device_free(dev);
+}
+END_TEST
+
+START_TEST(test_auto_wire_local_flows_dir)
+{
+    /* A project with a local flows/ directory scans all flows into dev->flows
+     * and wires them to devices referencing or relying on them. */
+    yaml_device_t *dev =
+        yaml_parse_from_file(TEST_DATA_DIR "/autoflow/autoflow.yaml");
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_ptr_nonnull(dev->flows);
+    ck_assert_ptr_nonnull(yaml_device_find_flow(dev, "custom_flow"));
+    ck_assert_ptr_nonnull(dev->flow);
+
+    yaml_dev_entry_t *entry = dev->devices->data;
+    ck_assert_ptr_eq(entry->flow, dev->flow);
+
+    yaml_device_free(dev);
+}
+END_TEST
+
 static Suite *yaml_loader_suite(void)
 {
     Suite *s = suite_create("yaml_loader");
@@ -332,6 +373,8 @@ static Suite *yaml_loader_suite(void)
     tcase_add_test(tc_load, test_extends_device);
     tcase_add_test(tc_load, test_parse_speed);
     tcase_add_test(tc_load, test_parse_file_and_loop);
+    tcase_add_test(tc_load, test_auto_wire_flow_from_datadir);
+    tcase_add_test(tc_load, test_auto_wire_local_flows_dir);
     suite_add_tcase(s, tc_load);
 
     return s;

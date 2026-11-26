@@ -177,22 +177,6 @@ void record_conn_recv(const usb_header_t *hdr, const void *payload, size_t len,
 
     case RT_INTERRUPT_PACKET:
     case RT_ISO_PACKET:
-        if (len < sizeof(usb_interrupt_packet_header_t))
-            return;
-        {
-            usb_interrupt_packet_header_t ih;
-            memcpy(&ih, payload, sizeof(ih));
-            pkt.endpoint = ih.endpoint & 0x0f; /* OUT */
-            pkt.dir      = PCAP_DIR_OUT;
-            pkt.xfer     = (hdr->type == RT_ISO_PACKET) ? PCAP_XFER_ISO : PCAP_XFER_INT;
-            if (len > sizeof(ih)) {
-                pkt.data     = (const uint8_t *)payload + sizeof(ih);
-                pkt.data_len = len - sizeof(ih);
-            }
-            record_add(&pkt);
-        }
-        break;
-
     case RT_BULK_PACKET:
         if (len < sizeof(usb_interrupt_packet_header_t))
             return;
@@ -201,7 +185,12 @@ void record_conn_recv(const usb_header_t *hdr, const void *payload, size_t len,
             memcpy(&ih, payload, sizeof(ih));
             pkt.endpoint = ih.endpoint & 0x0f; /* OUT */
             pkt.dir      = PCAP_DIR_OUT;
-            pkt.xfer     = PCAP_XFER_BULK;
+            if (hdr->type == RT_ISO_PACKET)
+                pkt.xfer = PCAP_XFER_ISO;
+            else if (hdr->type == RT_BULK_PACKET)
+                pkt.xfer = PCAP_XFER_BULK;
+            else
+                pkt.xfer = PCAP_XFER_INT;
             if (len > sizeof(ih)) {
                 pkt.data     = (const uint8_t *)payload + sizeof(ih);
                 pkt.data_len = len - sizeof(ih);
@@ -274,22 +263,6 @@ void record_conn_send(uint32_t type, int64_t id, const void *payload, size_t len
 
     case RT_INTERRUPT_PACKET:
     case RT_ISO_PACKET:
-        if (len < sizeof(usb_interrupt_packet_header_t))
-            return;
-        {
-            usb_interrupt_packet_header_t ih;
-            memcpy(&ih, payload, sizeof(ih));
-            pkt.endpoint = ih.endpoint | 0x80; /* IN */
-            pkt.dir      = PCAP_DIR_IN;
-            pkt.xfer     = (type == RT_ISO_PACKET) ? PCAP_XFER_ISO : PCAP_XFER_INT;
-            if (len > sizeof(ih)) {
-                pkt.data     = (const uint8_t *)payload + sizeof(ih);
-                pkt.data_len = len - sizeof(ih);
-            }
-            record_add(&pkt);
-        }
-        break;
-
     case RT_BULK_PACKET:
         if (len < sizeof(usb_interrupt_packet_header_t))
             return;
@@ -298,7 +271,12 @@ void record_conn_send(uint32_t type, int64_t id, const void *payload, size_t len
             memcpy(&ih, payload, sizeof(ih));
             pkt.endpoint = ih.endpoint | 0x80; /* IN */
             pkt.dir      = PCAP_DIR_IN;
-            pkt.xfer     = PCAP_XFER_BULK;
+            if (type == RT_ISO_PACKET)
+                pkt.xfer = PCAP_XFER_ISO;
+            else if (type == RT_BULK_PACKET)
+                pkt.xfer = PCAP_XFER_BULK;
+            else
+                pkt.xfer = PCAP_XFER_INT;
             if (len > sizeof(ih)) {
                 pkt.data     = (const uint8_t *)payload + sizeof(ih);
                 pkt.data_len = len - sizeof(ih);

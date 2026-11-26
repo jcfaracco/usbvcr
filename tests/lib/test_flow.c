@@ -82,6 +82,9 @@ START_TEST(test_flow_stream_from_file_state_machine)
     int rc = flow_control(f, setup_start, out, &out_len);
     ck_assert_int_eq(rc, 0);
 
+    /* Synchronous transition: state is immediately 'streaming' without waiting for flow_tick */
+    ck_assert_str_eq(flow_current_state(f), "streaming");
+
     flow_tick(f);
     ck_assert_str_eq(flow_current_state(f), "streaming");
 
@@ -100,12 +103,83 @@ START_TEST(test_flow_stream_from_file_state_machine)
     rc = flow_control(f, setup_stop, out, &out_len);
     ck_assert_int_eq(rc, 0);
 
+    /* Synchronous transition: state is immediately 'idle' without waiting for flow_tick */
+    ck_assert_str_eq(flow_current_state(f), "idle");
+
     flow_tick(f);
     ck_assert_str_eq(flow_current_state(f), "idle");
 
     /* EP 0x81 should NAK again */
     n = flow_ep_in(f, 0x81, buf, sizeof(buf));
     ck_assert_int_eq(n, 0);
+
+    flow_free(f);
+}
+END_TEST
+
+START_TEST(test_flow_sync_transition_on_packet)
+{
+    flow_t *f = flow_load(TEST_DATA_DIR "/flow_transition/transition_flow.yaml");
+    ck_assert_ptr_nonnull(f);
+
+    /* Initial state */
+    ck_assert_str_eq(flow_current_state(f), "init");
+
+    /* EP 0x81 has nothing queued yet */
+    uint8_t buf[64];
+    int n = flow_ep_in(f, 0x81, buf, sizeof(buf));
+    ck_assert_int_eq(n, 0);
+
+    /* Send request 0x40/0x01: transitions to 'armed' and queues '01020304' in on_enter */
+    uint8_t setup_arm[8] = { 0x40, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    uint8_t out[128];
+    uint16_t out_len = 0;
+    int rc = flow_control(f, setup_arm, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+
+    /* State transition must be synchronous: immediately 'armed' without flow_tick() */
+    ck_assert_str_eq(flow_current_state(f), "armed");
+
+    /* on_enter actions must have executed synchronously: endpoint queue is immediately available */
+    n = flow_ep_in(f, 0x81, buf, sizeof(buf));
+    ck_assert_int_eq(n, 4);
+    ck_assert_int_eq(buf[0], 0x01);
+    ck_assert_int_eq(buf[1], 0x02);
+    ck_assert_int_eq(buf[2], 0x03);
+    ck_assert_int_eq(buf[3], 0x04);
+
+    /* Send request 0x40/0x02: transitions to 'disarmed' */
+    uint8_t setup_disarm[8] = { 0x40, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    rc = flow_control(f, setup_disarm, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_str_eq(flow_current_state(f), "disarmed");
+
+    flow_free(f);
+}
+END_TEST
+
+START_TEST(test_flow_transition_to_api)
+{
+    flow_t *f = flow_load(TEST_DATA_DIR "/flow_transition/transition_flow.yaml");
+    ck_assert_ptr_nonnull(f);
+
+    /* Invalid parameters */
+    ck_assert_int_eq(flow_transition_to(NULL, "armed"), -1);
+    ck_assert_int_eq(flow_transition_to(f, NULL), -1);
+    ck_assert_int_eq(flow_transition_to(f, "nonexistent"), -1);
+
+    /* Valid transition */
+    ck_assert_int_eq(flow_transition_to(f, "armed"), 0);
+    ck_assert_str_eq(flow_current_state(f), "armed");
+
+    /* on_enter queued 4 bytes */
+    uint8_t buf[16];
+    int n = flow_ep_in(f, 0x81, buf, sizeof(buf));
+    ck_assert_int_eq(n, 4);
+
+    /* Transitioning to the same state is a no-op */
+    ck_assert_int_eq(flow_transition_to(f, "armed"), 0);
+    ck_assert_str_eq(flow_current_state(f), "armed");
 
     flow_free(f);
 }
@@ -126,6 +200,8 @@ static Suite *flow_suite(void)
     tcase_add_test(tc_core, test_flow_load_missing);
     tcase_add_test(tc_core, test_flow_load_example1);
     tcase_add_test(tc_core, test_flow_stream_from_file_state_machine);
+    tcase_add_test(tc_core, test_flow_sync_transition_on_packet);
+    tcase_add_test(tc_core, test_flow_transition_to_api);
     tcase_add_test(tc_core, test_flow_free_null);
     suite_add_tcase(s, tc_core);
 

@@ -10,7 +10,8 @@ This directory contains complete, ready-to-run USB device emulation projects dem
 |---------|-------|-------------|----------------|
 | [**joystick/**](joystick/README.md) | HID (`0x03`) | 4-axis analog joystick with 12 digital buttons. Emulates input events queued on interrupt endpoint `0x81`. Binds to Linux `joydev` / `evdev`. | None (declarative events) |
 | [**msc/**](msc/README.md) | Mass Storage (`0x08`) | USB flash drive (pendrive) using Bulk-Only Transport (BOT) and SCSI transparent commands (SPC/SBC). Mounts as a block device. | `payloads/disk.img` (10 MiB FAT16 image) |
-| [**uvc/**](uvc/README.md) | Video (`0x0E`) | UVC webcam streaming video over isochronous endpoint `0x82`. Implements dynamic state transitions (`idle` ↔ `streaming`) on `SET_INTERFACE`. | `payloads/stream.mjpeg` (Motion-JPEG video) |
+| [**uvc/**](uvc/README.md) | Video (`0x0E`) | UVC webcam streaming video over isochronous endpoint `0x82`. Uses state inheritance (`extends: "idle"`). | `payloads/stream.mjpeg` (Motion-JPEG video) |
+| [**composite/**](composite/README.md) | Composite (`0xEF`) | Multi-interface UVC webcam + Telemetry device showcasing **all** flow FSM features: orthogonal machines (`machines`), global `common_rules`, state inheritance (`extends`), synchronous transitions, and cross-machine transitions. | `payloads/stream.mjpeg` (Motion-JPEG video) |
 
 ---
 

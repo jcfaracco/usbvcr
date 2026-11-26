@@ -7,7 +7,6 @@
  *
  * TODO:
  *   - autofill null length/count fields (README §3.1)
- *   - load flows/ into Flow model (flow.h) — manifest step 4
  *   - build ValidationSuite from tests/ (README §3.4)
  */
 
@@ -105,6 +104,111 @@ static int parse_tests(const char *path, yaml_device_t *dev)
     return 0; /* TODO: build ValidationSuite (README §3.4) */
 }
 
+/* Flows: parse each behavior flow (flows/<name>.yaml) into dev->flows. */
+static int parse_flows(const char *path, yaml_device_t *dev)
+{
+    char *dir;
+    flow_t *f;
+    char *base;
+    char *name;
+
+    dir = g_path_get_dirname(path);
+    f = flow_load_with_dir(path, dir);
+    g_free(dir);
+    if (!f) {
+        LOG_ERR("yaml_loader: failed to load flow '%s'", path);
+        return -1;
+    }
+
+    base = g_path_get_basename(path);
+    name = g_strdup(base);
+    if (g_str_has_suffix(name, ".yaml")) {
+        name[strlen(name) - 5] = '\0';
+    } else if (g_str_has_suffix(name, ".yml")) {
+        name[strlen(name) - 4] = '\0';
+    }
+
+    g_hash_table_insert(dev->flows, name, f);
+    LOG_DEBUG("[Flow] registered '%s' from %s", name, path);
+    g_free(base);
+    return 0;
+}
+
+void *yaml_device_find_flow(yaml_device_t *dev, const char *ref)
+{
+    flow_t *f;
+    char *base;
+
+    if (!dev || !dev->flows || !ref) {
+        return NULL;
+    }
+
+    /* 1. Direct lookup */
+    f = g_hash_table_lookup(dev->flows, ref);
+    if (f) {
+        return f;
+    }
+
+    /* 2. Lookup by basename without extension */
+    base = g_path_get_basename(ref);
+    if (g_str_has_suffix(base, ".yaml")) {
+        base[strlen(base) - 5] = '\0';
+    } else if (g_str_has_suffix(base, ".yml")) {
+        base[strlen(base) - 4] = '\0';
+    }
+
+    f = g_hash_table_lookup(dev->flows, base);
+    g_free(base);
+    return f;
+}
+
+static flow_t *find_flow_for_device(yaml_device_t *dev, const char *dref)
+{
+    flow_t *f = NULL;
+
+    if (!dev || !dev->flows) {
+        return NULL;
+    }
+
+    if (dref) {
+        char *dbase = g_path_get_basename(dref);
+        char *with_flow;
+
+        if (g_str_has_suffix(dbase, ".yaml")) {
+            dbase[strlen(dbase) - 5] = '\0';
+        } else if (g_str_has_suffix(dbase, ".yml")) {
+            dbase[strlen(dbase) - 4] = '\0';
+        }
+
+        /* Try exact device name as flow name */
+        f = g_hash_table_lookup(dev->flows, dbase);
+        if (!f) {
+            /* Try <device>_flow */
+            with_flow = g_strdup_printf("%s_flow", dbase);
+            f = g_hash_table_lookup(dev->flows, with_flow);
+            g_free(with_flow);
+        }
+        g_free(dbase);
+    }
+
+    if (!f && g_hash_table_size(dev->flows) == 1) {
+        GHashTableIter iter;
+        gpointer value;
+
+        g_hash_table_iter_init(&iter, dev->flows);
+        if (g_hash_table_iter_next(&iter, NULL, &value)) {
+            f = value;
+        }
+    }
+
+    if (!f) {
+        /* Fall back to standard enumeration flow if available */
+        f = g_hash_table_lookup(dev->flows, "enumeration_flow");
+    }
+
+    return f;
+}
+
 static void dev_entry_free(gpointer p)
 {
     yaml_dev_entry_t *e = p;
@@ -114,7 +218,6 @@ static void dev_entry_free(gpointer p)
     g_free(e->flow_path);
     g_free(e->file);
     usb_node_free(e->tree);
-    if (e->flow) { flow_free(e->flow); }
     g_free(e);
 }
 
@@ -190,10 +293,9 @@ static char *resolve_asset_path(const char *dir, const char *sub, const char *re
 }
 
 /* Project file: read the `devices:` manifest — a sequence of {device, flow}
- * pairs — and load each device tree (schema templates and codec tables must be
- * loaded first). Paths are resolved relative to the project dir. The flow is
- * recorded by path only; building the Flow model is step 4. A missing project
- * file is not an error (no devices). */
+ * pairs — and load each device tree (schema templates, codec tables, and flows
+ * must be loaded first). Paths are resolved relative to the project dir.
+ * A missing project file is not an error (no devices). */
 static int parse_main(const char *path, yaml_device_t *dev)
 {
     yaml_parser_t parser;
@@ -325,15 +427,35 @@ static int parse_main(const char *path, yaml_device_t *dev)
                 break;
             }
 
+            char *fpath = fref ? resolve_asset_path(dir, "flows", fref) : NULL;
+            flow_t *flow = yaml_device_find_flow(dev, fref);
+
+            if (!flow && fpath) {
+                flow = flow_load_with_dir(fpath, dir);
+                if (flow) {
+                    char *base = g_path_get_basename(fpath);
+                    if (g_str_has_suffix(base, ".yaml")) {
+                        base[strlen(base) - 5] = '\0';
+                    } else if (g_str_has_suffix(base, ".yml")) {
+                        base[strlen(base) - 4] = '\0';
+                    }
+                    g_hash_table_insert(dev->flows, base, flow);
+                }
+            }
+
+            if (!flow && !fref) {
+                flow = find_flow_for_device(dev, dref);
+            }
+
             yaml_dev_entry_t *e = g_new0(yaml_dev_entry_t, 1);
             const char *dspeed = yaml_scalar(yaml_map_get(&doc, item, "speed"));
             const char *efile = yaml_scalar(yaml_map_get(&doc, item, "file"));
             const char *eloop = yaml_scalar(yaml_map_get(&doc, item, "loop"));
             int item_speed = usb_parse_speed(dspeed);
             e->name      = g_strdup(dref);
-            e->flow_path = fref ? resolve_asset_path(dir, "flows", fref) : NULL;
+            e->flow_path = fpath;
             e->tree      = tree;   /* entry owns it */
-            e->flow      = e->flow_path ? flow_load_with_dir(e->flow_path, dir) : NULL;
+            e->flow      = flow;   /* aliased from dev->flows */
             e->speed     = (item_speed >= 0) ? item_speed : dev->speed;
             if (efile) {
                 e->file = resolve_asset_path(dir, "payloads", efile);
@@ -349,7 +471,7 @@ static int parse_main(const char *path, yaml_device_t *dev)
             }
             dev->devices = g_list_append(dev->devices, e);
             LOG_DEBUG("[Manifest] device '%s' flow '%s'",
-                      dref, fref ? fref : "(none)");
+                      dref, fref ? fref : (flow ? "(auto)" : "(none)"));
 
             g_free(dpath);
         }
@@ -365,6 +487,7 @@ static int parse_main(const char *path, yaml_device_t *dev)
         if (first->speed >= 0)
             dev->speed = first->speed;
     } else {
+        dev->flow = find_flow_for_device(dev, NULL);
         dev->file = resolved_file; /* standalone device owns it */
         dev->loop = parsed_loop;
         resolved_file = NULL;
@@ -410,6 +533,9 @@ static int load_scope_dir(const char *root, const char *sub,
                     case YAML_SCOPE_CODECS:
                         rc = parse_codecs(path, dev);
                         break;
+                    case YAML_SCOPE_FLOWS:
+                        rc = parse_flows(path, dev);
+                        break;
                     case YAML_SCOPE_TESTS:
                         rc = parse_tests(path, dev);
                         break;
@@ -437,6 +563,9 @@ yaml_device_t *yaml_device_create(void)
     dev->codecs    = g_hash_table_new_full(g_str_hash, g_str_equal,
                                            g_free,
                                            (GDestroyNotify) codec_free);
+    dev->flows     = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                           g_free,
+                                           (GDestroyNotify) flow_free);
 
     return dev;
 }
@@ -450,20 +579,22 @@ yaml_device_t *yaml_parse_from_file(const char *path)
     char *datadir = usbvcr_get_data_dir();
     yaml_device_t *dev = yaml_device_create();
 
-    /* Pre-load global shared resources (schemas and codecs) from data dir first */
+    /* Pre-load global shared resources (schemas, codecs, and flows) from data dir first */
     if (datadir != NULL) {
         if (g_strcmp0(datadir, dir) != 0) {
             load_scope_dir(datadir, "schemas", YAML_SCOPE_SCHEMAS, dev);
             load_scope_dir(datadir, "codecs",  YAML_SCOPE_CODECS,  dev);
+            load_scope_dir(datadir, "flows",   YAML_SCOPE_FLOWS,   dev);
         }
         g_free(datadir);
     }
 
-    /* Shared resources first (dir-scanned): schema templates + codec tables.
+    /* Shared resources first (dir-scanned): schema templates + codec tables + flows.
      * Then the project `devices:` manifest, which loads each device tree using
      * them. tests/ is still dir-scanned (stub). */
     if (load_scope_dir(dir, "schemas", YAML_SCOPE_SCHEMAS, dev) < 0 ||
         load_scope_dir(dir, "codecs",  YAML_SCOPE_CODECS,  dev) < 0 ||
+        load_scope_dir(dir, "flows",   YAML_SCOPE_FLOWS,   dev) < 0 ||
         load_scope_dir(dir, "tests",   YAML_SCOPE_TESTS,   dev) < 0 ||
         parse_main(path, dev) < 0) {
 
@@ -490,10 +621,12 @@ void yaml_device_free(yaml_device_t *dev)
     g_free(dev->pcap);
     if (dev->devices == NULL)
         g_free(dev->file);
-    /* Entries own their trees/flows; dev->tree/flow are just aliases. */
+    /* Entries own their trees; dev->tree/flow/file are just aliases. */
     g_list_free_full(dev->devices, dev_entry_free);
     schema_free(dev->schemas);
     if (dev->codecs)
         g_hash_table_destroy(dev->codecs);
+    if (dev->flows)
+        g_hash_table_destroy(dev->flows);
     g_free(dev);
 }

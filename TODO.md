@@ -51,18 +51,6 @@ hardcoded directly into its structures and packet handlers:
 
 ---
 
-### `[yaml/loader]` Flow model is not loaded from `flows/` (manifest step 4 is dead)
-**File:** `src/lib/yaml/loader.h:39`, `src/lib/yaml/loader.c:10`
-**Complexity:** Medium
-
-`yaml_dev_entry_t.flow` is populated by `flow_load(e->flow_path)` already,
-but the YAML loader's own manifest step 4 — scanning the `flows/` directory
-and wiring each loaded `Flow*` into the device model — is not implemented.
-Devices that rely on a flow for their `ep_in` / `ep_out` / `control`
-behaviour will silently get a NULL flow and fall through every match.
-
----
-
 ### `[yaml/loader]` `parse_tests()` is a no-op stub
 **File:** `src/lib/yaml/loader.c:101-105`
 **Complexity:** Medium

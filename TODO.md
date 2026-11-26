@@ -1,15 +1,59 @@
 # TODO
 
 Tracked work items found across the codebase. Each entry references the
-source location where the gap was identified and describes what is missing
-and why it matters.
+source location where the gap was identified, estimates implementation complexity,
+and describes what is missing and why it matters.
 
 ---
 
 ## High Priority
 
+### `[yaml/diagnostics]` Rich error diagnostics and source-location reporting for malformed device trees
+**File:** `src/lib/usb_node.c:282-321`, `src/lib/yaml/tree.c`, `src/backends/yaml_backend.c:308-312`
+**Complexity:** Medium
+
+When a device YAML has missing required properties, type mismatches, or malformed
+scalars, `usb_node_validate()` immediately returns `-1` on the first encountered
+`USB_PROP_UNKNOWN` with only a debug-level log. The backend simply outputs:
+`"There are some NULL props in devices for <path> (`--debug` shows them)."`.
+This makes debugging malformed manifests difficult because it provides:
+1. No source location (file path, line, or column number).
+2. No descriptor hierarchy path (e.g. `device -> configurations[0] -> interfaces[0] -> endpoints[1] -> wMaxPacketSize`).
+3. Immediate abort on first failure rather than collecting and displaying all validation errors at once.
+4. No schema-level checks for missing mandatory USB descriptor fields (e.g., missing `bLength`, `bDescriptorType`, or `bNumInterfaces`).
+
+**Target Improvements:**
+* Preserve libyaml `start_mark.line` and `start_mark.column` during `yaml_tree_load()`.
+* Implement a diagnostic collector (`GList` of formatted errors) that walks the entire tree and accumulates all invalid/null properties.
+* Print standard GCC-style diagnostic messages:
+  `<file>:<line>:<col>: error: field '<name>' in <descriptor_path> is undefined or malformed (expected uint8_t, got null)`
+* Add schema cross-validation to warn about omitted fields that are required by the USB 2.0 / 3.x specifications before attempting serialization.
+
+---
+
+### `[flow/decouple]` Decouple protocol-specific logic (MSC BOT / SCSI) and streaming from generic flow engine
+**File:** `src/lib/flow.c:65, 542-551, 662-667`, `src/lib/flow.h`, `src/lib/storage/disk_provider.c`, `src/lib/stream/stream_provider.c`
+**Complexity:** High
+
+The generic flow engine currently has device-class-specific framing and protocol logic
+hardcoded directly into its structures and packet handlers:
+* `flow_t` carries USB Mass Storage (MSC) Command Block Wrapper (CBW) tracking state (`last_cbw_tag[4]` and `has_cbw_tag`).
+* `flow_ep_out()` inspects payload length and checks `memcmp(buf, "USBC", 4) == 0` to intercept MSC CBW tags.
+* `execute_actions()` (`ACT_QUEUE_ENDPOINT_DATA`) dynamically rewrites bytes 4..7 of 13-byte Command Status Wrappers (`USBS`) to match the intercepted CBW tag.
+* `ACT_DISK_FROM_FILE` and `ACT_STREAM_FROM_FILE` are baked as monolithic action types into `flow_action_type_t`, embedding SCSI command execution (`disk_provider`) and MJPEG parsing (`stream_provider`) inside `flow.c`.
+* `stream_provider` is duplicated: checked both as a flow action and separately on `yaml_backend_state_t` (`yb_ep_in` and `yb_tick`).
+
+**Target Improvements:**
+* Remove CBW/CSW tag tracking and magic byte checks from `flow.c`.
+* Replace `ACT_DISK_FROM_FILE` and `ACT_STREAM_FROM_FILE` with a generic endpoint provider/filter interface (`flow_bind_endpoint(ep, provider_ops)`).
+* Encapsulate BOT framing and SCSI CDB handling entirely inside `disk_provider`.
+* Unify endpoint streaming and packet consumption into a single dispatch path.
+
+---
+
 ### `[yaml/loader]` Flow model is not loaded from `flows/` (manifest step 4 is dead)
 **File:** `src/lib/yaml/loader.h:39`, `src/lib/yaml/loader.c:10`
+**Complexity:** Medium
 
 `yaml_dev_entry_t.flow` is populated by `flow_load(e->flow_path)` already,
 but the YAML loader's own manifest step 4 — scanning the `flows/` directory
@@ -21,6 +65,7 @@ behaviour will silently get a NULL flow and fall through every match.
 
 ### `[yaml/loader]` `parse_tests()` is a no-op stub
 **File:** `src/lib/yaml/loader.c:101-105`
+**Complexity:** Medium
 
 ```c
 static int parse_tests(const char *path, yaml_device_t *dev)
@@ -39,31 +84,68 @@ runtime.
 
 ## Medium Priority
 
-### `[yaml/loader]` Null `length`/`count` fields are not auto-filled
-**File:** `src/lib/yaml/loader.c:9`
+### `[architecture/engine-ops]` Standardize execution engines on an `engine_ops_t` interface
+**File:** `src/engine/qemu_engine.h`, `src/engine/local_engine.h`, `src/main.c:241-261`
+**Complexity:** Medium
 
-README §3.1 specifies that null `length` or `count` fields in a device YAML
-should be automatically derived from the actual serialized byte length of the
-surrounding descriptor. Currently, fields left unset in the YAML stay zero in
-the serialized descriptor, producing malformed output that may confuse a host
-or silently truncate data.
+Backends are cleanly abstracted behind `usb_device_ops_t` (`yaml_backend`, `pcap_backend`),
+allowing `main.c` to swap them seamlessly. However, execution engines (`qemu_engine` vs
+`local_engine`) are hardcoded in `main.c` behind branching `if (use_local) ... else ...` blocks.
+Introducing a standardized `usb_engine_ops_t` interface (`init`, `run`, `stop`, `cleanup`) will:
+* Decouple `main.c` from target engine runtime specifics.
+* Allow engines to be selected and configured dynamically via CLI or manifest (`connection.engine`).
+* Provide a clean extension point for future execution targets (e.g. USBIP daemon, WebUSB, or Linux kernel vhci-hcd).
 
 ---
 
-### `[storage/msc]` Automated unit tests for disk_provider and SCSI commands
-**File:** `src/lib/storage/disk_provider.c`, `tests/`
+### `[style/memory]` Standardize memory management on GLib primitives and `g_auto*` macros
+**File:** `src/core/usb_core.c:194, 558, 611`, `src/lib/pcap/pcap.c`, `src/lib/`
+**Complexity:** Medium
 
-The `disk_provider` component implements SCSI transparent command set (SPC/SBC)
-over Bulk-Only Transport (BOT), verified end-to-end against real Linux guest VMs.
-A dedicated unit test suite (`tests/lib/test_disk_provider.c`) should be added to
-exercise and validate individual SCSI CDB parsing (INQUIRY, READ CAPACITY 10/16,
-MODE SENSE, READ 10, WRITE 10, SYNCHRONIZE CACHE, REQUEST SENSE) and CSW tag/residue
-pairing against synthetic test images.
+The codebase currently mixes standard libc allocators (`malloc()`, `free()`, `strdup()`)
+with the GLib allocation ecosystem (`g_new0()`, `g_free()`, `g_strdup()`).
+For example, `usb_core.c` and `pcap.c` allocate wire packet buffers using `malloc()` / `free()`,
+while `yaml_backend.c` and `flow.c` rely on GLib structures.
+Standardizing across the entire codebase on GLib memory primitives and modern automatic
+cleanup macros (`g_autofree`, `g_autoptr`) prevents accidental allocator mismatches and
+eliminates boilerplate cleanup in error handling code paths.
+
+---
+
+### `[api/error-handling]` Standardize error propagation across parsing APIs using `GError`
+**File:** `src/lib/yaml/loader.c`, `src/lib/yaml/tree.c`, `src/lib/flow.c`, `src/lib/schema.c`
+**Complexity:** Medium
+
+Public parsing and loading functions (`yaml_tree_load()`, `flow_load()`, `schema_register()`,
+`usb_node_validate()`) currently return a bare `-1` or `NULL` upon failure, losing the specific
+cause of error. Callers are unable to distinguish between I/O errors, YAML syntax errors,
+schema validation failures, or missing files. Standardizing these APIs to follow the GLib
+`GError **error` convention (`USBVCR_ERROR` quark) enables rich, context-aware error propagation
+directly up to CLI diagnostic outputs and test suites.
+
+---
+
+### `[flow/rules]` Common/global rules and state inheritance for flow FSM
+**File:** `src/lib/flow.c:575-603`, `src/lib/flow.h`
+**Complexity:** Medium
+
+The flow engine matches rules strictly within the current state (`flow->state`).
+Because USB hosts can re-request descriptors or standard requests (`GET_DESCRIPTOR`,
+`SET_CONFIGURATION`, `GET_REPORT`) at any time, every state in a multi-state flow
+(such as `idle` and `streaming` in UVC) is forced to duplicate ~150 lines of
+standard enumeration rules. In simpler devices (e.g. keyboards), authors are forced
+to collapse the entire device into a single monolithic state.
+
+**Target Improvements:**
+* Add a `common_rules:` block in YAML flow definitions that applies across all states.
+* Support state inheritance (`states: - name: streaming, extends: idle`).
+* In `flow_control()`, evaluate `st->rules` first; if unhandled, fall through to `common_rules`.
 
 ---
 
 ### `[flow]` Orthogonal (and hierarchical) state machine support
 **File:** `src/lib/flow.c`, `src/lib/flow.h`
+**Complexity:** High
 
 The current flow state machine is flat: it tracks a single global scalar state
 (`flow->state`), which requires duplicating common rules (such as standard
@@ -80,8 +162,78 @@ interface behaviors.
 
 ---
 
+### `[yaml/loader]` Null `length`/`count` fields are not auto-filled
+**File:** `src/lib/yaml/loader.c:9`
+**Complexity:** Medium
+
+README §3.1 specifies that null `length` or `count` fields in a device YAML
+should be automatically derived from the actual serialized byte length of the
+surrounding descriptor. Currently, fields left unset in the YAML stay zero in
+the serialized descriptor, producing malformed output that may confuse a host
+or silently truncate data.
+
+---
+
+### `[storage/msc]` Automated unit tests for disk_provider and SCSI commands
+**File:** `src/lib/storage/disk_provider.c`, `tests/`
+**Complexity:** Low
+
+The `disk_provider` component implements SCSI transparent command set (SPC/SBC)
+over Bulk-Only Transport (BOT), verified end-to-end against real Linux guest VMs.
+A dedicated unit test suite (`tests/lib/test_disk_provider.c`) should be added to
+exercise and validate individual SCSI CDB parsing (INQUIRY, READ CAPACITY 10/16,
+MODE SENSE, READ 10, WRITE 10, SYNCHRONIZE CACHE, REQUEST SENSE) and CSW tag/residue
+pairing against synthetic test images.
+
+---
+
+### `[yaml_backend/perf]` Pre-resolve `$device.*` descriptor references at load time
+**File:** `src/backends/yaml_backend.c:176-238`
+**Complexity:** Low
+
+In `yb_control()`, responding with `$device.device_descriptor` or `$device.configurations[0]`
+executes `g_strsplit()` and walks the `usb_node_t` property tree on the hot path for
+every single control transaction. Resolving these symbolic references once during
+flow loading and caching direct byte slice pointers will eliminate repeated heap
+allocations and string parsing during USB enumeration.
+
+---
+
+### `[flow/transitions]` Synchronous state transitions on packet handling
+**File:** `src/lib/flow.c:529-533, 715-724`
+**Complexity:** Low
+
+`ACT_TRANSITION_STATE` only updates `flow->next_state`. The actual state change and
+execution of `on_enter` actions are deferred until the next `flow_tick()` call.
+In scenarios where subsequent packets arrive before the tick executes, or where
+an action requires immediate state progression, this can lead to subtle race conditions
+or dropped packet matches. Transitions should be applied synchronously upon action
+completion or provide explicit atomic transition semantics.
+
+---
+
+### `[flow/timing]` Asynchronous tick-driven delayed responses and state dwell times
+**File:** `src/lib/flow.c:34-47, 504-573, 695-725`, `src/lib/flow.h`, `src/core/usb_core.c:250-289, 638-650`
+**Complexity:** Medium
+
+Real USB hardware exhibits non-zero processing latencies (EEPROM reads, sensor configuration,
+flash write delays, bootloader handoffs), and OS drivers often contain subtle race conditions
+or timeout handlers during probing. Currently, all responses in `flow.c` and `usb_core.c` are
+emitted immediately and synchronously. Adding support for temporal state delays and paced
+queue emission allows high-fidelity hardware modeling and targeted driver resilience testing.
+
+**Target Improvements:**
+* **Response Delays (`delay_ticks`):** Add optional `delay_ticks` to response actions (`ACT_RESPOND_WITH`, `ACT_RESPOND_WITH_STATUS`).
+* **Asynchronous Completion Queue:** In `usb_core.c`, leverage usbredir packet IDs to buffer deferred responses in a pending queue `(sock, id, setup, data, deadline_tick)` rather than replying immediately. Flush ready packets during `usb_core_run()` tick processing. Never use blocking `sleep()`/`usleep()` calls, which freeze the single-threaded event loop.
+* **State Dwell Times (`dwell_ticks` & `auto_transition`):** Allow a state to define a mandatory dwell duration before automatically advancing to another state (e.g. modeling firmware boot stages or sensor stabilization).
+* **Endpoint Pacing (`interval_ticks`):** Add inter-packet pacing to `queue_endpoint_data` so bursts of keystrokes or sensor reports are emitted over realistic time intervals.
+* **Determinism for Fuzzing:** Quantize all delays in discrete logical event-loop ticks (socket timeout intervals) rather than wall-clock time, preserving reproducible execution across runs.
+
+---
+
 ### `[yaml_backend]` Descriptor lookup does not handle `BOS` or `Device Qualifier`
 **File:** `src/backends/yaml_backend.c` — `yb_get_descriptor()`
+**Complexity:** Low
 
 The `get_descriptor` op handles `type == 1` (DEVICE), `type == 2` (CONFIG),
 and `type == 3` (STRING). Other standard descriptor types — BOS (`0x0F`),
@@ -92,6 +244,7 @@ issue `GET_DESCRIPTOR` for BOS will receive a stall.
 
 ### `[transport]` `connect_to_server()` only supports IPv4
 **File:** `src/core/transport.c:38`
+**Complexity:** Low
 
 `hints.ai_family = AF_INET` is hard-coded. IPv6 hosts (or hosts that only
 resolve to AAAA records) will fail to connect. Changing to `AF_UNSPEC` and
@@ -101,6 +254,7 @@ iterating the `getaddrinfo` result list would handle both address families.
 
 ### `[scripts/pcap_to_yaml]` Automated tests for PCAP-to-YAML heuristics
 **File:** `scripts/pcap_to_yaml.py`, `tests/`
+**Complexity:** Medium
 
 The `scripts/pcap_to_yaml.py` conversion script uses several heuristics to infer
 symbolic devices, configurations, HID report descriptors, and operational flow
@@ -115,6 +269,7 @@ suite should be added to exercise and validate each heuristic stage.
 
 ### `[ffs]` FunctionFS descriptors are emitted for FS and HS only
 **File:** `src/lib/ffs/ffs.c` — `ffs_build_descriptors()`
+**Complexity:** Medium
 
 The `usb_functionfs_descs_head_v2` is built with
 `FUNCTIONFS_HAS_FS_DESC | FUNCTIONFS_HAS_HS_DESC`. SuperSpeed (SS) and
@@ -126,48 +281,8 @@ enumerate correctly.
 
 ## Low Priority
 
-### `[lib/utils]` `trim_string()` could be replaced by a GLib call
-**File:** `src/lib/utils.c:47`
-
-The hand-rolled `trim_string` duplicates functionality already available in
-GLib. `g_strstrip()` (in-place) or a combination of `g_strchomp()` /
-`g_strchug()` could replace it. Worth evaluating once the dependency on the
-`#` comment-stripping behaviour is clarified — GLib's strip does not strip
-`#`-delimited comments.
+*(No open low-priority items currently tracked.)*
 
 ---
 
-### `[fuzz]` Fuzzer has no corpus coverage for multi-configuration devices
-**File:** `src/fuzz/fuzz.c` — `fuzz_mutate_descriptor()`
-
-The structure-aware descriptor mutator walks descriptors by `bLength` but
-starts at offset 0, implicitly treating the whole buffer as a single
-configuration. A device with multiple `bNumConfigurations > 1` and a
-wTotalLength-delimited config boundary is not modelled. The corpus should
-include multi-config descriptors and the walker should respect
-`wTotalLength`.
-
----
-
-### `[pcap]` pcap writer does not check `fwrite` return values
-**File:** `src/lib/pcap/pcap.c` — `pcap_writer_add_pcap()`,
-`pcap_writer_add_pcapng()`, `pcap_writer_open_legacy_header()`,
-`pcap_writer_open_ng_header()`
-
-All `fwrite` calls in the writer path silently discard their return value.
-A full disk or a closed file descriptor would corrupt the output file without
-any error being surfaced to the caller. Each write should be checked and the
-writer should propagate an error code up to `pcap_writer_add()`.
-
----
-
-### `[ffs]` `ffs_teardown()` does not check `umount()` / `rmdir()` errors
-**File:** `src/lib/ffs/ffs.c` — `ffs_teardown()`
-
-`umount()`, `rmdir()`, and `unlink()` return values are silently discarded.
-A failed unmount (e.g. the mount point is busy) leaves a stale gadget bound
-to the UDC. Each syscall should be checked and logged on failure.
-
----
-
-*Last updated: 2026-11-25*
+*Last updated: 2026-11-26*

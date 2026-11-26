@@ -1,5 +1,6 @@
 #include "storage/disk_provider.h"
 #include "log.h"
+#include "bytes.h"
 
 #include <fcntl.h>
 #include <string.h>
@@ -33,10 +34,7 @@ static void queue_csw(GQueue *in_queue, const uint8_t *tag, uint32_t residue, ui
     uint8_t csw_buf[13];
     memcpy(csw_buf, "USBS", 4);
     memcpy(csw_buf + 4, tag, 4);
-    csw_buf[8] = (uint8_t)(residue & 0xff);
-    csw_buf[9] = (uint8_t)((residue >> 8) & 0xff);
-    csw_buf[10] = (uint8_t)((residue >> 16) & 0xff);
-    csw_buf[11] = (uint8_t)((residue >> 24) & 0xff);
+    put_u32le(csw_buf + 8, residue);
     csw_buf[12] = status;
 
     g_byte_array_append(csw, csw_buf, 13);
@@ -138,10 +136,7 @@ int disk_provider_handle_out(disk_provider_t *dp, const uint8_t *buf, size_t len
         return -1;
 
     const uint8_t *tag = buf + 4;
-    uint32_t transfer_len = (uint32_t)buf[8] |
-                            ((uint32_t)buf[9] << 8) |
-                            ((uint32_t)buf[10] << 16) |
-                            ((uint32_t)buf[11] << 24);
+    uint32_t transfer_len = get_u32le(buf + 8);
     uint8_t cdb_len = buf[14];
     const uint8_t *cdb = buf + 15;
 
@@ -184,16 +179,9 @@ int disk_provider_handle_out(disk_provider_t *dp, const uint8_t *buf, size_t len
     case 0x25: { /* READ CAPACITY (10) */
         uint32_t last_lba = dp->total_blocks > 0 ? (uint32_t)(dp->total_blocks - 1) : 0;
         uint32_t blk_size = dp->block_size;
-        uint8_t cap_resp[8] = {
-            (uint8_t)(last_lba >> 24),
-            (uint8_t)(last_lba >> 16),
-            (uint8_t)(last_lba >> 8),
-            (uint8_t)(last_lba & 0xff),
-            (uint8_t)(blk_size >> 24),
-            (uint8_t)(blk_size >> 16),
-            (uint8_t)(blk_size >> 8),
-            (uint8_t)(blk_size & 0xff)
-        };
+        uint8_t cap_resp[8];
+        put_u32be(cap_resp, last_lba);
+        put_u32be(cap_resp + 4, blk_size);
         queue_in_payload(in_queue, cap_resp, sizeof(cap_resp));
         queue_csw(in_queue, tag, 0, 0);
         break;
@@ -205,12 +193,8 @@ int disk_provider_handle_out(disk_provider_t *dp, const uint8_t *buf, size_t len
             uint32_t blk_size = dp->block_size;
             uint8_t cap16[32];
             memset(cap16, 0, sizeof(cap16));
-            for (int i = 0; i < 8; i++)
-                cap16[i] = (uint8_t)((last_lba >> (56 - i * 8)) & 0xff);
-            cap16[8] = (uint8_t)(blk_size >> 24);
-            cap16[9] = (uint8_t)(blk_size >> 16);
-            cap16[10] = (uint8_t)(blk_size >> 8);
-            cap16[11] = (uint8_t)(blk_size & 0xff);
+            put_u64be(cap16, last_lba);
+            put_u32be(cap16 + 8, blk_size);
 
             size_t send_len = sizeof(cap16);
             if (transfer_len < send_len)
@@ -267,11 +251,8 @@ int disk_provider_handle_out(disk_provider_t *dp, const uint8_t *buf, size_t len
     }
 
     case 0x28: { /* READ (10) */
-        uint32_t lba = ((uint32_t)cdb[2] << 24) |
-                       ((uint32_t)cdb[3] << 16) |
-                       ((uint32_t)cdb[4] << 8) |
-                       (uint32_t)cdb[5];
-        uint16_t blks = ((uint16_t)cdb[7] << 8) | (uint16_t)cdb[8];
+        uint32_t lba = get_u32be(cdb + 2);
+        uint16_t blks = get_u16be(cdb + 7);
         size_t req_bytes = (size_t)blks * dp->block_size;
 
         uint8_t *read_buf = g_malloc0(req_bytes > 0 ? req_bytes : 512);
@@ -289,11 +270,8 @@ int disk_provider_handle_out(disk_provider_t *dp, const uint8_t *buf, size_t len
     }
 
     case 0x2A: { /* WRITE (10) */
-        uint32_t lba = ((uint32_t)cdb[2] << 24) |
-                       ((uint32_t)cdb[3] << 16) |
-                       ((uint32_t)cdb[4] << 8) |
-                       (uint32_t)cdb[5];
-        uint16_t blks = ((uint16_t)cdb[7] << 8) | (uint16_t)cdb[8];
+        uint32_t lba = get_u32be(cdb + 2);
+        uint16_t blks = get_u16be(cdb + 7);
         size_t req_bytes = (size_t)blks * dp->block_size;
 
         if (req_bytes == 0) {

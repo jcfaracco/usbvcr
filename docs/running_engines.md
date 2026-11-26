@@ -63,7 +63,7 @@ connection:
 `usbvcr --yaml replay.yaml` then behaves like `usbvcr --pcap capture.pcapng`,
 but still picks up `connection:`/`record:`/`debug:` from the same file. This
 is a run-config convenience, not a second device dialect — see
-[`ARCHITECTURE.md`](ARCHITECTURE.md#4-one-yaml-dialect-canonical).
+[`architecture.md`](architecture.md#4-one-yaml-dialect-canonical).
 
 ---
 

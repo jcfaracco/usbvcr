@@ -62,7 +62,7 @@ if check_dep.found()
       '../src/lib/storage/disk_provider.c',
       '../src/lib/log.c',
     ),
-    include_directories : [lib],
+    include_directories : [lib, core],
     dependencies : [check_dep, glib_dep, yaml_dep],
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
@@ -85,7 +85,7 @@ if check_dep.found()
       '../src/lib/storage/disk_provider.c',
       '../src/lib/log.c',
     ),
-    include_directories : [lib],
+    include_directories : [lib, core],
     dependencies : [check_dep, glib_dep, yaml_dep],
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
@@ -162,6 +162,17 @@ if check_dep.found()
     dependencies : [check_dep, glib_dep, dependency('threads')],
   )
   test('transport', test_transport)
+
+  test_fuzz = executable(
+    'test_fuzz',
+    'core/test_fuzz.c',
+    files(
+      '../src/fuzz/fuzz.c',
+    ),
+    include_directories : [core, fuzz],
+    dependencies : [check_dep, glib_dep],
+  )
+  test('fuzz', test_fuzz)
 
   test_pcap_roundtrip = executable(
     'test_pcap_roundtrip',

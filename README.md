@@ -153,7 +153,7 @@ seeds and saves a reproducer on crash.
 
 ## Documentation
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design goals, data flow,
+- [`docs/architecture.md`](docs/architecture.md) — design goals, data flow,
   source layout, the generic codec system, build order.
 - [`docs/running_engines.md`](docs/running_engines.md) — comprehensive guide for
   QEMU (`usbredir`) and local Linux gadget (`FunctionFS` / `ConfigFS`) execution.

@@ -303,6 +303,103 @@ START_TEST(test_flow_rules_inheritance)
 }
 END_TEST
 
+START_TEST(test_flow_orthogonal_state_machines)
+{
+    flow_t *f = flow_load(TEST_DATA_DIR "/flow_orthogonal/orthogonal_flow.yaml");
+    ck_assert_ptr_nonnull(f);
+
+    uint8_t out[128];
+    uint16_t out_len = 0;
+    uint8_t buf[16];
+    int rc;
+
+    /* 1. Initial states of orthogonal machines */
+    ck_assert_str_eq(flow_current_state(f), "configured");
+    ck_assert_str_eq(flow_machine_state(f, "video_control"), "configured");
+    ck_assert_str_eq(flow_machine_state(f, "video_streaming"), "idle");
+    ck_assert_str_eq(flow_machine_state(f, "audio_streaming"), "muted");
+    ck_assert_ptr_null(flow_machine_state(f, "nonexistent"));
+
+    /* Common rule works */
+    uint8_t setup_common[8] = { 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00 };
+    rc = flow_control(f, setup_common, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(out_len, 2);
+    ck_assert_int_eq(out[0], 0x01);
+    ck_assert_int_eq(out[1], 0x00);
+
+    /* Video control rule works */
+    uint8_t setup_vc[8] = { 0xA1, 0x81, 0x00, 0x01, 0x00, 0x00, 0x02, 0x00 };
+    rc = flow_control(f, setup_vc, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(out_len, 2);
+    ck_assert_int_eq(out[0], 0x11);
+    ck_assert_int_eq(out[1], 0x22);
+
+    /* Neither streaming machine should have queued packets yet */
+    ck_assert_int_eq(flow_ep_in(f, 0x81, buf, sizeof(buf)), 0);
+    ck_assert_int_eq(flow_ep_in(f, 0x82, buf, sizeof(buf)), 0);
+
+    /* 2. Transition video_streaming to 'streaming' via SET_INTERFACE alt=1 on iface 1 */
+    uint8_t setup_vs_start[8] = { 0x01, 0x0B, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00 };
+    rc = flow_control(f, setup_vs_start, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+
+    /* video_streaming transitioned synchronously, but audio_streaming stayed muted */
+    ck_assert_str_eq(flow_machine_state(f, "video_streaming"), "streaming");
+    ck_assert_str_eq(flow_machine_state(f, "audio_streaming"), "muted");
+    ck_assert_str_eq(flow_machine_state(f, "video_control"), "configured");
+
+    /* Video streaming on_enter queued DEADBEEF */
+    int n = flow_ep_in(f, 0x81, buf, sizeof(buf));
+    ck_assert_int_eq(n, 4);
+    ck_assert_int_eq(buf[0], 0xDE);
+    ck_assert_int_eq(buf[1], 0xAD);
+    ck_assert_int_eq(buf[2], 0xBE);
+    ck_assert_int_eq(buf[3], 0xEF);
+
+    /* Audio streaming queue is still empty */
+    ck_assert_int_eq(flow_ep_in(f, 0x82, buf, sizeof(buf)), 0);
+
+    /* 3. Transition audio_streaming to 'unmuted' via SET_CUR on iface 2 */
+    uint8_t setup_as_unmute[8] = { 0x21, 0x01, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00 };
+    rc = flow_control(f, setup_as_unmute, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+
+    /* audio_streaming is now unmuted, while video_streaming remains streaming */
+    ck_assert_str_eq(flow_machine_state(f, "audio_streaming"), "unmuted");
+    ck_assert_str_eq(flow_machine_state(f, "video_streaming"), "streaming");
+
+    /* Audio streaming on_enter queued CAFEBABE */
+    n = flow_ep_in(f, 0x82, buf, sizeof(buf));
+    ck_assert_int_eq(n, 4);
+    ck_assert_int_eq(buf[0], 0xCA);
+    ck_assert_int_eq(buf[1], 0xFE);
+    ck_assert_int_eq(buf[2], 0xBA);
+    ck_assert_int_eq(buf[3], 0xBE);
+
+    /* 4. Transition audio_streaming back to muted via dot-notation rule */
+    uint8_t setup_as_mute[8] = { 0x21, 0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00 };
+    rc = flow_control(f, setup_as_mute, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_str_eq(flow_machine_state(f, "audio_streaming"), "muted");
+    ck_assert_str_eq(flow_machine_state(f, "video_streaming"), "streaming");
+
+    /* 5. Direct API transitions */
+    ck_assert_int_eq(flow_transition_machine_to(f, "video_streaming", "idle"), 0);
+    ck_assert_str_eq(flow_machine_state(f, "video_streaming"), "idle");
+
+    ck_assert_int_eq(flow_transition_machine_to(f, "nonexistent", "idle"), -1);
+    ck_assert_int_eq(flow_transition_machine_to(f, "video_streaming", "nonexistent"), -1);
+
+    /* Transition via dot-notation in flow_transition_to */
+    ck_assert_int_eq(flow_transition_to(f, "audio_streaming.unmuted"), 0);
+    ck_assert_str_eq(flow_machine_state(f, "audio_streaming"), "unmuted");
+
+    flow_free(f);
+}
+END_TEST
+
 START_TEST(test_flow_free_null)
 {
     flow_free(NULL);
@@ -321,6 +418,7 @@ static Suite *flow_suite(void)
     tcase_add_test(tc_core, test_flow_sync_transition_on_packet);
     tcase_add_test(tc_core, test_flow_transition_to_api);
     tcase_add_test(tc_core, test_flow_rules_inheritance);
+    tcase_add_test(tc_core, test_flow_orthogonal_state_machines);
     tcase_add_test(tc_core, test_flow_free_null);
     suite_add_tcase(s, tc_core);
 

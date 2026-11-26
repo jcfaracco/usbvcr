@@ -185,6 +185,124 @@ START_TEST(test_flow_transition_to_api)
 }
 END_TEST
 
+START_TEST(test_flow_rules_inheritance)
+{
+    flow_t *f = flow_load(TEST_DATA_DIR "/flow_rules/rules_inheritance.yaml");
+    ck_assert_ptr_nonnull(f);
+
+    uint8_t out[128];
+    uint16_t out_len = 0;
+    uint8_t buf[16];
+    int rc;
+
+    /* Setup packets */
+    uint8_t setup_common[8]   = { 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00 };
+    uint8_t setup_rule_a[8]   = { 0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x04, 0x00 }; /* 0x0100 */
+    uint8_t setup_rule_b[8]   = { 0x80, 0x06, 0x00, 0x02, 0x00, 0x00, 0x04, 0x00 }; /* 0x0200 */
+    uint8_t setup_rule_c[8]   = { 0x80, 0x06, 0x00, 0x03, 0x00, 0x00, 0x04, 0x00 }; /* 0x0300 */
+    uint8_t setup_rule_d[8]   = { 0x80, 0x06, 0x00, 0x04, 0x00, 0x00, 0x04, 0x00 }; /* 0x0400 */
+    uint8_t setup_to_derived[8] = { 0x00, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    uint8_t setup_to_standalone[8] = { 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+
+    /* 1. Initial state is 'base' */
+    ck_assert_str_eq(flow_current_state(f), "base");
+
+    /* Common rule works in 'base' */
+    rc = flow_control(f, setup_common, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(out_len, 2);
+    ck_assert_int_eq(out[0], 0x01);
+    ck_assert_int_eq(out[1], 0x00);
+
+    /* Rule A works in 'base' */
+    rc = flow_control(f, setup_rule_a, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(out_len, 4);
+    ck_assert_int_eq(out[0], 0x12);
+    ck_assert_int_eq(out[3], 0x02);
+
+    /* Rule B returns base version */
+    rc = flow_control(f, setup_rule_b, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(out_len, 4);
+    ck_assert_int_eq(out[2], 0x20);
+
+    /* Rule C is NOT in 'base' */
+    rc = flow_control(f, setup_rule_c, out, &out_len);
+    ck_assert_int_eq(rc, -1);
+
+    /* Common ep_out works in 'base' */
+    uint8_t out_pkt[1] = { 0x00 };
+    flow_ep_out(f, 0x02, out_pkt, sizeof(out_pkt));
+    int n = flow_ep_in(f, 0x82, buf, sizeof(buf));
+    ck_assert_int_eq(n, 2);
+    ck_assert_int_eq(buf[0], 0xAA);
+    ck_assert_int_eq(buf[1], 0xBB);
+
+    /* 2. Transition to 'derived' (extends 'base') */
+    rc = flow_control(f, setup_to_derived, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_str_eq(flow_current_state(f), "derived");
+
+    /* Common rule works in 'derived' */
+    rc = flow_control(f, setup_common, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(out_len, 2);
+
+    /* Rule A is inherited from 'base' via extends */
+    rc = flow_control(f, setup_rule_a, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(out_len, 4);
+    ck_assert_int_eq(out[0], 0x12);
+
+    /* Rule B is overridden by 'derived' */
+    rc = flow_control(f, setup_rule_b, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(out_len, 4);
+    ck_assert_int_eq(out[2], 0xFF);
+    ck_assert_int_eq(out[3], 0xFF);
+
+    /* Rule C is defined in 'derived' */
+    rc = flow_control(f, setup_rule_c, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(out_len, 4);
+    ck_assert_int_eq(out[0], 0x04);
+
+    /* 3. Transition to 'standalone' (does NOT extend 'base') */
+    rc = flow_control(f, setup_to_standalone, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_str_eq(flow_current_state(f), "standalone");
+
+    /* Common rule works in 'standalone' */
+    rc = flow_control(f, setup_common, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(out_len, 2);
+
+    /* Rule D is defined in 'standalone' */
+    rc = flow_control(f, setup_rule_d, out, &out_len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(out_len, 4);
+    ck_assert_int_eq(out[0], 0x08);
+
+    /* Rules A, B, C are NOT present in 'standalone' */
+    rc = flow_control(f, setup_rule_a, out, &out_len);
+    ck_assert_int_eq(rc, -1);
+    rc = flow_control(f, setup_rule_b, out, &out_len);
+    ck_assert_int_eq(rc, -1);
+    rc = flow_control(f, setup_rule_c, out, &out_len);
+    ck_assert_int_eq(rc, -1);
+
+    /* Common ep_out also works in 'standalone' */
+    flow_ep_out(f, 0x02, out_pkt, sizeof(out_pkt));
+    n = flow_ep_in(f, 0x82, buf, sizeof(buf));
+    ck_assert_int_eq(n, 2);
+    ck_assert_int_eq(buf[0], 0xAA);
+    ck_assert_int_eq(buf[1], 0xBB);
+
+    flow_free(f);
+}
+END_TEST
+
 START_TEST(test_flow_free_null)
 {
     flow_free(NULL);
@@ -202,6 +320,7 @@ static Suite *flow_suite(void)
     tcase_add_test(tc_core, test_flow_stream_from_file_state_machine);
     tcase_add_test(tc_core, test_flow_sync_transition_on_packet);
     tcase_add_test(tc_core, test_flow_transition_to_api);
+    tcase_add_test(tc_core, test_flow_rules_inheritance);
     tcase_add_test(tc_core, test_flow_free_null);
     suite_add_tcase(s, tc_core);
 

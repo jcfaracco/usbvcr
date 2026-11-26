@@ -128,8 +128,8 @@ static int parse_flows(const char *path, yaml_device_t *dev)
         name[strlen(name) - 4] = '\0';
     }
 
-    g_hash_table_insert(dev->flows, name, f);
     LOG_DEBUG("[Flow] registered '%s' from %s", name, path);
+    g_hash_table_insert(dev->flows, name, f);
     g_free(base);
     return 0;
 }

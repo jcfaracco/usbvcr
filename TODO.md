@@ -281,76 +281,8 @@ enumerate correctly.
 
 ## Low Priority
 
-### `[bytes/endianness]` Standardize multi-byte wire serialization via `bytes.h` helpers
-**File:** `src/lib/flow.c:184-188`, `src/lib/storage/disk_provider.c:141-144, 188-196`, `src/core/bytes.h`
-**Complexity:** Low
-
-Several modules perform manual bitwise shifts (e.g. `buf[0] | (buf[1] << 8)`) or raw byte
-casts for little-endian decoding and encoding, rather than using the inline primitives defined
-in `src/core/bytes.h` (`get_u16le()`, `get_u32le()`, `put_u16le()`, `put_u32le()`). Standardizing
-all multi-byte wire manipulations across `flow.c`, `disk_provider.c`, and `usb_core.c` guarantees
-unaligned access safety, strict-aliasing compliance, and platform portability.
+*(No open low-priority items currently tracked.)*
 
 ---
 
-### `[style/formatting]` Enforce GNOME / GLib coding standards with `.clang-format`
-**File:** `.clang-format`, `meson.build`
-**Complexity:** Low
-
-The project protocol specifies GNOME coding style (4 spaces indentation, braces on new lines
-for control statements, function header variable declarations, `_t` typedefs). Currently, style
-conventions vary across files (mix of K&R braces, mid-scope declarations, and single-line blocks).
-Adding a repository-level `.clang-format` matching GNOME/GLib rules along with a Meson `format`
-or `lint` build target will provide automated enforcement.
-
----
-
-### `[lib/utils]` `trim_string()` could be replaced by a GLib call
-**File:** `src/lib/utils.c:47`
-**Complexity:** Low
-
-The hand-rolled `trim_string` duplicates functionality already available in
-GLib. `g_strstrip()` (in-place) or a combination of `g_strchomp()` /
-`g_strchug()` could replace it. Worth evaluating once the dependency on the
-`#` comment-stripping behaviour is clarified — GLib's strip does not strip
-`#`-delimited comments.
-
----
-
-### `[fuzz]` Fuzzer has no corpus coverage for multi-configuration devices
-**File:** `src/fuzz/fuzz.c` — `fuzz_mutate_descriptor()`
-**Complexity:** Medium
-
-The structure-aware descriptor mutator walks descriptors by `bLength` but
-starts at offset 0, implicitly treating the whole buffer as a single
-configuration. A device with multiple `bNumConfigurations > 1` and a
-wTotalLength-delimited config boundary is not modelled. The corpus should
-include multi-config descriptors and the walker should respect
-`wTotalLength`.
-
----
-
-### `[pcap]` pcap writer does not check `fwrite` return values
-**File:** `src/lib/pcap/pcap.c` — `pcap_writer_add_pcap()`,
-`pcap_writer_add_pcapng()`, `pcap_writer_open_legacy_header()`,
-`pcap_writer_open_ng_header()`
-**Complexity:** Low
-
-All `fwrite` calls in the writer path silently discard their return value.
-A full disk or a closed file descriptor would corrupt the output file without
-any error being surfaced to the caller. Each write should be checked and the
-writer should propagate an error code up to `pcap_writer_add()`.
-
----
-
-### `[ffs]` `ffs_teardown()` does not check `umount()` / `rmdir()` errors
-**File:** `src/lib/ffs/ffs.c` — `ffs_teardown()`
-**Complexity:** Low
-
-`umount()`, `rmdir()`, and `unlink()` return values are silently discarded.
-A failed unmount (e.g. the mount point is busy) leaves a stale gadget bound
-to the UDC. Each syscall should be checked and logged on failure.
-
----
-
-*Last updated: 2026-11-25*
+*Last updated: 2026-11-26*

@@ -100,7 +100,7 @@ int main(int argc, char *argv[])
         { "local", 0, 0, G_OPTION_ARG_NONE, &config.local, "run the device locally against a Linux USB gadget (FunctionFS/ConfigFS) instead of QEMU (or set connection.engine: local in the manifest).", NULL },
         { "udc", 0, 0, G_OPTION_ARG_STRING, &config.udc, "UDC to bind the local gadget to, with --local (default: auto-detect, or manifest's connection.udc).", "UDC" },
         { "version", 'V', 0, G_OPTION_ARG_NONE, &config.version, "Show version and exit.", NULL },
-        { NULL }
+        G_OPTION_ENTRY_NULL
     };
 
     // Create the context with a usage summary
@@ -148,13 +148,15 @@ int main(int argc, char *argv[])
             rc = -1;
             goto end;
         }
+        /* Tracked separately from `dev` so it's still reachable to free at
+         * `end:` even after a pcap: redirect or fuzz_wrap reassign `dev`. */
+        yaml_cfg_dev = dev;
 
         /* Manifest's top-level pcap: replaces devices:/flows: with a capture
          * to replay — swap backends but keep the manifest around to read its
          * connection:/record:/debug fields below. */
         const char *manifest_pcap = yaml_backend_get_pcap(dev);
         if (manifest_pcap) {
-            yaml_cfg_dev = dev;
             dev = pcap_backend_create(manifest_pcap);
             if (!dev) {
                 LOG_ERR("failed to load pcap capture referenced by manifest: %s",
@@ -267,6 +269,8 @@ end:
         close(sock);
     if (pcap_dev)
         pcap_backend_destroy(pcap_dev);
+    if (yaml_cfg_dev)
+        yaml_backend_destroy(yaml_cfg_dev);
     if (error)
         g_clear_error(&error);
     if (context)

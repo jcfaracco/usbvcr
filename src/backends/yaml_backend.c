@@ -12,6 +12,7 @@
 #include "yaml/loader.h"
 #include "usb_node.h"
 #include "flow.h"
+#include "stream/stream_provider.h"
 #include "log.h"
 
 #include <stdlib.h>
@@ -19,6 +20,7 @@
 
 typedef struct {
     yaml_device_t *dev;
+    stream_provider_t *stream;
     GByteArray *desc_buf;    /* scratch for control ($device.*) resolution */
     GHashTable *desc_bufs;   /* descriptor type -> its own GByteArray */
 } yaml_backend_state_t;
@@ -70,6 +72,62 @@ static int yb_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
         target = find_node_by_name_and_index(st->dev->tree, "device_descriptor", index);
     } else if (type == 2) { // USB_DESC_CONFIG
         target = find_node_by_name_and_index(st->dev->tree, "configurations", index);
+    } else if (type == 3) { // USB_DESC_STRING
+        guint key = ((guint)type << 8) | index;
+        GByteArray *buf = g_hash_table_lookup(st->desc_bufs, GUINT_TO_POINTER(key));
+        if (!buf) {
+            buf = g_byte_array_new();
+            g_hash_table_insert(st->desc_bufs, GUINT_TO_POINTER(key), buf);
+        }
+        g_byte_array_set_size(buf, 0);
+
+        if (index == 0) {
+            uint8_t lang_desc[4] = { 4, 3, 0x09, 0x04 };
+            g_byte_array_append(buf, lang_desc, sizeof(lang_desc));
+            if (out) *out = buf->data;
+            if (len) *len = buf->len;
+            return 0;
+        }
+
+        const char *text = NULL;
+        usb_prop_t *sprop = find_prop_by_name_and_index(st->dev->tree, "strings", 0);
+        if (sprop && sprop->type == USB_PROP_NODE) {
+            char idx_str[16];
+            snprintf(idx_str, sizeof(idx_str), "%u", index);
+            for (GList *l = sprop->val.node->props; l; l = l->next) {
+                usb_prop_t *p = l->data;
+                if (strcmp(p->name, idx_str) == 0 ||
+                    (index == 1 && strcmp(p->name, "manufacturer") == 0) ||
+                    (index == 2 && strcmp(p->name, "product") == 0)) {
+                    if (p->type == USB_PROP_ARRAY && p->val.array) {
+                        text = (const char *)p->val.array;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (!text && index == 2 && st->dev->name) {
+            text = st->dev->name;
+        }
+
+        if (!text)
+            return -1;
+
+        size_t text_len = strlen(text);
+        uint8_t b_len = (uint8_t)(2 + text_len * 2);
+        uint8_t b_type = 3;
+        g_byte_array_append(buf, &b_len, 1);
+        g_byte_array_append(buf, &b_type, 1);
+        for (size_t i = 0; i < text_len; i++) {
+            uint16_t ch = (uint8_t)text[i];
+            uint8_t le[2] = { (uint8_t)(ch & 0xff), (uint8_t)(ch >> 8) };
+            g_byte_array_append(buf, le, 2);
+        }
+
+        if (out) *out = buf->data;
+        if (len) *len = buf->len;
+        return 0;
     }
 
     if (!target)
@@ -169,7 +227,9 @@ static int yb_control(usb_device_t *dev,
              * descriptor with a short request (e.g. 8 bytes) before asking
              * for the full length. Over-serving desyncs the host parser. */
             if (n > setup->length) n = setup->length;
-            if (n > USB_VCR_BUF_SIZE) n = USB_VCR_BUF_SIZE;
+#if USB_VCR_BUF_SIZE < 65536
+            if (n > USB_VCR_BUF_SIZE) n = (uint16_t)USB_VCR_BUF_SIZE;
+#endif
             memcpy(data, out_bytes, n);
             *len = n;
         } else {
@@ -183,6 +243,14 @@ static int yb_control(usb_device_t *dev,
 static int yb_ep_in(usb_device_t *dev, uint8_t ep, uint8_t *buf, size_t cap)
 {
     yaml_backend_state_t *st = dev->state;
+    if (st->stream != NULL)
+    {
+        int n = stream_provider_produce_packet(st->stream, ep, buf, cap);
+        if (n >= 0)
+        {
+            return n;
+        }
+    }
     return flow_ep_in(st->dev->flow, ep, buf, cap);
 }
 
@@ -195,7 +263,27 @@ static int yb_ep_out(usb_device_t *dev, uint8_t ep, const uint8_t *buf, size_t l
 static void yb_tick(usb_device_t *dev)
 {
     yaml_backend_state_t *st = dev->state;
+    if (st->stream != NULL)
+    {
+        stream_provider_tick(st->stream);
+    }
     flow_tick(st->dev->flow);
+}
+
+static int yb_get_speed(usb_device_t *dev)
+{
+    yaml_backend_state_t *st;
+
+    if (dev == NULL || dev->state == NULL)
+    {
+        return -1;
+    }
+    st = (yaml_backend_state_t *)dev->state;
+    if (st->dev == NULL)
+    {
+        return -1;
+    }
+    return st->dev->speed;
 }
 
 static const usb_device_ops_t yaml_ops = {
@@ -205,6 +293,7 @@ static const usb_device_ops_t yaml_ops = {
     .ep_in          = yb_ep_in,
     .ep_out         = yb_ep_out,
     .tick           = yb_tick,
+    .get_speed      = yb_get_speed,
 };
 
 usb_device_t *yaml_backend_create(const char *path)
@@ -218,11 +307,12 @@ usb_device_t *yaml_backend_create(const char *path)
      * its connection:/record:/debug:/pcap fields. */
     if (yd->tree && usb_node_validate(yd->tree, 0) < 0) {
         LOG_ERR("There are some NULL props in devices for %s (`--debug` shows them).\n", path);
+        yaml_device_free(yd);
         return NULL;
     }
 
-    yaml_backend_state_t *st = g_new(yaml_backend_state_t, 1);
-    usb_device_t *dev = g_new(usb_device_t, 1);
+    yaml_backend_state_t *st = g_new0(yaml_backend_state_t, 1);
+    usb_device_t *dev = g_new0(usb_device_t, 1);
     if (!st || !dev) {
         g_free(st);
         g_free(dev);
@@ -233,9 +323,43 @@ usb_device_t *yaml_backend_create(const char *path)
     st->desc_buf = g_byte_array_new();
     st->desc_bufs = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                           NULL, (GDestroyNotify)g_byte_array_unref);
+    if (yd->file != NULL)
+    {
+        st->stream = stream_provider_new(yd->file, yd->loop, 0);
+    }
     dev->ops = &yaml_ops;
     dev->state = st;
     return dev;
+}
+
+void yaml_backend_destroy(usb_device_t *dev)
+{
+    yaml_backend_state_t *st;
+
+    if (dev == NULL)
+    {
+        return;
+    }
+
+    st = (yaml_backend_state_t *)dev->state;
+    if (st != NULL)
+    {
+        if (st->stream != NULL)
+        {
+            stream_provider_free(st->stream);
+        }
+        if (st->desc_buf != NULL)
+        {
+            g_byte_array_unref(st->desc_buf);
+        }
+        if (st->desc_bufs != NULL)
+        {
+            g_hash_table_destroy(st->desc_bufs);
+        }
+        yaml_device_free(st->dev);
+        g_free(st);
+    }
+    g_free(dev);
 }
 
 const char *yaml_backend_get_name(usb_device_t *dev)

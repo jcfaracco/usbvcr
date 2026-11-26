@@ -1,0 +1,11 @@
+version: "1.0"
+name: "Virtual USB Joystick"
+
+connection:
+  engine: "qemu"
+  host: "127.0.0.1"
+  port: "4000"
+
+devices:
+  - device: "devices/joystick.yaml"
+    flow: "flows/joystick_flow.yaml"

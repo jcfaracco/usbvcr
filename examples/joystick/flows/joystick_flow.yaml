@@ -1,0 +1,119 @@
+states:
+  - name: "operational"
+    rules:
+      # Standard GET_DESCRIPTOR (device)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0100
+        actions:
+          - respond_with: "$device.device_descriptor"
+
+      # Standard GET_DESCRIPTOR (configuration)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0200
+        actions:
+          - respond_with: "$device.configurations[0]"
+
+      # Standard GET_DESCRIPTOR (string 0 - language IDs)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0300
+        actions:
+          - respond_with:
+              hex: "04030904" # LangID 0x0409 (English US)
+
+      # Standard GET_DESCRIPTOR (string 1 - Manufacturer)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0301
+        actions:
+          - respond_with:
+              hex: "180355005300420020005600430052002000500072006F006A00650063007400" # "USB VCR Project"
+
+      # Standard GET_DESCRIPTOR (string 2 - Product)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0302
+        actions:
+          - respond_with:
+              hex: "2c035600690072007400750061006C00200055005300420020004A006F00790073007400690063006B00" # "Virtual USB Joystick"
+
+      # Standard GET_DESCRIPTOR (string 3 - SerialNumber)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0303
+        actions:
+          - respond_with:
+              hex: "120330003000300030003000300030003100" # "00000001"
+
+      # Class GET_DESCRIPTOR (HID Report Descriptor on Interface 0)
+      - match:
+          bmRequestType: 0x81
+          bRequest: 6
+          wValue: 0x2200
+          wIndex: 0
+        actions:
+          - respond_with: "$device.report_descriptor"
+
+      # HID Class Request: SET_IDLE
+      - match:
+          bmRequestType: 0x21
+          bRequest: 0x0a
+        actions:
+          - respond_with_status: 0
+
+      # HID Class Request: GET_IDLE
+      - match:
+          bmRequestType: 0xa1
+          bRequest: 0x02
+        actions:
+          - respond_with:
+              hex: "00"
+
+      # Standard Request: SET_CONFIGURATION
+      # Once configured, queue sample joystick motion and button press events:
+      # Report format (6 bytes):
+      #   Byte 0: X (-127..127 signed)
+      #   Byte 1: Y (-127..127 signed)
+      #   Byte 2: Z / Throttle (0..255 unsigned)
+      #   Byte 3: Rz / Rudder (0..255 unsigned)
+      #   Byte 4: Buttons 1..8 (bitfield)
+      #   Byte 5: Buttons 9..12 (lower 4 bits)
+      - match:
+          bmRequestType: 0x00
+          bRequest: 9
+          wValue: 1
+        actions:
+          - respond_with_status: 0
+          - queue_endpoint_data:
+              endpoint: 0x81
+              payloads:
+                # Neutral position (centered X/Y, mid throttle/rudder, no buttons)
+                - hex: "000080800000"
+                # Push stick forward (Y = -100 / 0x9c)
+                - hex: "009c80800000"
+                # Neutral
+                - hex: "000080800000"
+                # Push stick right (X = +100 / 0x64)
+                - hex: "640080800000"
+                # Neutral
+                - hex: "000080800000"
+                # Press Primary Trigger (Button 1: 0x01)
+                - hex: "000080800100"
+                # Release Trigger
+                - hex: "000080800000"
+                # Press Secondary Fire (Button 2: 0x02)
+                - hex: "000080800200"
+                # Release
+                - hex: "000080800000"
+                # Increase throttle to 100% (Z = 0xff)
+                - hex: "0000ff800000"
+                # Return to neutral
+                - hex: "000080800000"

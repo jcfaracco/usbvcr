@@ -5,6 +5,9 @@ if not check_dep.found()
 endif
 
 if check_dep.found()
+  test_env = environment()
+  test_env.set('USBVCR_DATA_DIR', meson.project_source_root() / 'data')
+
   test_version = executable(
     'test_version',
     'lib/test_version.c',
@@ -13,9 +16,9 @@ if check_dep.found()
       '../src/lib/utils.c',
     ),
     include_directories : [lib],
-    dependencies : [check_dep],
+    dependencies : [check_dep, glib_dep],
   )
-  test('version', test_version)
+  test('version', test_version, env : test_env)
 
   test_utils = executable(
     'test_utils',
@@ -24,9 +27,22 @@ if check_dep.found()
       '../src/lib/utils.c',
     ),
     include_directories : [lib],
-    dependencies : [check_dep],
+    dependencies : [check_dep, glib_dep],
   )
-  test('utils', test_utils)
+  test('utils', test_utils, env : test_env)
+
+  test_stream = executable(
+    'test_stream',
+    'lib/test_stream.c',
+    files(
+      '../src/lib/stream/video_parser.c',
+      '../src/lib/stream/stream_provider.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib],
+    dependencies : [check_dep, glib_dep],
+  )
+  test('stream', test_stream, env : test_env)
 
   test_yaml_loader = executable(
     'test_yaml_loader',
@@ -41,13 +57,16 @@ if check_dep.found()
       '../src/lib/codec.c',
       '../src/lib/version.c',
       '../src/lib/utils.c',
+      '../src/lib/stream/video_parser.c',
+      '../src/lib/stream/stream_provider.c',
+      '../src/lib/storage/disk_provider.c',
       '../src/lib/log.c',
     ),
     include_directories : [lib],
     dependencies : [check_dep, glib_dep, yaml_dep],
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
-  test('yaml_loader', test_yaml_loader)
+  test('yaml_loader', test_yaml_loader, env : test_env)
 
   test_flow = executable(
     'test_flow',
@@ -61,13 +80,16 @@ if check_dep.found()
       '../src/lib/codec.c',
       '../src/lib/version.c',
       '../src/lib/utils.c',
+      '../src/lib/stream/video_parser.c',
+      '../src/lib/stream/stream_provider.c',
+      '../src/lib/storage/disk_provider.c',
       '../src/lib/log.c',
     ),
     include_directories : [lib],
     dependencies : [check_dep, glib_dep, yaml_dep],
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
-  test('flow', test_flow)
+  test('flow', test_flow, env : test_env)
 
   test_usb_node = executable(
     'test_usb_node',
@@ -100,13 +122,16 @@ if check_dep.found()
       '../src/lib/usb_node.c',
       '../src/lib/utils.c',
       '../src/lib/version.c',
+      '../src/lib/stream/video_parser.c',
+      '../src/lib/stream/stream_provider.c',
+      '../src/lib/storage/disk_provider.c',
       '../src/backends/yaml_backend.c',
     ),
     include_directories : [lib, core, backends],
     dependencies : [check_dep, glib_dep, yaml_dep],
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
-  test('descriptor', test_descriptor)
+  test('descriptor', test_descriptor, env : test_env)
 
   test_usb_core = executable(
     'test_usb_core',
@@ -230,13 +255,16 @@ if check_dep.found()
       '../src/lib/codec.c',
       '../src/lib/version.c',
       '../src/lib/utils.c',
+      '../src/lib/stream/video_parser.c',
+      '../src/lib/stream/stream_provider.c',
+      '../src/lib/storage/disk_provider.c',
       '../src/lib/log.c',
     ),
     include_directories : [lib, core, backends],
     dependencies : [check_dep, glib_dep, yaml_dep],
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
-  test('yaml_backend', test_yaml_backend)
+  test('yaml_backend', test_yaml_backend, env : test_env)
 
   if have_local_engine
     test_ffs = executable(
@@ -255,12 +283,15 @@ if check_dep.found()
         '../src/lib/codec.c',
         '../src/lib/version.c',
         '../src/lib/utils.c',
+        '../src/lib/stream/video_parser.c',
+        '../src/lib/stream/stream_provider.c',
+        '../src/lib/storage/disk_provider.c',
       ),
       include_directories : [lib, core, backends],
       dependencies : [check_dep, glib_dep, yaml_dep],
       c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
     )
-    test('ffs', test_ffs)
+    test('ffs', test_ffs, env : test_env)
 
     test_local_engine = executable(
       'test_local_engine',
@@ -278,12 +309,15 @@ if check_dep.found()
         '../src/lib/codec.c',
         '../src/lib/version.c',
         '../src/lib/utils.c',
+        '../src/lib/stream/video_parser.c',
+        '../src/lib/stream/stream_provider.c',
+        '../src/lib/storage/disk_provider.c',
       ),
       include_directories : [lib, core, engine, backends],
       dependencies : [check_dep, glib_dep, yaml_dep],
       c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
     )
-    test('local_engine', test_local_engine)
+    test('local_engine', test_local_engine, env : test_env)
   endif
 endif
 

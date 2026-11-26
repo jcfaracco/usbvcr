@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <check.h>
+#include <glib.h>
 
 #include "utils.h"
 
@@ -159,6 +160,61 @@ START_TEST(test_trim_only_comment)
 }
 END_TEST
 
+/* ── data dir discovery ── */
+
+START_TEST(test_data_dir_lookup)
+{
+    g_autofree char *datadir = usbvcr_get_data_dir();
+    ck_assert_ptr_nonnull(datadir);
+    ck_assert(g_file_test(datadir, G_FILE_TEST_IS_DIR));
+}
+END_TEST
+
+START_TEST(test_find_data_file)
+{
+    g_autofree char *kbd = usbvcr_find_data_file("devices", "keyboard");
+    ck_assert_ptr_nonnull(kbd);
+    ck_assert(g_str_has_suffix(kbd, "keyboard.yaml"));
+    ck_assert(g_file_test(kbd, G_FILE_TEST_EXISTS));
+
+    g_autofree char *mouse = usbvcr_find_data_file("devices", "mouse.yaml");
+    ck_assert_ptr_nonnull(mouse);
+    ck_assert(g_str_has_suffix(mouse, "mouse.yaml"));
+
+    g_autofree char *uvc = usbvcr_find_data_file("devices", "uvc_camera");
+    ck_assert_ptr_nonnull(uvc);
+
+    g_autofree char *missing = usbvcr_find_data_file("devices", "nonexistent_device");
+    ck_assert_ptr_null(missing);
+}
+END_TEST
+
+/* ── usb_parse_speed ── */
+
+START_TEST(test_usb_parse_speed)
+{
+    ck_assert_int_eq(usb_parse_speed("low"), USB_VCR_SPEED_LOW);
+    ck_assert_int_eq(usb_parse_speed("Low"), USB_VCR_SPEED_LOW);
+    ck_assert_int_eq(usb_parse_speed("0"), USB_VCR_SPEED_LOW);
+
+    ck_assert_int_eq(usb_parse_speed("full"), USB_VCR_SPEED_FULL);
+    ck_assert_int_eq(usb_parse_speed("FULL"), USB_VCR_SPEED_FULL);
+    ck_assert_int_eq(usb_parse_speed("1"), USB_VCR_SPEED_FULL);
+
+    ck_assert_int_eq(usb_parse_speed("high"), USB_VCR_SPEED_HIGH);
+    ck_assert_int_eq(usb_parse_speed("High"), USB_VCR_SPEED_HIGH);
+    ck_assert_int_eq(usb_parse_speed("2"), USB_VCR_SPEED_HIGH);
+
+    ck_assert_int_eq(usb_parse_speed("super"), USB_VCR_SPEED_SUPER);
+    ck_assert_int_eq(usb_parse_speed("SuperSpeed"), USB_VCR_SPEED_SUPER);
+    ck_assert_int_eq(usb_parse_speed("3"), USB_VCR_SPEED_SUPER);
+
+    ck_assert_int_eq(usb_parse_speed(NULL), -1);
+    ck_assert_int_eq(usb_parse_speed("invalid"), -1);
+    ck_assert_int_eq(usb_parse_speed(""), -1);
+}
+END_TEST
+
 static Suite *utils_suite(void)
 {
     Suite *s = suite_create("utils");
@@ -190,6 +246,12 @@ static Suite *utils_suite(void)
     tcase_add_test(tc_trim, test_trim_only_whitespace);
     tcase_add_test(tc_trim, test_trim_only_comment);
     suite_add_tcase(s, tc_trim);
+
+    TCase *tc_data = tcase_create("data_discovery");
+    tcase_add_test(tc_data, test_data_dir_lookup);
+    tcase_add_test(tc_data, test_find_data_file);
+    tcase_add_test(tc_data, test_usb_parse_speed);
+    suite_add_tcase(s, tc_data);
 
     return s;
 }

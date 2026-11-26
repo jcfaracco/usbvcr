@@ -31,7 +31,9 @@ static int fw_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
     }
 
     /* Copy into mutable scratch, then mutate in place. */
-    size_t n = base_len < sizeof(fs->scratch) ? base_len : sizeof(fs->scratch);
+    size_t n = base_len;
+    if (n > sizeof(fs->scratch))
+        n = sizeof(fs->scratch);
     memcpy(fs->scratch, base_desc, n);
     n = fuzz_mutate_descriptor(&fs->rng, &fs->cfg, fs->scratch, n,
                                sizeof(fs->scratch));
@@ -84,6 +86,14 @@ static void fw_tick(usb_device_t *dev)
         fs->base->ops->tick(fs->base);
 }
 
+static int fw_get_speed(usb_device_t *dev)
+{
+    fuzz_state_t *fs = dev->state;
+    if (fs && fs->base && fs->base->ops && fs->base->ops->get_speed)
+        return fs->base->ops->get_speed(fs->base);
+    return -1;
+}
+
 static const usb_device_ops_t fuzz_ops = {
     .name           = "fuzz",
     .get_descriptor = fw_get_descriptor,
@@ -91,14 +101,15 @@ static const usb_device_ops_t fuzz_ops = {
     .ep_in          = fw_ep_in,
     .ep_out         = fw_ep_out,
     .tick           = fw_tick,
+    .get_speed      = fw_get_speed,
 };
 
 usb_device_t *fuzz_wrap(usb_device_t *base, const fuzz_cfg_t *cfg)
 {
-    usb_device_t *dev = g_new(usb_device_t, 1);
-    fuzz_state_t *fs = g_new(fuzz_state_t, 1);
+    usb_device_t *dev = g_new0(usb_device_t, 1);
+    fuzz_state_t *fs = g_new0(fuzz_state_t, 1);
     if (!dev || !fs) {
-        free(dev); free(fs);
+        g_free(dev); g_free(fs);
         LOG_ERR("fuzz_wrap: out of memory");
         return NULL;
     }

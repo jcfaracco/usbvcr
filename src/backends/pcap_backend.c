@@ -287,10 +287,12 @@ static int handle_control_get_descriptor(pcap_backend_state_t *st,
     }
 
     copy_len = (desc_buf->len < setup->length) ? (uint16_t)desc_buf->len : setup->length;
+#if USB_VCR_BUF_SIZE < 65536
     if (copy_len > USB_VCR_BUF_SIZE)
     {
-        copy_len = USB_VCR_BUF_SIZE;
+        copy_len = (uint16_t)USB_VCR_BUF_SIZE;
     }
+#endif
     if (data != NULL && copy_len > 0)
     {
         memcpy(data, desc_buf->data, copy_len);
@@ -338,10 +340,12 @@ static int pb_control(usb_device_t *dev,
         copy_len = (txn->reply_data->len < setup->length)
                      ? (uint16_t)txn->reply_data->len
                      : setup->length;
+#if USB_VCR_BUF_SIZE < 65536
         if (copy_len > USB_VCR_BUF_SIZE)
         {
-            copy_len = USB_VCR_BUF_SIZE;
+            copy_len = (uint16_t)USB_VCR_BUF_SIZE;
         }
+#endif
         if (data != NULL && copy_len > 0)
         {
             memcpy(data, txn->reply_data->data, copy_len);
@@ -425,6 +429,12 @@ static void pb_tick(usb_device_t *dev)
     (void)dev;
 }
 
+static int pb_get_speed(usb_device_t *dev)
+{
+    (void)dev;
+    return -1;
+}
+
 static const usb_device_ops_t pcap_ops = {
     .name           = "pcap",
     .get_descriptor = pb_get_descriptor,
@@ -432,6 +442,7 @@ static const usb_device_ops_t pcap_ops = {
     .ep_in          = pb_ep_in,
     .ep_out         = pb_ep_out,
     .tick           = pb_tick,
+    .get_speed      = pb_get_speed,
 };
 
 void pcap_backend_destroy(usb_device_t *dev)

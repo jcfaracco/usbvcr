@@ -1,0 +1,86 @@
+states:
+  - name: "operational"
+    rules:
+      # Standard GET_DESCRIPTOR (device)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0100
+        actions:
+          - respond_with: "$device.device_descriptor"
+
+      # Standard GET_DESCRIPTOR (configuration)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0200
+        actions:
+          - respond_with: "$device.configurations[0]"
+
+      # Standard GET_DESCRIPTOR (string 0 - language IDs)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0300
+        actions:
+          - respond_with:
+              hex: "04030904" # LangID 0x0409 (English US)
+
+      # Standard GET_DESCRIPTOR (string 1 - Manufacturer)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0301
+        actions:
+          - respond_with:
+              hex: "1803530061006E004400690073006B00200043006F00720070002E00" # "SanDisk Corp."
+
+      # Standard GET_DESCRIPTOR (string 2 - Product)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0302
+        actions:
+          - respond_with:
+              hex: "2c035600690072007400750061006C002000550053004200200044007200690076006500" # "Virtual USB Drive"
+
+      # Standard GET_DESCRIPTOR (string 3 - SerialNumber)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0303
+        actions:
+          - respond_with:
+              hex: "22033000310032003300340035003600370038003900410042004300440045004600" # "0123456789ABCDEF"
+
+      # MSC Bulk-Only Transport (BOT) Class Request: GET_MAX_LUN (0xfe)
+      # Returns 1 byte indicating the maximum LUN index (0 = 1 LUN supported)
+      - match:
+          bmRequestType: 0xa1
+          bRequest: 0xfe
+        actions:
+          - respond_with:
+              hex: "00"
+
+      # MSC Bulk-Only Transport (BOT) Class Request: BOT Reset (0xff)
+      - match:
+          bmRequestType: 0x21
+          bRequest: 0xff
+        actions:
+          - respond_with_status: 0
+
+      # Standard Request: SET_CONFIGURATION
+      # Acknowledge configuration selection
+      - match:
+          bmRequestType: 0x00
+          bRequest: 9
+          wValue: 1
+        actions:
+          - respond_with_status: 0
+
+      # USB Mass Storage SCSI transparent command set (SPC/SBC) backed by disk image
+      - match:
+          endpoint_out: 0x02
+        actions:
+          - disk_from_file:
+              file: "payloads/disk.img"

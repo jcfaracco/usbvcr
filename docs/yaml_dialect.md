@@ -114,6 +114,7 @@ sequencing is a structural choice, not a fixed layout.
 |-----|-------|---------|
 | `version` | string | dialect version |
 | `name` | string | human label |
+| `extends` | string | device template/instance to inherit from (e.g. `uvc_camera`) |
 | `imports` | list of paths | schema files to pull templates from |
 | `device_descriptor` | map | uses `template:` + field overrides |
 | `strings` | map `index: text` | USB string descriptors |
@@ -135,7 +136,7 @@ Inside an interface:
 | `bInterfaceNumber`, `bInterfaceClass`, `bInterfaceSubClass`, `bInterfaceProtocol` | int | standard interface fields |
 | `hid_descriptor` | map | e.g. `wDescriptorLength` |
 | `endpoints` | list | `address`, `attributes`, `max_packet_size`, `interval` |
-| `report_descriptor` | list **or** `raw_file` | symbolic item list (see `codecs/`) or an opaque blob path |
+| `report_descriptor` | list **or** `raw_file` **or** `hex` | symbolic item list (see `codecs/`), an opaque blob path (`raw_file:`), or raw hex bytes (`hex:`) |
 
 Field override example:
 
@@ -146,9 +147,10 @@ device_descriptor:
   idProduct: 0x1702
 ```
 
-Two authoring modes coexist:
+Three authoring modes coexist:
 - **Schema mode** — named fields, serialized to bytes.
 - **Raw mode** — `raw_file: "payloads/…"` when no schema fits.
+- **Inline hex mode** — `hex: "05010904..."` for raw descriptor bytes inline.
 
 ---
 
@@ -179,12 +181,14 @@ Actions:
 
 | Action | Meaning |
 |--------|---------|
-| `respond_with` | serialize a tree node, e.g. `"$device.device_descriptor"`, `"$device.configurations[0].interfaces[0].report_descriptor"` |
+| `respond_with` | serialize a tree node, e.g. `"$device.device_descriptor"`, `"$device.configurations[0].interfaces[0].report_descriptor"`, or inline `{ hex: "..." }` |
 | `respond_raw` | send an opaque payload: `{ file: "payloads/blob.bin" }` |
 | `respond_with_status` | ACK/stall a setup packet (`0` = ACK) |
 | `transition_state` | switch to another state by name |
 | `queue_endpoint_data` | queue `payloads` (list of `hex:`) to an `endpoint:` |
 | `return_nak_if_queue_empty` | NAK polls when the endpoint queue is drained |
+| `stream_from_file` | stream periodic video or isochronous/bulk packets from a file (e.g. `{ file: "payloads/stream.mjpeg", loop: true }`) |
+| `disk_from_file` | attach backing storage image for USB Mass Storage (SCSI over Bulk-Only Transport) (e.g. `{ file: "payloads/disk.img" }`) |
 
 ```yaml
 states:

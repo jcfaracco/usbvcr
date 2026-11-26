@@ -10,7 +10,7 @@
  * host. On a big-endian host these would need byte swapping.
  */
 
-#define USB_VCR_BUF_SIZE 4096
+#define USB_VCR_BUF_SIZE (128 * 1024)
 
 /* In-memory packet header. The `id` is widened to 64 bits so it can hold a
  * 64-bit wire id; the transport layer serializes it as 4 or 8 bytes on the
@@ -36,8 +36,12 @@ enum {
     RT_SET_ALT_SETTING          = 9,
     RT_GET_ALT_SETTING          = 10,
     RT_ALT_SETTING_STATUS       = 11,
+    RT_START_ISO_STREAM         = 12,
+    RT_STOP_ISO_STREAM          = 13,
+    RT_ISO_STREAM_STATUS        = 14,
     RT_START_INTERRUPT_RECEIVING = 15,
     RT_STOP_INTERRUPT_RECEIVING  = 16,
+    RT_CANCEL_DATA_PACKET       = 21,
     RT_CONTROL_PACKET           = 100,
     RT_BULK_PACKET              = 101,
     RT_ISO_PACKET               = 102,
@@ -77,11 +81,13 @@ enum {
      (1u << USB_VCR_CAP_BULK_RECEIVING))
 
 /* Link speeds. */
+#ifndef USB_VCR_SPEED_LOW
 #define USB_VCR_SPEED_LOW     0
 #define USB_VCR_SPEED_FULL    1
 #define USB_VCR_SPEED_HIGH    2
 #define USB_VCR_SPEED_SUPER   3
 #define USB_VCR_SPEED_UNKNOWN 255
+#endif
 
 /* Device descriptor field offsets (USB 2.0 spec, table 9-8). */
 #define USB_DD_bcdUSB           2   /* u16 LE */
@@ -103,8 +109,12 @@ enum {
 #define USB_DESC_HID_REPORT 0x22
 
 /* Standard control requests (bRequest). */
-#define USB_REQ_GET_DESCRIPTOR  0x06
+#define USB_REQ_GET_STATUS        0x00
+#define USB_REQ_CLEAR_FEATURE     0x01
+#define USB_REQ_SET_FEATURE       0x03
+#define USB_REQ_GET_DESCRIPTOR    0x06
 #define USB_REQ_SET_CONFIGURATION 0x09
+#define USB_REQ_SET_INTERFACE     0x0B
 
 /* bmRequestType bits. */
 #define USB_DIR_IN   0x80   /* device-to-host */
@@ -179,6 +189,40 @@ typedef struct {
     uint8_t  status;
     uint16_t length;
 } usb_interrupt_packet_header_t;
+
+/* RT_BULK_PACKET header */
+typedef struct {
+    uint8_t  endpoint;
+    uint8_t  status;
+    uint16_t length;
+    uint32_t stream_id;
+    uint16_t length_high;
+} usb_bulk_packet_header_t;
+
+/* RT_START_ISO_STREAM payload */
+typedef struct {
+    uint8_t endpoint;
+    uint8_t pkts_per_urb;
+    uint8_t no_urbs;
+} usb_start_iso_stream_header_t;
+
+/* RT_STOP_ISO_STREAM payload */
+typedef struct {
+    uint8_t endpoint;
+} usb_stop_iso_stream_header_t;
+
+/* RT_ISO_STREAM_STATUS reply payload */
+typedef struct {
+    uint8_t status;      /* 0 = success */
+    uint8_t endpoint;
+} usb_iso_stream_status_header_t;
+
+/* RT_ISO_PACKET header, followed by stream data */
+typedef struct {
+    uint8_t  endpoint;
+    uint8_t  status;
+    uint16_t length;
+} usb_iso_packet_header_t;
 
 #pragma pack(pop)
 

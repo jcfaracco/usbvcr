@@ -1,0 +1,105 @@
+states:
+  - name: "operational"
+    rules:
+      # GET_DESCRIPTOR (device)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0100
+        actions:
+          - respond_with: "$device.device_descriptor"
+
+      # GET_DESCRIPTOR (configuration)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0200
+        actions:
+          - respond_with: "$device.configurations[0]"
+
+      # SET_CONFIGURATION(1)
+      - match:
+          bmRequestType: 0x00
+          bRequest: 9
+          wValue: 1
+        actions:
+          - respond_with_status: 0
+
+      # VS PROBE_CONTROL GET_CUR
+      - match:
+          bmRequestType: 0x81
+          bRequest: 0x81
+          wValue: 0x0100
+          wIndex: 0x0001
+        actions:
+          - respond_with: "$device.probe_commit_response"
+
+      # VS COMMIT_CONTROL GET_CUR
+      - match:
+          bmRequestType: 0x81
+          bRequest: 0x81
+          wValue: 0x0200
+          wIndex: 0x0001
+        actions:
+          - respond_with: "$device.probe_commit_response"
+
+      # PROBE/COMMIT SET_CUR
+      - match:
+          bmRequestType: 0x21
+          bRequest: 0x01
+          wValue: 0x0100
+          wIndex: 0x0001
+        actions:
+          - respond_with_status: 0
+      - match:
+          bmRequestType: 0x21
+          bRequest: 0x01
+          wValue: 0x0200
+          wIndex: 0x0001
+        actions:
+          - respond_with_status: 0
+
+      # SU4 selector unit input select
+      - match:
+          bmRequestType: 0x81
+          bRequest: 0x81
+          wValue: 0x0100
+          wIndex: 0x0004
+        actions:
+          - respond_with: "$device.selector_input_response"
+      - match:
+          bmRequestType: 0x21
+          bRequest: 0x01
+          wValue: 0x0100
+          wIndex: 0x0004
+        actions:
+          - respond_with_status: 0
+
+      # SET_INTERFACE(VS iface=1, alt=1)
+      - match:
+          bmRequestType: 0x01
+          bRequest: 0x0b
+          wValue: 1
+          wIndex: 1
+        actions:
+          - respond_with_status: 0
+          - queue_endpoint_data:
+              endpoint: 0x82
+              payloads:
+                - hex: "02020080008000800080"
+                - hex: "02030080008000800080"
+
+      # SET_INTERFACE(VS iface=1, alt=0)
+      - match:
+          bmRequestType: 0x01
+          bRequest: 0x0b
+          wValue: 0
+          wIndex: 1
+        actions:
+          - respond_with_status: 0
+
+      # Isochronous video IN polling
+      - match:
+          endpoint_poll: 0x82
+        actions:
+          - return_nak_if_queue_empty: true

@@ -478,6 +478,65 @@ static void handle_stop_iso_stream(int sock, int64_t id,
                   (uint8_t *)&rstatus, sizeof(rstatus), ctx);
 }
 
+static void handle_bulk_packet(int sock, usb_device_t *dev, int64_t id,
+                               const uint8_t *payload, size_t len,
+                               const usb_record_ctx_t *ctx)
+{
+    if (len < sizeof(usb_bulk_packet_header_t))
+        return;
+
+    usb_bulk_packet_header_t bh;
+    memcpy(&bh, payload, sizeof(bh));
+    uint8_t ep = bh.endpoint;
+    size_t data_len = len - sizeof(bh);
+    const uint8_t *data = payload + sizeof(bh);
+
+    if (ep & 0x80) {
+        /* Bulk IN request from host */
+        size_t req_len = (size_t)bh.length | ((size_t)bh.length_high << 16);
+        size_t max_in = USB_VCR_BUF_SIZE - sizeof(usb_bulk_packet_header_t) - 64;
+        if (req_len == 0 || req_len > max_in)
+            req_len = max_in;
+
+        uint8_t *in_buf = malloc(req_len);
+        uint8_t *resp = malloc(sizeof(usb_bulk_packet_header_t) + req_len);
+        if (!in_buf || !resp) {
+            free(in_buf);
+            free(resp);
+            return;
+        }
+
+        int n = 0;
+        if (dev->ops->ep_in) {
+            n = dev->ops->ep_in(dev, ep, in_buf, req_len);
+            if (n < 0) n = 0;
+        }
+
+        usb_bulk_packet_header_t rh = bh;
+        rh.status = 0; /* usb_redir_success */
+        rh.length = (uint16_t)(n & 0xffff);
+        rh.length_high = (uint16_t)(n >> 16);
+        memcpy(resp, &rh, sizeof(rh));
+        if (n > 0)
+            memcpy(resp + sizeof(rh), in_buf, n);
+
+        usb_conn_send(sock, RT_BULK_PACKET, id, resp, sizeof(rh) + n, ctx);
+        free(in_buf);
+        free(resp);
+    } else {
+        /* Bulk OUT from host (e.g. SCSI CBW) */
+        if (dev->ops->ep_out)
+            dev->ops->ep_out(dev, ep, data, data_len);
+
+        /* ACK bulk OUT completion */
+        usb_bulk_packet_header_t rh = bh;
+        rh.status = 0; /* usb_redir_success */
+        rh.length = bh.length;
+        rh.length_high = bh.length_high;
+        usb_conn_send(sock, RT_BULK_PACKET, id, &rh, sizeof(rh), ctx);
+    }
+}
+
 /* ------------------------------------------------------------------ *
  * Main dispatch loop                                                  *
  * ------------------------------------------------------------------ */
@@ -541,58 +600,7 @@ static void dispatch_packet(int sock, usb_device_t *dev, const usb_header_t *hdr
         break;
 
     case RT_BULK_PACKET:  /* Bulk transfer (e.g. MSC SCSI command / data) */
-        if (len >= sizeof(usb_bulk_packet_header_t)) {
-            usb_bulk_packet_header_t bh;
-            memcpy(&bh, payload, sizeof(bh));
-            uint8_t ep = bh.endpoint;
-            size_t data_len = len - sizeof(bh);
-            const uint8_t *data = payload + sizeof(bh);
-
-            if (ep & 0x80) {
-                /* Bulk IN request from host */
-                size_t req_len = (size_t)bh.length | ((size_t)bh.length_high << 16);
-                size_t max_in = USB_VCR_BUF_SIZE - sizeof(usb_bulk_packet_header_t) - 64;
-                if (req_len == 0 || req_len > max_in)
-                    req_len = max_in;
-
-                uint8_t *in_buf = malloc(req_len);
-                uint8_t *resp = malloc(sizeof(usb_bulk_packet_header_t) + req_len);
-                if (!in_buf || !resp) {
-                    free(in_buf);
-                    free(resp);
-                    break;
-                }
-
-                int n = 0;
-                if (dev->ops->ep_in) {
-                    n = dev->ops->ep_in(dev, ep, in_buf, req_len);
-                    if (n < 0) n = 0;
-                }
-
-                usb_bulk_packet_header_t rh = bh;
-                rh.status = 0; /* usb_redir_success */
-                rh.length = (uint16_t)(n & 0xffff);
-                rh.length_high = (uint16_t)(n >> 16);
-                memcpy(resp, &rh, sizeof(rh));
-                if (n > 0)
-                    memcpy(resp + sizeof(rh), in_buf, n);
-
-                usb_conn_send(sock, RT_BULK_PACKET, hdr->id, resp, sizeof(rh) + n, ctx);
-                free(in_buf);
-                free(resp);
-            } else {
-                /* Bulk OUT from host (e.g. SCSI CBW) */
-                if (dev->ops->ep_out)
-                    dev->ops->ep_out(dev, ep, data, data_len);
-
-                /* ACK bulk OUT completion */
-                usb_bulk_packet_header_t rh = bh;
-                rh.status = 0; /* usb_redir_success */
-                rh.length = bh.length;
-                rh.length_high = bh.length_high;
-                usb_conn_send(sock, RT_BULK_PACKET, hdr->id, &rh, sizeof(rh), ctx);
-            }
-        }
+        handle_bulk_packet(sock, dev, hdr->id, payload, len, ctx);
         break;
 
     case RT_CANCEL_DATA_PACKET:

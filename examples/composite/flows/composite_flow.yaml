@@ -47,7 +47,7 @@ common_rules:
       wValue: 0x0302
     actions:
       - respond_with:
-          hex: "46035600690072007400750061006C00200043006F006D0070006F0073006900740065002000570065006200630061006D00200026002000540065006C0065006D006500740072007900" # "Virtual Composite Webcam & Telemetry"
+          hex: "4A035600690072007400750061006C00200043006F006D0070006F0073006900740065002000570065006200630061006D00200026002000540065006C0065006D006500740072007900" # "Virtual Composite Webcam & Telemetry"
 
   # Standard SET_CONFIGURATION(1)
   - match:
@@ -77,7 +77,7 @@ machines:
       # Initial state: Standby (AltSetting 0, zero bandwidth allocated)
       - name: "idle"
         rules:
-          # UVC Probe/Commit Negotiations (GET_CUR, SET_CUR)
+          # UVC VS PROBE_CONTROL (cs=0x01) GET_CUR / GET_MIN / GET_MAX / GET_DEF
           - match:
               bmRequestType: 0xA1
               bRequest: 0x81
@@ -93,12 +93,154 @@ machines:
             actions:
               - respond_with: "$device.probe_commit_response"
           - match:
+              bmRequestType: 0xA1
+              bRequest: 0x82
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0x81
+              bRequest: 0x82
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x83
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0x81
+              bRequest: 0x83
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x87
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0x81
+              bRequest: 0x87
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+
+          # UVC VS COMMIT_CONTROL (cs=0x02) GET_CUR / GET_MIN / GET_MAX / GET_DEF
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x81
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0x81
+              bRequest: 0x81
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x82
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x83
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x87
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+
+          # UVC PROBE_CONTROL and COMMIT_CONTROL SET_CUR
+          - match:
               bmRequestType: 0x21
               bRequest: 0x01
               wValue: 0x0100
               wIndex: 0x0001
             actions:
               - respond_with_status: 0
+          - match:
+              bmRequestType: 0x01
+              bRequest: 0x01
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with_status: 0
+          - match:
+              bmRequestType: 0x21
+              bRequest: 0x01
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with_status: 0
+          - match:
+              bmRequestType: 0x01
+              bRequest: 0x01
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with_status: 0
+
+          # SU4 selector unit controls (unit 4, iface 0)
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x81
+              wValue: 0x0100
+              wIndex: 0x0004
+            actions:
+              - respond_with: "$device.selector_input_response"
+          - match:
+              bmRequestType: 0x81
+              bRequest: 0x81
+              wValue: 0x0100
+              wIndex: 0x0004
+            actions:
+              - respond_with: "$device.selector_input_response"
+          - match:
+              bmRequestType: 0x21
+              bRequest: 0x01
+              wValue: 0x0100
+              wIndex: 0x0004
+            actions:
+              - respond_with_status: 0
+          - match:
+              bmRequestType: 0x01
+              bRequest: 0x01
+              wValue: 0x0100
+              wIndex: 0x0004
+            actions:
+              - respond_with_status: 0
+
+          # Processing unit (unit 5, iface 0)
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x81
+              wValue: 0x0100
+              wIndex: 0x0005
+            actions:
+              - respond_with:
+                  hex: "0100"
 
           # Host requests Alternate Setting 1 to start video streaming.
           # SYNCHRONOUS TRANSITION: transitions state immediately upon matching,

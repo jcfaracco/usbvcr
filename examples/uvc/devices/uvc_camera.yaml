@@ -81,7 +81,7 @@ configurations:
             bEndpointAddress: 0x81
             bmAttributes: 0x03       # Interrupt
             wMaxPacketSize: 8
-            bInterval: 0xff
+            bInterval: 10
 
         vc_cs_endpoint:
           hex: "0525030800"

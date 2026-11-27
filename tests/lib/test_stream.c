@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <unistd.h>
 #include <check.h>
 #include <glib.h>
 
@@ -157,6 +158,133 @@ START_TEST(test_stream_provider_looping)
 }
 END_TEST
 
+START_TEST(test_stream_provider_lifecycle_and_properties)
+{
+    char tmp_path[] = "/tmp/usbvcr_stream_test_XXXXXX.mjpeg";
+    int fd;
+    static const uint8_t dummy_mjpeg[] = { 0xFF, 0xD8, 0x01, 0xFF, 0xD9 };
+    stream_provider_t *p;
+
+    /* NULL path and non-existent path */
+    ck_assert_ptr_null(stream_provider_new(NULL, FALSE, 0));
+    ck_assert_ptr_null(stream_provider_new("/nonexistent/file.mjpeg", FALSE, 0));
+
+    /* Valid file */
+    fd = mkstemps(tmp_path, 6);
+    ck_assert_int_ge(fd, 0);
+    ck_assert_int_eq(write(fd, dummy_mjpeg, sizeof(dummy_mjpeg)), sizeof(dummy_mjpeg));
+    close(fd);
+
+    p = stream_provider_new(tmp_path, FALSE, 0x82);
+    ck_assert_ptr_nonnull(p);
+    ck_assert_str_eq(p->file_path, tmp_path);
+    stream_provider_free(p);
+    unlink(tmp_path);
+
+    /* NULL stream */
+    ck_assert_ptr_null(stream_provider_new_from_stream(NULL, FALSE, 0));
+
+    /* stream_provider_free(NULL) */
+    stream_provider_free(NULL);
+
+    /* NULL guards for setters */
+    stream_provider_set_active(NULL, TRUE);
+    stream_provider_set_interval(NULL, 1000);
+}
+END_TEST
+
+START_TEST(test_stream_provider_setters_and_ops)
+{
+    static const uint8_t data[] = { 0xFF, 0xD8, 0xAA, 0xFF, 0xD9 };
+    video_stream_t *s;
+    stream_provider_t *p;
+    uint8_t pkt[16];
+    const flow_endpoint_ops_t *ops;
+
+    s = video_stream_new_from_bytes(data, sizeof(data), VIDEO_FORMAT_MJPEG);
+    p = stream_provider_new_from_stream(s, FALSE, 0x81);
+    ck_assert_ptr_nonnull(p);
+
+    /* Interval setter with 0 and valid interval */
+    stream_provider_set_interval(p, 0);
+    ck_assert_int_eq(p->frame_interval_us, 33333);
+    stream_provider_set_interval(p, 20000);
+    ck_assert_int_eq(p->frame_interval_us, 20000);
+
+    /* Deactivate stream */
+    stream_provider_set_active(p, FALSE);
+    ck_assert(!p->active);
+    ck_assert_int_eq(stream_provider_produce_packet(p, 0x81, pkt, sizeof(pkt)), 0);
+
+    /* Reactivate stream */
+    p->current_frame = 5;
+    p->frame_offset = 2;
+    p->fid = 1;
+    stream_provider_set_active(p, TRUE);
+    ck_assert(p->active);
+    ck_assert_int_eq(p->current_frame, 0);
+    ck_assert_int_eq(p->frame_offset, 0);
+    ck_assert_int_eq(p->fid, 0);
+
+    /* Verify flow_endpoint_ops */
+    ops = stream_provider_get_ops();
+    ck_assert_ptr_nonnull(ops);
+    ck_assert(ops->consume_out == NULL);
+    ck_assert(ops->produce_in != NULL);
+    ck_assert(ops->tick != NULL);
+    ck_assert(ops->free != NULL);
+
+    ops->tick(p);
+    ck_assert_int_gt(ops->produce_in(p, 0x81, pkt, sizeof(pkt)), 0);
+
+    ops->free(p);
+}
+END_TEST
+
+START_TEST(test_stream_provider_produce_edge_cases)
+{
+    static const uint8_t data[] = { 0xFF, 0xD8, 0x11, 0x22, 0xFF, 0xD9 };
+    video_stream_t *s;
+    video_stream_t *saved_stream;
+    stream_provider_t *p;
+    uint8_t pkt[16];
+
+    /* NULL provider */
+    ck_assert_int_eq(stream_provider_produce_packet(NULL, 0x81, pkt, sizeof(pkt)), 0);
+
+    s = video_stream_new_from_bytes(data, sizeof(data), VIDEO_FORMAT_MJPEG);
+    p = stream_provider_new_from_stream(s, FALSE, 0x81);
+    ck_assert_ptr_nonnull(p);
+
+    /* NULL buffer or cap < 3 */
+    ck_assert_int_eq(stream_provider_produce_packet(p, 0x81, NULL, sizeof(pkt)), 0);
+    ck_assert_int_eq(stream_provider_produce_packet(p, 0x81, pkt, 2), 0);
+
+    /* Empty frame count or NULL stream */
+    p->stream->frame_count = 0;
+    ck_assert_int_eq(stream_provider_produce_packet(p, 0x81, pkt, sizeof(pkt)), 0);
+    p->stream->frame_count = 1;
+
+    saved_stream = p->stream;
+    p->stream = NULL;
+    ck_assert_int_eq(stream_provider_produce_packet(p, 0x81, pkt, sizeof(pkt)), 0);
+    p->stream = saved_stream;
+
+    /* Out of bounds frame with loop = TRUE -> triggers rewind to frame 0 */
+    p->loop = TRUE;
+    p->current_frame = 999;
+    ck_assert_int_gt(stream_provider_produce_packet(p, 0x81, pkt, sizeof(pkt)), 0);
+    ck_assert_int_eq(p->current_frame, 0);
+
+    /* Out of bounds frame with loop = FALSE -> returns 0 */
+    p->loop = FALSE;
+    p->current_frame = 999;
+    ck_assert_int_eq(stream_provider_produce_packet(p, 0x81, pkt, sizeof(pkt)), 0);
+
+    stream_provider_free(p);
+}
+END_TEST
+
 static Suite *stream_suite(void)
 {
     Suite *s = suite_create("stream");
@@ -167,6 +295,9 @@ static Suite *stream_suite(void)
     tcase_add_test(tc, test_video_parser_raw_and_yuy2);
     tcase_add_test(tc, test_stream_provider_slicing_and_headers);
     tcase_add_test(tc, test_stream_provider_looping);
+    tcase_add_test(tc, test_stream_provider_lifecycle_and_properties);
+    tcase_add_test(tc, test_stream_provider_setters_and_ops);
+    tcase_add_test(tc, test_stream_provider_produce_edge_cases);
 
     suite_add_tcase(s, tc);
     return s;

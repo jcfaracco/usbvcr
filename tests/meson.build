@@ -318,6 +318,34 @@ if check_dep.found()
   )
   test('yaml_backend', test_yaml_backend, env : test_env)
 
+  test_roundtrip_fixtures = executable(
+    'test_roundtrip_fixtures',
+    'integration/test_roundtrip_fixtures.c',
+    files(
+      '../src/backends/pcap_backend.c',
+      '../src/backends/yaml_backend.c',
+      '../src/lib/pcap/pcap.c',
+      '../src/lib/pcap/record.c',
+      '../src/lib/yaml/loader.c',
+      '../src/lib/yaml/tree.c',
+      '../src/lib/yaml/util.c',
+      '../src/lib/schema.c',
+      '../src/lib/flow.c',
+      '../src/lib/usb_node.c',
+      '../src/lib/codec.c',
+      '../src/lib/version.c',
+      '../src/lib/utils.c',
+      '../src/lib/stream/video_parser.c',
+      '../src/lib/stream/stream_provider.c',
+      '../src/lib/storage/disk_provider.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib, core, backends],
+    dependencies : [check_dep, glib_dep, yaml_dep],
+    c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+  )
+  test('roundtrip_fixtures', test_roundtrip_fixtures, env : test_env)
+
   engine_test_sources = files(
     '../src/engine/engine.c',
     '../src/engine/qemu_engine.c',

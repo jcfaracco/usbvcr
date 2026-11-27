@@ -10,6 +10,7 @@
 
 #include "yaml_backend.h"
 #include "ffs/ffs.h"
+#include "bytes.h"
 
 #ifndef TEST_DATA_DIR
 #define TEST_DATA_DIR "tests/data"

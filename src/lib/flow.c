@@ -5,6 +5,7 @@
 #include "bytes.h"
 #include "stream/stream_provider.h"
 #include "storage/disk_provider.h"
+#include "exec_provider.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +28,9 @@ typedef enum {
     ACT_TRANSITION_STATE,
     ACT_RETURN_NAK_IF_QUEUE_EMPTY,
     ACT_QUEUE_ENDPOINT_DATA,
-    ACT_ENDPOINT_PROVIDER
+    ACT_ENDPOINT_PROVIDER,
+    ACT_BIND_PROVIDER,
+    ACT_UNBIND_PROVIDER
 } flow_action_type_t;
 
 typedef struct {
@@ -39,6 +42,8 @@ typedef struct {
     char *transition_state;
     int return_nak_if_queue_empty;
     uint8_t ep;
+    uint8_t ep_in;
+    uint8_t ep_out;
     GQueue *payloads; // of GByteArray*
     flow_endpoint_ops_t provider_ops;
     void *provider_ctx;
@@ -437,6 +442,166 @@ static flow_action_t *parse_disk_action(yaml_document_t *doc, yaml_node_t *v, ui
     return a;
 }
 
+static flow_action_t *parse_bind_provider_action(yaml_document_t *doc, yaml_node_t *v, uint8_t ep_hint,
+                                                 const char *flow_dir, const char *base_dir)
+{
+    if (!v || v->type != YAML_MAPPING_NODE)
+        return NULL;
+
+    flow_action_t *a = g_new0(flow_action_t, 1);
+    a->type = ACT_BIND_PROVIDER;
+
+    const char *driver = NULL;
+    uint8_t ep_in = 0;
+    uint8_t ep_out = (ep_hint != 0) ? ep_hint : 0;
+    const char *file_str = NULL;
+    const char *command_str = NULL;
+    gboolean loop_val = TRUE;
+
+    yaml_node_t *dn = yaml_map_get(doc, v, "driver");
+    if (dn)
+        driver = yaml_scalar(dn);
+
+    yaml_node_t *eps = yaml_map_get(doc, v, "endpoints");
+    if (eps && eps->type == YAML_MAPPING_NODE) {
+        yaml_node_t *ein = yaml_map_get(doc, eps, "in");
+        yaml_node_t *eout = yaml_map_get(doc, eps, "out");
+        if (ein) {
+            const char *s = yaml_scalar(ein);
+            if (s) ep_in = (uint8_t)strtoul(s, NULL, 0);
+        }
+        if (eout) {
+            const char *s = yaml_scalar(eout);
+            if (s) ep_out = (uint8_t)strtoul(s, NULL, 0);
+        }
+    }
+    yaml_node_t *ein = yaml_map_get(doc, v, "endpoint_in");
+    if (ein) {
+        const char *s = yaml_scalar(ein);
+        if (s) ep_in = (uint8_t)strtoul(s, NULL, 0);
+    }
+    yaml_node_t *eout = yaml_map_get(doc, v, "endpoint_out");
+    if (eout) {
+        const char *s = yaml_scalar(eout);
+        if (s) ep_out = (uint8_t)strtoul(s, NULL, 0);
+    }
+    yaml_node_t *ep_single = yaml_map_get(doc, v, "endpoint");
+    if (ep_single) {
+        const char *s = yaml_scalar(ep_single);
+        if (s) {
+            uint8_t ep = (uint8_t)strtoul(s, NULL, 0);
+            if (ep & 0x80)
+                ep_in = ep;
+            else
+                ep_out = ep;
+        }
+    }
+
+    yaml_node_t *cfg = yaml_map_get(doc, v, "config");
+    yaml_node_t *cfg_source = (cfg && cfg->type == YAML_MAPPING_NODE) ? cfg : v;
+
+    yaml_node_t *fn = yaml_map_get(doc, cfg_source, "file");
+    if (fn)
+        file_str = yaml_scalar(fn);
+
+    yaml_node_t *cmd_node = yaml_map_get(doc, cfg_source, "command");
+    if (cmd_node)
+        command_str = yaml_scalar(cmd_node);
+
+    yaml_node_t *ln = yaml_map_get(doc, cfg_source, "loop");
+    if (ln) {
+        const char *ls = yaml_scalar(ln);
+        loop_val = (g_strcmp0(ls, "false") != 0 && g_strcmp0(ls, "0") != 0 && g_strcmp0(ls, "no") != 0);
+    }
+
+    if (g_strcmp0(driver, "disk") == 0) {
+        if (ep_in == 0) ep_in = 0x81;
+        if (ep_out == 0) ep_out = 0x02;
+        if (file_str) {
+            char *resolved = resolve_flow_asset(base_dir, flow_dir, file_str);
+            disk_provider_t *dp = disk_provider_new(resolved, ep_in, ep_out);
+            a->provider_ops = *disk_provider_get_ops();
+            a->provider_ctx = dp;
+            g_free(resolved);
+        }
+    } else if (g_strcmp0(driver, "stream") == 0) {
+        if (ep_in == 0) ep_in = (ep_hint != 0) ? ep_hint : 0x81;
+        if (file_str) {
+            char *resolved = resolve_flow_asset(base_dir, flow_dir, file_str);
+            stream_provider_t *sp = stream_provider_new(resolved, loop_val, ep_in);
+            a->provider_ops = *stream_provider_get_ops();
+            a->provider_ctx = sp;
+            g_free(resolved);
+        }
+    } else if (g_strcmp0(driver, "exec") == 0) {
+        if (ep_in == 0) ep_in = 0x81;
+        if (ep_out == 0) ep_out = 0x01;
+        if (command_str) {
+            exec_provider_t *ep = exec_provider_new(command_str, flow_dir, ep_in, ep_out);
+            if (ep != NULL) {
+                a->provider_ops = *exec_provider_get_ops();
+                a->provider_ctx = ep;
+            }
+        }
+    } else {
+        LOG_WARN("flow: unknown provider driver '%s'", driver ? driver : "(null)");
+    }
+
+    a->ep_in = ep_in;
+    a->ep_out = ep_out;
+    a->ep = ep_out ? ep_out : ep_in;
+
+    return a;
+}
+
+static flow_action_t *parse_unbind_provider_action(yaml_document_t *doc, yaml_node_t *v)
+{
+    flow_action_t *a = g_new0(flow_action_t, 1);
+    a->type = ACT_UNBIND_PROVIDER;
+
+    if (!v)
+        return a;
+
+    if (v->type == YAML_MAPPING_NODE) {
+        yaml_node_t *ein = yaml_map_get(doc, v, "endpoint_in");
+        if (ein) {
+            const char *s = yaml_scalar(ein);
+            if (s) a->ep_in = (uint8_t)strtoul(s, NULL, 0);
+        }
+        yaml_node_t *eout = yaml_map_get(doc, v, "endpoint_out");
+        if (eout) {
+            const char *s = yaml_scalar(eout);
+            if (s) a->ep_out = (uint8_t)strtoul(s, NULL, 0);
+        }
+        yaml_node_t *ep = yaml_map_get(doc, v, "endpoint");
+        if (ep) {
+            const char *s = yaml_scalar(ep);
+            if (s) {
+                uint8_t val = (uint8_t)strtoul(s, NULL, 0);
+                if (val & 0x80) a->ep_in = val;
+                else a->ep_out = val;
+            }
+        }
+        yaml_node_t *eps = yaml_map_get(doc, v, "endpoints");
+        if (eps && eps->type == YAML_SEQUENCE_NODE) {
+            for (yaml_node_item_t *i = eps->data.sequence.items.start; i < eps->data.sequence.items.top; i++) {
+                yaml_node_t *it = yaml_document_get_node(doc, *i);
+                if (it && it->type == YAML_SCALAR_NODE) {
+                    uint8_t val = (uint8_t)strtoul(yaml_scalar(it), NULL, 0);
+                    if (val & 0x80) a->ep_in = val;
+                    else a->ep_out = val;
+                }
+            }
+        }
+    } else if (v->type == YAML_SCALAR_NODE) {
+        uint8_t val = (uint8_t)strtoul(yaml_scalar(v), NULL, 0);
+        if (val & 0x80) a->ep_in = val;
+        else a->ep_out = val;
+    }
+
+    return a;
+}
+
 static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq, uint8_t ep_hint,
                             const char *flow_dir, const char *base_dir) {
     GList *list = NULL;
@@ -487,6 +652,10 @@ static GList* parse_actions(yaml_document_t *doc, yaml_node_t *seq, uint8_t ep_h
         } else if ((v = yaml_map_get(doc, item, "disk_from_file")) ||
                    (v = yaml_map_get(doc, item, "attach_disk"))) {
             a = parse_disk_action(doc, v, ep_hint, flow_dir, base_dir);
+        } else if ((v = yaml_map_get(doc, item, "bind_provider"))) {
+            a = parse_bind_provider_action(doc, v, ep_hint, flow_dir, base_dir);
+        } else if ((v = yaml_map_get(doc, item, "unbind_provider"))) {
+            a = parse_unbind_provider_action(doc, v);
         }
 
         if (a)
@@ -837,6 +1006,26 @@ static void execute_actions(flow_t *flow, GList *actions, uint8_t *out, uint16_t
                     if (a->provider_ops.consume_out(a->provider_ctx, a->ep, ep_buf, ep_len, q) == 0) {
                         if (handled) *handled = 1;
                     }
+                }
+                break;
+            case ACT_BIND_PROVIDER:
+                if (a->provider_ctx) {
+                    flow_endpoint_ops_t ops_borrowed = a->provider_ops;
+                    ops_borrowed.free = NULL;
+                    if (a->ep_in != 0) {
+                        flow_bind_endpoint(flow, a->ep_in, &ops_borrowed, a->provider_ctx);
+                    }
+                    if (a->ep_out != 0 && a->ep_out != a->ep_in) {
+                        flow_bind_endpoint(flow, a->ep_out, &ops_borrowed, a->provider_ctx);
+                    }
+                }
+                break;
+            case ACT_UNBIND_PROVIDER:
+                if (a->ep_in != 0) {
+                    flow_unbind_endpoint(flow, a->ep_in);
+                }
+                if (a->ep_out != 0 && a->ep_out != a->ep_in) {
+                    flow_unbind_endpoint(flow, a->ep_out);
                 }
                 break;
         }

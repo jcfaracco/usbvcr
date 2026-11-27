@@ -11,6 +11,7 @@ This directory contains complete, ready-to-run USB device emulation projects dem
 | [**joystick/**](joystick/README.md) | HID (`0x03`) | 4-axis analog joystick with 12 digital buttons. Emulates input events queued on interrupt endpoint `0x81`. Binds to Linux `joydev` / `evdev`. | None (declarative events) |
 | [**msc/**](msc/README.md) | Mass Storage (`0x08`) | USB flash drive (pendrive) using Bulk-Only Transport (BOT) and SCSI transparent commands (SPC/SBC). Mounts as a block device. | `payloads/disk.img` (10 MiB FAT16 image) |
 | [**composite/**](composite/README.md) | Composite (`0xEF`) | Multi-interface UVC webcam + Telemetry device showcasing **all** flow FSM features: orthogonal machines (`machines`), global `common_rules`, state inheritance (`extends`), synchronous transitions, and cross-machine transitions. | `payloads/stream.mjpeg` (Motion-JPEG video) |
+| [**custom_device/**](custom_device/README.md) | Vendor Specific (`0xFF`) | Unknown / proprietary USB dongle using generic `bind_provider` (`driver: "exec"`). Bridges Bulk I/O to a project-scoped Python protocol service script. | `scripts/dongle_service.py` (Protocol handler) |
 
 ---
 
@@ -44,6 +45,9 @@ Start `usbvcr` targeting your desired example manifest:
 
 # Emulate the Composite webcam & telemetry
 ./build/src/usbvcr --yaml examples/composite/project.yaml
+
+# Emulate the Custom vendor-specific dongle
+./build/src/usbvcr --yaml examples/custom_device/project.yaml
 ```
 
 Then attach the device to a QEMU virtual machine via `usb-redir`:

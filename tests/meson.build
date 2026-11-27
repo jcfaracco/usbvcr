@@ -35,7 +35,6 @@ if check_dep.found()
     'test_stream',
     'lib/test_stream.c',
     files(
-      '../src/lib/stream/video_parser.c',
       '../src/lib/stream/stream_provider.c',
       '../src/lib/log.c',
     ),
@@ -43,6 +42,17 @@ if check_dep.found()
     dependencies : [check_dep, glib_dep],
   )
   test('stream', test_stream, env : test_env)
+
+  test_disk_provider = executable(
+    'test_disk_provider',
+    'lib/test_disk_provider.c',
+    files(
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib, core],
+    dependencies : [check_dep, glib_dep],
+  )
+  test('disk_provider', test_disk_provider, env : test_env)
 
   test_yaml_loader = executable(
     'test_yaml_loader',
@@ -60,6 +70,7 @@ if check_dep.found()
       '../src/lib/stream/video_parser.c',
       '../src/lib/stream/stream_provider.c',
       '../src/lib/storage/disk_provider.c',
+      '../src/lib/exec_provider.c',
       '../src/lib/log.c',
     ),
     include_directories : [lib, core],
@@ -102,6 +113,7 @@ if check_dep.found()
       '../src/lib/stream/video_parser.c',
       '../src/lib/stream/stream_provider.c',
       '../src/lib/storage/disk_provider.c',
+      '../src/lib/exec_provider.c',
       '../src/lib/log.c',
     ),
     include_directories : [lib, core],
@@ -121,6 +133,19 @@ if check_dep.found()
     dependencies : [check_dep, glib_dep],
   )
   test('usb_node', test_usb_node)
+
+  test_codec = executable(
+    'test_codec',
+    'lib/test_codec.c',
+    files(
+      '../src/lib/yaml/util.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib, core],
+    dependencies : [check_dep, glib_dep, yaml_dep],
+    c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+  )
+  test('codec', test_codec, env : test_env)
 
   test_descriptor = executable(
     'test_descriptor',
@@ -144,6 +169,7 @@ if check_dep.found()
       '../src/lib/stream/video_parser.c',
       '../src/lib/stream/stream_provider.c',
       '../src/lib/storage/disk_provider.c',
+      '../src/lib/exec_provider.c',
       '../src/backends/yaml_backend.c',
     ),
     include_directories : [lib, core, backends],
@@ -197,7 +223,6 @@ if check_dep.found()
     'test_pcap_roundtrip',
     'integration/test_pcap_roundtrip.c',
     files(
-      '../src/lib/pcap/pcap.c',
       '../src/lib/log.c',
     ),
     include_directories : [lib],
@@ -288,6 +313,7 @@ if check_dep.found()
       '../src/lib/stream/video_parser.c',
       '../src/lib/stream/stream_provider.c',
       '../src/lib/storage/disk_provider.c',
+      '../src/lib/exec_provider.c',
       '../src/lib/log.c',
     ),
     include_directories : [lib, core, backends],
@@ -295,6 +321,35 @@ if check_dep.found()
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
   )
   test('yaml_backend', test_yaml_backend, env : test_env)
+
+  test_roundtrip_fixtures = executable(
+    'test_roundtrip_fixtures',
+    'integration/test_roundtrip_fixtures.c',
+    files(
+      '../src/backends/pcap_backend.c',
+      '../src/backends/yaml_backend.c',
+      '../src/lib/pcap/pcap.c',
+      '../src/lib/pcap/record.c',
+      '../src/lib/yaml/loader.c',
+      '../src/lib/yaml/tree.c',
+      '../src/lib/yaml/util.c',
+      '../src/lib/schema.c',
+      '../src/lib/flow.c',
+      '../src/lib/usb_node.c',
+      '../src/lib/codec.c',
+      '../src/lib/version.c',
+      '../src/lib/utils.c',
+      '../src/lib/stream/video_parser.c',
+      '../src/lib/stream/stream_provider.c',
+      '../src/lib/storage/disk_provider.c',
+      '../src/lib/exec_provider.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib, core, backends],
+    dependencies : [check_dep, glib_dep, yaml_dep],
+    c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+  )
+  test('roundtrip_fixtures', test_roundtrip_fixtures, env : test_env)
 
   engine_test_sources = files(
     '../src/engine/engine.c',
@@ -323,6 +378,7 @@ if check_dep.found()
       '../src/lib/stream/video_parser.c',
       '../src/lib/stream/stream_provider.c',
       '../src/lib/storage/disk_provider.c',
+      '../src/lib/exec_provider.c',
     )
   endif
 
@@ -356,10 +412,12 @@ if check_dep.found()
         '../src/lib/stream/video_parser.c',
         '../src/lib/stream/stream_provider.c',
         '../src/lib/storage/disk_provider.c',
+      '../src/lib/exec_provider.c',
       ),
       include_directories : [lib, core, backends],
       dependencies : [check_dep, glib_dep, yaml_dep],
       c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+      link_args : ['-Wl,--wrap=mount', '-Wl,--wrap=umount', '-Wl,--wrap=opendir'],
     )
     test('ffs', test_ffs, env : test_env)
 
@@ -382,6 +440,7 @@ if check_dep.found()
         '../src/lib/stream/video_parser.c',
         '../src/lib/stream/stream_provider.c',
         '../src/lib/storage/disk_provider.c',
+      '../src/lib/exec_provider.c',
       ),
       include_directories : [lib, core, engine, backends],
       dependencies : [check_dep, glib_dep, yaml_dep],

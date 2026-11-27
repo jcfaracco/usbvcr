@@ -213,7 +213,8 @@ START_TEST(test_data_dir_chdir_resolution)
 
     /* 2. From a subdirectory like tests/, data is at ../data */
     ck_assert_int_eq(g_chdir(".."), 0);
-    g_autofree char *sub = g_build_filename(g_get_current_dir(), "tests", NULL);
+    g_autofree char *parent = g_get_current_dir();
+    g_autofree char *sub = g_build_filename(parent, "tests", NULL);
     ck_assert_int_eq(g_chdir(sub), 0);
     g_autofree char *dir_from_sub = usbvcr_get_data_dir();
     ck_assert_ptr_nonnull(dir_from_sub);
@@ -230,6 +231,8 @@ START_TEST(test_data_dir_chdir_resolution)
     ck_assert_int_eq(g_chdir(orig_cwd), 0);
     if (saved_env)
         g_setenv("USBVCR_DATA_DIR", saved_env, 1);
+    else
+        g_unsetenv("USBVCR_DATA_DIR");
 }
 END_TEST
 
@@ -304,7 +307,8 @@ START_TEST(test_usb_parse_speed)
 }
 END_TEST
 
-static Suite *utils_suite(void)
+static Suite *
+utils_suite(void)
 {
     Suite *s = suite_create("utils");
 
@@ -348,7 +352,8 @@ static Suite *utils_suite(void)
     return s;
 }
 
-int main(void)
+int
+main(void)
 {
     SRunner *sr = srunner_create(utils_suite());
     srunner_run_all(sr, CK_NORMAL);

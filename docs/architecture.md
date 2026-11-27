@@ -49,20 +49,23 @@ This document describes the architecture and design of usbvcr: data flow, execut
                          [ optional fuzz_wrap layer ]
                                        │
                      ┌─────────────────┴─────────────────┐
-                     │                                   │
-                     ▼ (usbredir)                        ▼ (FunctionFS ABI)
-         ┌───────────────────────┐           ┌───────────────────────┐
-         │      qemu_engine      │           │     local_engine      │
-         │  (src/engine/qemu_*)  │           │  (src/engine/local_*) │
-         │           │           │           │           │           │
-         │   src/core/usb_core   │           │     src/lib/ffs/      │
-         │           │           │           └───────────┬───────────┘
-         │  src/core/transport   │                       │
-         └───────────┬───────────┘                       ▼
-                     │ TCP socket               Linux Gadget / UDC
-                     ▼                       (ConfigFS FunctionFS fds)
-             QEMU Virtual Guest
-             (-device usb-redir)
+                     │   usb_engine_ops (engine seam)    │
+                     │     (src/engine/engine.{c,h})     │
+                     └────────┬─────────────────┬────────┘
+                              │                 │
+                  (usbredir)  ▼                 ▼ (FunctionFS ABI)
+                  ┌───────────────────────┐ ┌───────────────────────┐
+                  │      qemu_engine      │ │     local_engine      │
+                  │  (src/engine/qemu_*)  │ │  (src/engine/local_*) │
+                  │           │           │ │           │           │
+                  │   src/core/usb_core   │ │     src/lib/ffs/      │
+                  │           │           │ └───────────┬───────────┘
+                  │  src/core/transport   │             │
+                  └───────────┬───────────┘             ▼
+                              │ TCP socket      Linux Gadget / UDC
+                              ▼              (ConfigFS FunctionFS fds)
+                      QEMU Virtual Guest
+                      (-device usb-redir)
 ```
 
 YAML never reaches QEMU or FunctionFS directly. It is a device *description*; C serializes it to the binary descriptors and packet streams expected by the target engine.
@@ -106,13 +109,17 @@ payloads:
 ```
 
 ### 3.3 State Machine Behavior
-Flows express conditional logic via `match:` + `transition_state` and endpoint queues.
+Flows express declarative response logic via states, `match:` rules, synchronous `transition_state`
+transitions, and per-endpoint queues:
+- **Hierarchical states (`extends:`):** Sub-states inherit rules from parent states without duplicating descriptors.
+- **Global rules (`common_rules:`):** Rules evaluated across all states and machines to eliminate boilerplate.
+- **Orthogonal machines (`machines:`):** Concurrent, independent state machines running per interface or component.
+
 Planned additions (tracked in [TODO.md](../TODO.md)), kept **bounded** (no arbitrary expression eval — safety +
 deterministic fuzzing):
 - `vars:` block + `{{ var }}` interpolation.
 - `when:` guards on rules/actions using a limited vocabulary
   (field compare, current state, counters).
-- `common_rules:` block evaluated across all states to reduce duplication.
 
 ---
 
@@ -169,7 +176,8 @@ src/backends/             # Device implementations behind usb_device_ops
   yaml_backend.{c,h}      # Ops backend driven by loaded UsbNode tree + flow FSM
   pcap_backend.{c,h}      # Replay-from-capture ops backend
 
-src/engine/               # Target execution transports
+src/engine/               # Pluggable execution engine subsystem
+  engine.{c,h}            # Generic usb_engine_ops_t interface, registry, and factory
   qemu_engine.{c,h}       # Connects via TCP usbredir socket to QEMU
   local_engine.{c,h}      # Exposes USB device locally using Linux FunctionFS/ConfigFS
 
@@ -293,7 +301,4 @@ The test harness runs suites against `usb_core` and the execution backends.
 ## 9. Development & Roadmap
 
 Active and upcoming architectural improvements are tracked in [TODO.md](../TODO.md). Key areas include:
-- Standardizing engines around an `engine_ops_t` interface.
-- Decoupling flow state machine execution from storage and streaming providers.
-- Supporting global flow rules (`common_rules`) and state inheritance.
-- Orthogonal / concurrent state machines in flows.
+- Asynchronous tick-driven delayed responses and state dwell times.

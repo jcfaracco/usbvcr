@@ -2,8 +2,10 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <check.h>
 #include <glib.h>
+#include <glib/gstdio.h>
 
 #include "utils.h"
 
@@ -170,6 +172,70 @@ START_TEST(test_data_dir_lookup)
 }
 END_TEST
 
+START_TEST(test_data_dir_env)
+{
+    /* Save whatever environment meson passed */
+    const char *orig_env = g_getenv("USBVCR_DATA_DIR");
+    g_autofree char *saved_env = orig_env ? g_strdup(orig_env) : NULL;
+
+    g_setenv("USBVCR_DATA_DIR", "/tmp", 1);
+    g_autofree char *datadir = usbvcr_get_data_dir();
+    ck_assert_ptr_nonnull(datadir);
+    ck_assert_str_eq(datadir, "/tmp");
+
+    /* Non-existent directory should be ignored and fall back */
+    g_setenv("USBVCR_DATA_DIR", "/nonexistent_dir_12345", 1);
+    g_autofree char *datadir2 = usbvcr_get_data_dir();
+    ck_assert_ptr_nonnull(datadir2);
+    ck_assert(g_file_test(datadir2, G_FILE_TEST_IS_DIR));
+
+    if (saved_env)
+        g_setenv("USBVCR_DATA_DIR", saved_env, 1);
+    else
+        g_unsetenv("USBVCR_DATA_DIR");
+}
+END_TEST
+
+START_TEST(test_data_dir_chdir_resolution)
+{
+    const char *orig_env = g_getenv("USBVCR_DATA_DIR");
+    g_autofree char *saved_env = orig_env ? g_strdup(orig_env) : NULL;
+    g_unsetenv("USBVCR_DATA_DIR");
+
+    g_autofree char *orig_cwd = g_get_current_dir();
+
+    /* 1. From source root (cwd/.. from build/), "data" directory exists directly */
+    ck_assert_int_eq(g_chdir(".."), 0);
+    g_autofree char *dir_root = usbvcr_get_data_dir();
+    ck_assert_ptr_nonnull(dir_root);
+    ck_assert(g_file_test(dir_root, G_FILE_TEST_IS_DIR));
+    ck_assert_int_eq(g_chdir(orig_cwd), 0);
+
+    /* 2. From a subdirectory like tests/, data is at ../data */
+    ck_assert_int_eq(g_chdir(".."), 0);
+    g_autofree char *parent = g_get_current_dir();
+    g_autofree char *sub = g_build_filename(parent, "tests", NULL);
+    ck_assert_int_eq(g_chdir(sub), 0);
+    g_autofree char *dir_from_sub = usbvcr_get_data_dir();
+    ck_assert_ptr_nonnull(dir_from_sub);
+    ck_assert(g_file_test(dir_from_sub, G_FILE_TEST_IS_DIR));
+    ck_assert_int_eq(g_chdir(orig_cwd), 0);
+
+    /* 3. From /tmp, neither data nor ../data exists, so it resolves from /proc/self/exe */
+    ck_assert_int_eq(g_chdir("/tmp"), 0);
+    g_autofree char *dir_from_tmp = usbvcr_get_data_dir();
+    ck_assert_ptr_nonnull(dir_from_tmp);
+    ck_assert(g_file_test(dir_from_tmp, G_FILE_TEST_IS_DIR));
+
+    /* Restore original working directory and environment */
+    ck_assert_int_eq(g_chdir(orig_cwd), 0);
+    if (saved_env)
+        g_setenv("USBVCR_DATA_DIR", saved_env, 1);
+    else
+        g_unsetenv("USBVCR_DATA_DIR");
+}
+END_TEST
+
 START_TEST(test_find_data_file)
 {
     g_autofree char *kbd = usbvcr_find_data_file("devices", "keyboard");
@@ -186,6 +252,32 @@ START_TEST(test_find_data_file)
 
     g_autofree char *missing = usbvcr_find_data_file("devices", "nonexistent_device");
     ck_assert_ptr_null(missing);
+}
+END_TEST
+
+START_TEST(test_find_data_file_null_and_corner_cases)
+{
+    /* Null filename */
+    ck_assert_ptr_null(usbvcr_find_data_file("devices", NULL));
+    ck_assert_ptr_null(usbvcr_find_data_file(NULL, NULL));
+
+    /* Null subdir with non-existent file */
+    ck_assert_ptr_null(usbvcr_find_data_file(NULL, "nonexistent.yaml"));
+    ck_assert_ptr_null(usbvcr_find_data_file(NULL, "nonexistent"));
+
+    /* Null subdir with real file: point USBVCR_DATA_DIR to data/devices */
+    g_autofree char *orig_data = usbvcr_get_data_dir();
+    g_autofree char *dev_dir = g_build_filename(orig_data, "devices", NULL);
+    g_setenv("USBVCR_DATA_DIR", dev_dir, 1);
+
+    g_autofree char *found = usbvcr_find_data_file(NULL, "keyboard");
+    ck_assert_ptr_nonnull(found);
+    ck_assert(g_str_has_suffix(found, "keyboard.yaml"));
+
+    g_autofree char *found_exact = usbvcr_find_data_file(NULL, "keyboard.yaml");
+    ck_assert_ptr_nonnull(found_exact);
+
+    g_unsetenv("USBVCR_DATA_DIR");
 }
 END_TEST
 
@@ -215,7 +307,8 @@ START_TEST(test_usb_parse_speed)
 }
 END_TEST
 
-static Suite *utils_suite(void)
+static Suite *
+utils_suite(void)
 {
     Suite *s = suite_create("utils");
 
@@ -249,14 +342,18 @@ static Suite *utils_suite(void)
 
     TCase *tc_data = tcase_create("data_discovery");
     tcase_add_test(tc_data, test_data_dir_lookup);
+    tcase_add_test(tc_data, test_data_dir_env);
+    tcase_add_test(tc_data, test_data_dir_chdir_resolution);
     tcase_add_test(tc_data, test_find_data_file);
+    tcase_add_test(tc_data, test_find_data_file_null_and_corner_cases);
     tcase_add_test(tc_data, test_usb_parse_speed);
     suite_add_tcase(s, tc_data);
 
     return s;
 }
 
-int main(void)
+int
+main(void)
 {
     SRunner *sr = srunner_create(utils_suite());
     srunner_run_all(sr, CK_NORMAL);

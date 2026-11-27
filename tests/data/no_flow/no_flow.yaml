@@ -1,0 +1,4 @@
+version: "1.0"
+name: "No Local Flow Project"
+devices:
+  - device: keyboard

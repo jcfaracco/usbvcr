@@ -1,0 +1,4 @@
+version: "1.0"
+name: "Local Flow Project"
+devices:
+  - device: "devices/keyboard.yaml"

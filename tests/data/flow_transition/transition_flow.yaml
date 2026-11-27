@@ -1,0 +1,25 @@
+version: "1.0"
+states:
+  - name: "init"
+    rules:
+      - match:
+          bmRequestType: 0x40
+          bRequest: 0x01
+        actions:
+          - respond_with_status: 0
+          - transition_state: "armed"
+  - name: "armed"
+    on_enter:
+      - queue_endpoint_data:
+          endpoint: 0x81
+          payloads:
+            - hex: "01020304"
+    rules:
+      - match:
+          bmRequestType: 0x40
+          bRequest: 0x02
+        actions:
+          - respond_with_status: 0
+          - transition_state: "disarmed"
+  - name: "disarmed"
+    rules: []

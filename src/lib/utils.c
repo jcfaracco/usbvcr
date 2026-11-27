@@ -144,33 +144,25 @@ char *usbvcr_get_data_dir(void)
     if (path != NULL)
     {
         char *bindir = g_path_get_dirname(path);
-        char *candidate;
-
         g_free(path);
 
-        candidate = g_build_filename(bindir, "..", "..", "data", NULL);
-        if (g_file_test(candidate, G_FILE_TEST_IS_DIR))
-        {
-            g_free(bindir);
-            return candidate;
-        }
-        g_free(candidate);
+        const char *bin_rel[] = {
+            "../data",
+            "../../data",
+            "../share/usbvcr",
+            NULL
+        };
 
-        candidate = g_build_filename(bindir, "..", "data", NULL);
-        if (g_file_test(candidate, G_FILE_TEST_IS_DIR))
+        for (int i = 0; bin_rel[i] != NULL; i++)
         {
-            g_free(bindir);
-            return candidate;
+            char *cand = g_build_filename(bindir, bin_rel[i], NULL);
+            if (g_file_test(cand, G_FILE_TEST_IS_DIR))
+            {
+                g_free(bindir);
+                return cand;
+            }
+            g_free(cand);
         }
-        g_free(candidate);
-
-        candidate = g_build_filename(bindir, "..", "share", "usbvcr", NULL);
-        if (g_file_test(candidate, G_FILE_TEST_IS_DIR))
-        {
-            g_free(bindir);
-            return candidate;
-        }
-        g_free(candidate);
         g_free(bindir);
     }
 
@@ -215,14 +207,8 @@ char *usbvcr_find_data_file(const char *subdir, const char *filename)
         return NULL;
     }
 
-    if (subdir != NULL)
-    {
-        target = g_build_filename(datadir, subdir, filename, NULL);
-    }
-    else
-    {
-        target = g_build_filename(datadir, filename, NULL);
-    }
+    target = subdir ? g_build_filename(datadir, subdir, filename, NULL)
+                    : g_build_filename(datadir, filename, NULL);
 
     if (g_file_test(target, G_FILE_TEST_EXISTS))
     {

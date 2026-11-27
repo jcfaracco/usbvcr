@@ -57,6 +57,7 @@ static void pcap_decode_usbmon_header(const usbmon_header_t *h, pcap_packet_t *p
     pkt->dir         = (h->epnum & 0x80) ? PCAP_DIR_IN : PCAP_DIR_OUT;
     pkt->xfer        = (pcap_xfer_t)h->xfer_type;
     pkt->event_type  = (char)h->type;
+    pkt->ndesc       = h->ndesc;
 
     /* usbmon convention: flag_setup == 0 means s.setup holds a real setup
      * packet (see pcap_init_usbmon_header for how the writer sets it). */
@@ -292,6 +293,7 @@ static void pcap_init_usbmon_header(usbmon_header_t *usb_hdr,
     usb_hdr->status    = 0;
     usb_hdr->length    = (uint32_t)p->data_len;
     usb_hdr->len_cap   = (uint32_t)p->data_len;
+    usb_hdr->ndesc     = p->ndesc;
 
     /* usbmon convention (verified against holtek_keyboard.pcap/usb_capture.pcap,
      * both real usbmon captures): flag_setup == 0 means a setup packet is

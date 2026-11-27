@@ -1,0 +1,87 @@
+# Composite USB Device flow with orthogonal state machines
+common_rules:
+  - match:
+      bmRequestType: 0x80
+      bRequest: 0x00
+      wValue: 0x0000
+      wIndex: 0x0000
+    actions:
+      - respond_with:
+          hex: "0100"
+
+machines:
+  - name: "video_control"
+    interface: 0
+    states:
+      - name: "configured"
+        rules:
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x81
+              wValue: 0x0100
+              wIndex: 0x0000
+            actions:
+              - respond_with:
+                  hex: "1122"
+
+  - name: "video_streaming"
+    interface: 1
+    states:
+      - name: "idle"
+        rules:
+          - match:
+              bmRequestType: 0x01
+              bRequest: 0x0B
+              wValue: 0x0001
+              wIndex: 0x0001
+            actions:
+              - respond_with_status: 0
+              - transition_state: "streaming"
+
+      - name: "streaming"
+        on_enter:
+          - queue_endpoint_data:
+              endpoint: 0x81
+              payloads:
+                - hex: "DEADBEEF"
+        rules:
+          - match:
+              bmRequestType: 0x01
+              bRequest: 0x0B
+              wValue: 0x0000
+              wIndex: 0x0001
+            actions:
+              - respond_with_status: 0
+              - transition_state: "idle"
+
+  - name: "audio_streaming"
+    interface: 2
+    states:
+      - name: "muted"
+        rules:
+          - match:
+              bmRequestType: 0x21
+              bRequest: 0x01
+              wValue: 0x0100
+              wIndex: 0x0002
+            actions:
+              - respond_with_status: 0
+              - transition_state:
+                  machine: "audio_streaming"
+                  state: "unmuted"
+
+      - name: "unmuted"
+        on_enter:
+          - queue_endpoint_data:
+              endpoint: 0x82
+              payloads:
+                - hex: "CAFEBABE"
+        rules:
+          - match:
+              bmRequestType: 0x21
+              bRequest: 0x01
+              wValue: 0x0000
+              wIndex: 0x0002
+            actions:
+              - respond_with_status: 0
+              - transition_state: "audio_streaming.muted"

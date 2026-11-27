@@ -1,0 +1,11 @@
+version: "1.0"
+name: "composite-webcam-telemetry"
+
+connection:
+  engine: "qemu"
+  host: "127.0.0.1"
+  port: "4000"
+
+devices:
+  - device: "devices/composite_device.yaml"
+    flow: "flows/composite_flow.yaml"

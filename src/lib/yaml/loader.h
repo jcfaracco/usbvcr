@@ -38,7 +38,7 @@ typedef struct {
     char       *file;       /* backing data file (e.g. video.mjpeg, disk.img) */
     gboolean    loop;       /* whether backing data stream loops */
     usb_node_t *tree;       /* device/config/interface/endpoint descriptor tree */
-    void       *flow;       /* Flow* (see flow.h), built from flow_path (TODO) */
+    void       *flow;       /* Flow* (see flow.h), built from flow_path */
     int         speed;      /* speed override (USB_VCR_SPEED_*), or -1 */
 } yaml_dev_entry_t;
 
@@ -49,6 +49,7 @@ typedef struct {
     GList      *devices;    /* yaml_dev_entry_t* — all manifest entries */
     schema_t   *schemas;    /* schema base templates (schemas/ registry) */
     GHashTable *codecs;     /* "codec name" -> codec_t* (codecs/ tables) */
+    GHashTable *flows;      /* "flow name" -> flow_t* (flows/ definitions) */
 
     /* Optional `connection:` manifest block (README §3, run config): lets a
      * project pin how `usbvcr --yaml <file>` runs without CLI flags. Any
@@ -81,6 +82,10 @@ typedef struct {
  * schemas/, flows/ ...). Returns NULL on error. */
 yaml_device_t *yaml_parse_from_file(const char *dir);
 
+yaml_device_t *yaml_device_create(void);
 void yaml_device_free(yaml_device_t *dev);
+
+/* Find a loaded flow by name, path, or basename in the device model's flows registry. */
+void *yaml_device_find_flow(yaml_device_t *dev, const char *ref);
 
 #endif /* YAML_LOADER_H */

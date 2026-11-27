@@ -3,13 +3,11 @@ name: Docs Lint
 on:
   pull_request:
     paths:
-      - "docs/**"
-      - "README.md"
+      - "**/*.md"
   push:
     branches: [main]
     paths:
-      - "docs/**"
-      - "README.md"
+      - "**/*.md"
   workflow_dispatch:
 
 concurrency:
@@ -25,8 +23,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Check links in docs/ and README.md
+      - name: Check links in all markdown files
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2
         with:
-          args: --no-progress --timeout 15 --max-retries 2 --exclude "https://img\.shields\.io/.*" docs README.md
+          args: --no-progress --timeout 15 --max-retries 2 --exclude "https://img\.shields\.io/.*" './**/*.md'
           fail: true

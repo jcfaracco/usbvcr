@@ -18,8 +18,12 @@
 #include <stdint.h>
 #include <ctype.h>
 #include <check.h>
+#include <glib.h>
+#include <glib/gstdio.h>
 
 #include "yaml_backend.h"
+#include "yaml/loader.h"
+#include "stream/stream_provider.h"
 
 #ifndef TEST_DATA_DIR
 #define TEST_DATA_DIR "tests/data"
@@ -592,10 +596,476 @@ START_TEST(test_yaml_backend_string_descriptors)
 }
 END_TEST
 
+START_TEST(test_yaml_backend_accessors_and_connection)
+{
+    g_autofree char *dir = g_dir_make_tmp("usbvcr_yaml_acc_XXXXXX", NULL);
+    g_autofree char *path = g_build_filename(dir, "project.yaml", NULL);
+
+    ck_assert(g_file_set_contents(path,
+        "version: \"1.0\"\n"
+        "name: \"Accessor Device\"\n"
+        "connection:\n"
+        "  engine: \"local\"\n"
+        "  udc: \"dummy_udc.0\"\n"
+        "  host: \"127.0.0.1\"\n"
+        "  port: \"4000\"\n"
+        "  record: \"trace.pcap\"\n"
+        "  debug: true\n"
+        "  speed: \"high\"\n"
+        "pcap: \"capture.pcap\"\n",
+        -1, NULL));
+
+    usb_device_t *dev = yaml_backend_create(path);
+    ck_assert_ptr_nonnull(dev);
+    ck_assert_str_eq(yaml_backend_get_name(dev), "Accessor Device");
+    ck_assert_str_eq(yaml_backend_get_engine(dev), "local");
+    ck_assert_str_eq(yaml_backend_get_udc(dev), "dummy_udc.0");
+    ck_assert_str_eq(yaml_backend_get_host(dev), "127.0.0.1");
+    ck_assert_str_eq(yaml_backend_get_port(dev), "4000");
+    ck_assert_str_eq(yaml_backend_get_record(dev), "trace.pcap");
+    ck_assert_int_eq(yaml_backend_get_debug(dev), TRUE);
+    ck_assert(g_str_has_suffix(yaml_backend_get_pcap(dev), "capture.pcap"));
+    ck_assert_int_eq(dev->ops->get_speed(dev), 2);
+
+    yaml_backend_destroy(dev);
+    g_remove(path);
+    g_rmdir(dir);
+}
+END_TEST
+
+START_TEST(test_yaml_backend_ops_helpers)
+{
+    usb_device_t *dev = yaml_backend_create(PROJECT_PATH_E1);
+    uint8_t out_buf[4] = { 0x01, 0x02, 0x03, 0x04 };
+    usb_device_t fake;
+    void *fake_state[4] = { NULL, NULL, NULL, NULL };
+
+    ck_assert_ptr_nonnull(dev);
+
+    /* tick */
+    dev->ops->tick(dev);
+
+    /* ep_out */
+    ck_assert_int_ge(dev->ops->ep_out(dev, 0x01, out_buf, sizeof(out_buf)), 0);
+
+    /* get_speed */
+    ck_assert_int_eq(dev->ops->get_speed(dev), -1);
+    ck_assert_int_eq(dev->ops->get_speed(NULL), -1);
+
+    memset(&fake, 0, sizeof(fake));
+    fake.ops = dev->ops;
+    fake.state = NULL;
+    ck_assert_int_eq(dev->ops->get_speed(&fake), -1);
+
+    fake.state = fake_state;
+    ck_assert_int_eq(dev->ops->get_speed(&fake), -1);
+
+    /* control with invalid state */
+    usb_control_packet_header_t setup;
+    uint8_t data[8];
+    uint16_t len = 0;
+    memset(&setup, 0, sizeof(setup));
+    fake.state = NULL;
+    ck_assert_int_eq(dev->ops->control(&fake, &setup, data, &len), -1);
+    fake.state = fake_state;
+    ck_assert_int_eq(dev->ops->control(&fake, &setup, data, &len), -1);
+
+    /* destroy NULL is a safe no-op */
+    yaml_backend_destroy(NULL);
+    yaml_backend_destroy(dev);
+}
+END_TEST
+
+START_TEST(test_yaml_backend_stream_binding)
+{
+    g_autofree char *dir = g_dir_make_tmp("usbvcr_yaml_stream_XXXXXX", NULL);
+    g_autofree char *proj_path = g_build_filename(dir, "project.yaml", NULL);
+    g_autofree char *dev_path = g_build_filename(dir, "device.yaml", NULL);
+    g_autofree char *flow_path = g_build_filename(dir, "flow.yaml", NULL);
+    g_autofree char *stream_path = g_build_filename(dir, "stream.mjpeg", NULL);
+
+    /* Minimal synthetic JPEG frame */
+    static const uint8_t mjpeg_data[] = { 0xff, 0xd8, 0x01, 0x02, 0xff, 0xd9 };
+    ck_assert(g_file_set_contents(stream_path, (const char *)mjpeg_data, sizeof(mjpeg_data), NULL));
+
+    ck_assert(g_file_set_contents(dev_path,
+        "device_descriptor:\n"
+        "  - bLength: 18\n"
+        "    bDescriptorType: 0x01\n"
+        "    bcdUSB: 0x0200\n"
+        "    bDeviceClass: 0\n"
+        "    bDeviceSubClass: 0\n"
+        "    bDeviceProtocol: 0\n"
+        "    bMaxPacketSize0: 64\n"
+        "    idVendor: 0x1234\n"
+        "    idProduct: 0x5678\n"
+        "    bcdDevice: 0x0100\n"
+        "    iManufacturer: 0\n"
+        "    iProduct: 0\n"
+        "    iSerialNumber: 0\n"
+        "    bNumConfigurations: 1\n"
+        "configurations:\n"
+        "  - bLength: 9\n"
+        "    bDescriptorType: 0x02\n"
+        "    wTotalLength: 18\n"
+        "    bNumInterfaces: 1\n"
+        "    bConfigurationValue: 1\n"
+        "    iConfiguration: 0\n"
+        "    bmAttributes: 0x80\n"
+        "    bMaxPower: 50\n"
+        "    interfaces:\n"
+        "      - bLength: 9\n"
+        "        bDescriptorType: 0x04\n"
+        "        bInterfaceNumber: 0\n"
+        "        bAlternateSetting: 0\n"
+        "        bNumEndpoints: 0\n"
+        "        bInterfaceClass: 0xff\n"
+        "        bInterfaceSubClass: 0\n"
+        "        bInterfaceProtocol: 0\n"
+        "        iInterface: 0\n",
+        -1, NULL));
+
+    ck_assert(g_file_set_contents(flow_path,
+        "states:\n"
+        "  - name: operational\n"
+        "    rules:\n"
+        "      - match:\n"
+        "          bRequest: 0\n"
+        "        actions:\n"
+        "          - respond_with_status: 0\n",
+        -1, NULL));
+
+    ck_assert(g_file_set_contents(proj_path,
+        "version: \"1.0\"\n"
+        "name: \"stream-flow-test\"\n"
+        "file: \"stream.mjpeg\"\n"
+        "devices:\n"
+        "  - device: \"device.yaml\"\n"
+        "    flow: \"flow.yaml\"\n",
+        -1, NULL));
+
+    usb_device_t *dev = yaml_backend_create(proj_path);
+    ck_assert_ptr_nonnull(dev);
+    yaml_backend_destroy(dev);
+
+    /* Stream with no flow: exercises stream_provider_free branch during destruction */
+    usb_device_t *fake_stream_dev = g_new0(usb_device_t, 1);
+    typedef struct {
+        void *dev;
+        stream_provider_t *stream;
+        GByteArray *desc_buf;
+        GHashTable *desc_bufs;
+    } fake_backend_st_t;
+    fake_backend_st_t *fst = g_new0(fake_backend_st_t, 1);
+    fst->stream = stream_provider_new(stream_path, FALSE, 0);
+    fake_stream_dev->state = fst;
+    yaml_backend_destroy(fake_stream_dev);
+
+    g_remove(stream_path);
+    g_remove(flow_path);
+    g_remove(dev_path);
+    g_remove(proj_path);
+    g_rmdir(dir);
+}
+END_TEST
+
+START_TEST(test_yaml_backend_descriptor_edge_cases)
+{
+    usb_device_t *dev = yaml_backend_create(PROJECT_PATH_E1);
+    const uint8_t *desc = NULL;
+    uint16_t len = 0;
+    int rc;
+    usb_device_t fake;
+    void *fake_state[4] = { NULL, NULL, NULL, NULL };
+
+    ck_assert_ptr_nonnull(dev);
+
+    /* Missing st, dev or tree */
+    memset(&fake, 0, sizeof(fake));
+    fake.ops = dev->ops;
+    fake.state = NULL;
+    ck_assert_int_eq(dev->ops->get_descriptor(&fake, 1, 0, 0, &desc, &len), -1);
+    fake.state = fake_state;
+    ck_assert_int_eq(dev->ops->get_descriptor(&fake, 1, 0, 0, &desc, &len), -1);
+
+    /* Unknown descriptor type */
+    rc = dev->ops->get_descriptor(dev, 0x99, 0, 0, &desc, &len);
+    ck_assert_int_eq(rc, -1);
+
+    /* Device descriptor index > 0 */
+    rc = dev->ops->get_descriptor(dev, 1, 1, 0, &desc, &len);
+    ck_assert_int_eq(rc, -1);
+
+    /* Config descriptor index > 0 */
+    rc = dev->ops->get_descriptor(dev, 2, 1, 0, &desc, &len);
+    ck_assert_int_eq(rc, -1);
+
+    /* String descriptor index 0 query twice (tests cache lookup) */
+    desc = NULL; len = 0;
+    rc = dev->ops->get_descriptor(dev, 3, 0, 0, &desc, &len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(len, 4);
+    rc = dev->ops->get_descriptor(dev, 3, 0, 0, &desc, &len);
+    ck_assert_int_eq(rc, 0);
+
+    /* String descriptor index 2 fallback to st->dev->name twice */
+    desc = NULL; len = 0;
+    rc = dev->ops->get_descriptor(dev, 3, 2, 0, &desc, &len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(desc[0], (uint8_t)(2 + 29 * 2));
+    ck_assert_int_eq(desc[1], 3);
+    rc = dev->ops->get_descriptor(dev, 3, 2, 0, &desc, &len);
+    ck_assert_int_eq(rc, 0);
+
+    /* String descriptor index 1 when no strings node -> returns -1 */
+    rc = dev->ops->get_descriptor(dev, 3, 1, 0, &desc, &len);
+    ck_assert_int_eq(rc, -1);
+
+    /* String descriptor index 99 -> returns -1 */
+    rc = dev->ops->get_descriptor(dev, 3, 99, 0, &desc, &len);
+    ck_assert_int_eq(rc, -1);
+
+    yaml_backend_destroy(dev);
+
+    /* Test strings node with manufacturer and product named strings */
+    g_autofree char *dir = g_dir_make_tmp("usbvcr_yaml_strings_XXXXXX", NULL);
+    g_autofree char *proj_path = g_build_filename(dir, "project.yaml", NULL);
+    g_autofree char *dev_path = g_build_filename(dir, "device.yaml", NULL);
+
+    ck_assert(g_file_set_contents(dev_path,
+        "device_descriptor:\n"
+        "  - bLength: 18\n"
+        "    bDescriptorType: 0x01\n"
+        "    bcdUSB: 0x0200\n"
+        "    bDeviceClass: 0\n"
+        "    bDeviceSubClass: 0\n"
+        "    bDeviceProtocol: 0\n"
+        "    bMaxPacketSize0: 64\n"
+        "    idVendor: 0x1234\n"
+        "    idProduct: 0x5678\n"
+        "    bcdDevice: 0x0100\n"
+        "    iManufacturer: 1\n"
+        "    iProduct: 2\n"
+        "    iSerialNumber: 3\n"
+        "    bNumConfigurations: 1\n"
+        "strings:\n"
+        "  manufacturer: \"TestCorp\"\n"
+        "  product: \"TestWidget\"\n"
+        "  3: \"SN001\"\n"
+        "configurations:\n"
+        "  - bLength: 9\n"
+        "    bDescriptorType: 0x02\n"
+        "    wTotalLength: 9\n"
+        "    bNumInterfaces: 0\n"
+        "    bConfigurationValue: 1\n"
+        "    iConfiguration: 0\n"
+        "    bmAttributes: 0x80\n"
+        "    bMaxPower: 50\n",
+        -1, NULL));
+
+    ck_assert(g_file_set_contents(proj_path,
+        "version: \"1.0\"\n"
+        "name: \"strings-test\"\n"
+        "devices:\n"
+        "  - device: \"device.yaml\"\n",
+        -1, NULL));
+
+    dev = yaml_backend_create(proj_path);
+    ck_assert_ptr_nonnull(dev);
+
+    /* Index 1 -> "TestCorp" */
+    desc = NULL; len = 0;
+    rc = dev->ops->get_descriptor(dev, 3, 1, 0, &desc, &len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(len, (uint16_t)(2 + 8 * 2));
+    ck_assert_int_eq(desc[0], (uint8_t)(2 + 8 * 2));
+    ck_assert_int_eq(desc[1], 3);
+
+    /* Index 2 -> "TestWidget" */
+    desc = NULL; len = 0;
+    rc = dev->ops->get_descriptor(dev, 3, 2, 0, &desc, &len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(len, (uint16_t)(2 + 10 * 2));
+
+    /* Index 3 -> "SN001" */
+    desc = NULL; len = 0;
+    rc = dev->ops->get_descriptor(dev, 3, 3, 0, &desc, &len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(len, (uint16_t)(2 + 5 * 2));
+
+    /* Index 4 -> not found, returns -1 */
+    rc = dev->ops->get_descriptor(dev, 3, 4, 0, &desc, &len);
+    ck_assert_int_eq(rc, -1);
+
+    yaml_backend_destroy(dev);
+    g_remove(dev_path);
+    g_remove(proj_path);
+    g_rmdir(dir);
+}
+END_TEST
+
+START_TEST(test_yaml_backend_control_dynamic_path)
+{
+    g_autofree char *dir = g_dir_make_tmp("usbvcr_yaml_dyn_XXXXXX", NULL);
+    g_autofree char *proj_path = g_build_filename(dir, "project.yaml", NULL);
+    g_autofree char *dev_path = g_build_filename(dir, "device.yaml", NULL);
+    g_autofree char *flow_path = g_build_filename(dir, "flow.yaml", NULL);
+
+    ck_assert(g_file_set_contents(dev_path,
+        "device_descriptor:\n"
+        "  - bLength: 18\n"
+        "    bDescriptorType: 0x01\n"
+        "    bcdUSB: 0x0200\n"
+        "    bDeviceClass: 0\n"
+        "    bDeviceSubClass: 0\n"
+        "    bDeviceProtocol: 0\n"
+        "    bMaxPacketSize0: 64\n"
+        "    idVendor: 0x1111\n"
+        "    idProduct: 0x2222\n"
+        "    bcdDevice: 0x0100\n"
+        "    iManufacturer: 0\n"
+        "    iProduct: 0\n"
+        "    iSerialNumber: 0\n"
+        "    bNumConfigurations: 1\n"
+        "configurations:\n"
+        "  - bLength: 9\n"
+        "    bDescriptorType: 0x02\n"
+        "    wTotalLength: 27\n"
+        "    bNumInterfaces: 2\n"
+        "    bConfigurationValue: 1\n"
+        "    iConfiguration: 0\n"
+        "    bmAttributes: 0x80\n"
+        "    bMaxPower: 50\n"
+        "    interfaces:\n"
+        "      - bLength: 9\n"
+        "        bDescriptorType: 0x04\n"
+        "        bInterfaceNumber: 0\n"
+        "        bAlternateSetting: 0\n"
+        "        bNumEndpoints: 0\n"
+        "        bInterfaceClass: 0xff\n"
+        "        bInterfaceSubClass: 0\n"
+        "        bInterfaceProtocol: 0\n"
+        "        iInterface: 0\n"
+        "      - bLength: 9\n"
+        "        bDescriptorType: 0x04\n"
+        "        bInterfaceNumber: 1\n"
+        "        bAlternateSetting: 0\n"
+        "        bNumEndpoints: 0\n"
+        "        bInterfaceClass: 0xfe\n"
+        "        bInterfaceSubClass: 0\n"
+        "        bInterfaceProtocol: 0\n"
+        "        iInterface: 0\n",
+        -1, NULL));
+
+    ck_assert(g_file_set_contents(flow_path,
+        "states:\n"
+        "  - name: operational\n"
+        "    rules:\n"
+        "      - match:\n"
+        "          bmRequestType: 0xc0\n"
+        "          bRequest: 1\n"
+        "        actions:\n"
+        "          - respond_with: \"$device.configurations[0].interfaces[1]\"\n"
+        "      - match:\n"
+        "          bmRequestType: 0xc0\n"
+        "          bRequest: 2\n"
+        "        actions:\n"
+        "          - respond_with: \"$device.nonexistent\"\n"
+        "      - match:\n"
+        "          bmRequestType: 0xc0\n"
+        "          bRequest: 3\n"
+        "        actions:\n"
+        "          - respond_with: \"$device.device_descriptor.nonexistent\"\n",
+        -1, NULL));
+
+    ck_assert(g_file_set_contents(proj_path,
+        "version: \"1.0\"\n"
+        "name: \"dyn-path-test\"\n"
+        "devices:\n"
+        "  - device: \"device.yaml\"\n"
+        "    flow: \"flow.yaml\"\n",
+        -1, NULL));
+
+    usb_device_t *dev = yaml_backend_create(proj_path);
+    usb_control_packet_header_t setup;
+    uint8_t data[256];
+    uint16_t len;
+    int rc;
+
+    ck_assert_ptr_nonnull(dev);
+
+    /* Request 1: $device.configurations[0].interfaces[1] */
+    memset(&setup, 0, sizeof(setup));
+    setup.requesttype = 0xc0;
+    setup.request     = 1;
+    setup.length      = 9;
+    len = 0;
+    rc = dev->ops->control(dev, &setup, data, &len);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_uint_eq(len, 9);
+    ck_assert_uint_eq(data[0], 9);
+    ck_assert_uint_eq(data[1], 4);
+    ck_assert_uint_eq(data[2], 1);    /* bInterfaceNumber = 1 */
+    ck_assert_uint_eq(data[5], 0xfe); /* bInterfaceClass = 0xfe */
+
+    /* Request 2: $device.nonexistent -> fails and returns -1 */
+    memset(&setup, 0, sizeof(setup));
+    setup.requesttype = 0xc0;
+    setup.request     = 2;
+    setup.length      = 16;
+    len = 0;
+    rc = dev->ops->control(dev, &setup, data, &len);
+    ck_assert_int_eq(rc, -1);
+
+    /* Request 3: $device.device_descriptor.nonexistent -> fails and returns -1 */
+    memset(&setup, 0, sizeof(setup));
+    setup.requesttype = 0xc0;
+    setup.request     = 3;
+    setup.length      = 16;
+    len = 0;
+    rc = dev->ops->control(dev, &setup, data, &len);
+    ck_assert_int_eq(rc, -1);
+
+    yaml_backend_destroy(dev);
+    g_remove(flow_path);
+    g_remove(dev_path);
+    g_remove(proj_path);
+    g_rmdir(dir);
+}
+END_TEST
+
+START_TEST(test_yaml_backend_validation_failure)
+{
+    g_autofree char *dir = g_dir_make_tmp("usbvcr_yaml_val_XXXXXX", NULL);
+    g_autofree char *proj_path = g_build_filename(dir, "project.yaml", NULL);
+    g_autofree char *dev_path = g_build_filename(dir, "device.yaml", NULL);
+
+    ck_assert(g_file_set_contents(dev_path,
+        "device_descriptor:\n"
+        "  - bLength: 18\n"
+        "    bDescriptorType: null\n",
+        -1, NULL));
+
+    ck_assert(g_file_set_contents(proj_path,
+        "version: \"1.0\"\n"
+        "name: \"val-fail-test\"\n"
+        "devices:\n"
+        "  - device: \"device.yaml\"\n",
+        -1, NULL));
+
+    usb_device_t *dev = yaml_backend_create(proj_path);
+    ck_assert_ptr_null(dev);
+
+    g_remove(dev_path);
+    g_remove(proj_path);
+    g_rmdir(dir);
+}
+END_TEST
+
 static Suite *yaml_backend_suite(void)
 {
     Suite *s;
-    TCase *tc_e1, *tc_e2, *tc_e3;
+    TCase *tc_e1, *tc_e2, *tc_e3, *tc_ops;
 
     s = suite_create("yaml_backend");
 
@@ -621,6 +1091,15 @@ static Suite *yaml_backend_suite(void)
     tcase_add_test(tc_e3, test_yaml_backend_control_uvc_classes);
     tcase_add_test(tc_e3, test_yaml_backend_streaming);
     suite_add_tcase(s, tc_e3);
+
+    tc_ops = tcase_create("ops_and_coverage");
+    tcase_add_test(tc_ops, test_yaml_backend_accessors_and_connection);
+    tcase_add_test(tc_ops, test_yaml_backend_ops_helpers);
+    tcase_add_test(tc_ops, test_yaml_backend_stream_binding);
+    tcase_add_test(tc_ops, test_yaml_backend_descriptor_edge_cases);
+    tcase_add_test(tc_ops, test_yaml_backend_control_dynamic_path);
+    tcase_add_test(tc_ops, test_yaml_backend_validation_failure);
+    suite_add_tcase(s, tc_ops);
 
     return s;
 }

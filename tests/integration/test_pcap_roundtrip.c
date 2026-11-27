@@ -19,44 +19,77 @@
 #define N_VECTORS 6
 
 /* Real libc functions for linker wrapping */
+FILE *__real_fopen(const char *path, const char *mode);
+FILE *__real_fopen64(const char *path, const char *mode);
 size_t __real_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
 int __real_fflush(FILE *stream);
 int __real_fseek(FILE *stream, long offset, int whence);
 
+static FILE *s_mock_target_fp = NULL;
+static int s_mock_track_fopen = 0;
 static int s_mock_fwrite_fail_countdown = -1;
 static int s_mock_fflush_fail = 0;
 static int s_mock_fseek_fail = 0;
 
+FILE *__wrap_fopen(const char *path, const char *mode)
+{
+    FILE *fp = __real_fopen(path, mode);
+    if (s_mock_track_fopen)
+    {
+        s_mock_target_fp = fp;
+    }
+    return fp;
+}
+
+FILE *__wrap_fopen64(const char *path, const char *mode)
+{
+    FILE *fp = __real_fopen64(path, mode);
+    if (s_mock_track_fopen)
+    {
+        s_mock_target_fp = fp;
+    }
+    return fp;
+}
+
 size_t __wrap_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
-    if (s_mock_fwrite_fail_countdown >= 0)
+    if (s_mock_target_fp != NULL && stream == s_mock_target_fp)
     {
-        if (s_mock_fwrite_fail_countdown == 0)
+        if (s_mock_fwrite_fail_countdown >= 0)
         {
-            errno = EIO;
-            return 0;
+            if (s_mock_fwrite_fail_countdown == 0)
+            {
+                errno = EIO;
+                return 0;
+            }
+            s_mock_fwrite_fail_countdown--;
         }
-        s_mock_fwrite_fail_countdown--;
     }
     return __real_fwrite(ptr, size, nmemb, stream);
 }
 
 int __wrap_fflush(FILE *stream)
 {
-    if (s_mock_fflush_fail)
+    if (s_mock_target_fp != NULL && stream == s_mock_target_fp)
     {
-        errno = EIO;
-        return EOF;
+        if (s_mock_fflush_fail)
+        {
+            errno = EIO;
+            return EOF;
+        }
     }
     return __real_fflush(stream);
 }
 
 int __wrap_fseek(FILE *stream, long offset, int whence)
 {
-    if (s_mock_fseek_fail)
+    if (s_mock_target_fp != NULL && stream == s_mock_target_fp)
     {
-        errno = ESPIPE;
-        return -1;
+        if (s_mock_fseek_fail)
+        {
+            errno = ESPIPE;
+            return -1;
+        }
     }
     return __real_fseek(stream, offset, whence);
 }
@@ -317,6 +350,7 @@ END_TEST
 
 START_TEST(test_pcap_trace_load_missing_file)
 {
+    ck_assert_ptr_null(pcap_trace_load(NULL));
     pcap_trace_t *t = pcap_trace_load("/tmp/usbvcr_roundtrip_does_not_exist.pcapng");
     ck_assert_ptr_null(t);
 }
@@ -503,9 +537,12 @@ START_TEST(test_pcapng_load_errors)
     fwrite(&epb_trailer, sizeof(epb_trailer), 1, fp);
     fclose(fp);
 
+    s_mock_track_fopen = 1;
     s_mock_fseek_fail = 1;
     t = pcap_trace_load(path);
     s_mock_fseek_fail = 0;
+    s_mock_track_fopen = 0;
+    s_mock_target_fp = NULL;
     ck_assert_ptr_nonnull(t);
     ck_assert_uint_eq(pcap_trace_count(t), 1);
     pcap_trace_free(t);
@@ -597,18 +634,25 @@ START_TEST(test_pcap_writer_open_failures)
 {
     pcap_writer_t *w;
 
+    /* NULL path -> lines 388-390 */
+    ck_assert_ptr_null(pcap_writer_open(NULL));
+
     /* 1. Invalid path (directory does not exist) -> lines 391-396 */
     w = pcap_writer_open("/nonexistent_dir_12345/test.pcap");
     ck_assert_ptr_null(w);
 
     /* 2. Legacy header fwrite failure -> lines 340-341, 405-409 */
+    s_mock_track_fopen = 1;
     s_mock_fwrite_fail_countdown = 0;
     w = pcap_writer_open("/tmp/fail_legacy.pcap");
     ck_assert_ptr_null(w);
     s_mock_fwrite_fail_countdown = -1;
+    s_mock_track_fopen = 0;
+    s_mock_target_fp = NULL;
     remove("/tmp/fail_legacy.pcap");
 
     /* 3. PCAPNG SHB fwrite failure (first or second fwrite) -> lines 360-361, 405-409 */
+    s_mock_track_fopen = 1;
     s_mock_fwrite_fail_countdown = 0;
     w = pcap_writer_open("/tmp/fail_shb.pcapng");
     ck_assert_ptr_null(w);
@@ -616,9 +660,12 @@ START_TEST(test_pcap_writer_open_failures)
     w = pcap_writer_open("/tmp/fail_shb.pcapng");
     ck_assert_ptr_null(w);
     s_mock_fwrite_fail_countdown = -1;
+    s_mock_track_fopen = 0;
+    s_mock_target_fp = NULL;
     remove("/tmp/fail_shb.pcapng");
 
     /* 4. PCAPNG IDB fwrite failure -> lines 376-377, 405-409 */
+    s_mock_track_fopen = 1;
     s_mock_fwrite_fail_countdown = 2;
     w = pcap_writer_open("/tmp/fail_idb.pcapng");
     ck_assert_ptr_null(w);
@@ -626,13 +673,18 @@ START_TEST(test_pcap_writer_open_failures)
     w = pcap_writer_open("/tmp/fail_idb.pcapng");
     ck_assert_ptr_null(w);
     s_mock_fwrite_fail_countdown = -1;
+    s_mock_track_fopen = 0;
+    s_mock_target_fp = NULL;
     remove("/tmp/fail_idb.pcapng");
 
     /* 5. Header fflush failure -> lines 404-409 */
+    s_mock_track_fopen = 1;
     s_mock_fflush_fail = 1;
     w = pcap_writer_open("/tmp/fail_fflush.pcap");
     ck_assert_ptr_null(w);
     s_mock_fflush_fail = 0;
+    s_mock_track_fopen = 0;
+    s_mock_target_fp = NULL;
     remove("/tmp/fail_fflush.pcap");
 }
 END_TEST
@@ -668,6 +720,7 @@ START_TEST(test_pcap_writer_add_and_close_errors)
      * - usb_hdr (countdown = 1) -> lines 436-437
      * - payload (countdown = 2) -> lines 441-442
      */
+    s_mock_target_fp = w_legacy->fp;
     s_mock_fwrite_fail_countdown = 0;
     ck_assert_int_eq(pcap_writer_add(w_legacy, &pkt), -1);
 
@@ -682,6 +735,7 @@ START_TEST(test_pcap_writer_add_and_close_errors)
     s_mock_fflush_fail = 1;
     ck_assert_int_eq(pcap_writer_add(w_legacy, &pkt), -1);
     s_mock_fflush_fail = 0;
+    s_mock_target_fp = NULL;
 
     pcap_writer_close(w_legacy);
     remove(pcap_path);
@@ -698,6 +752,7 @@ START_TEST(test_pcap_writer_add_and_close_errors)
     pcap_writer_t *w_ng = pcap_writer_open(ng_path);
     ck_assert_ptr_nonnull(w_ng);
 
+    s_mock_target_fp = w_ng->fp;
     s_mock_fwrite_fail_countdown = 0;
     ck_assert_int_eq(pcap_writer_add(w_ng, &pkt), -1);
 
@@ -714,6 +769,7 @@ START_TEST(test_pcap_writer_add_and_close_errors)
     ck_assert_int_eq(pcap_writer_add(w_ng, &pkt), -1);
 
     s_mock_fwrite_fail_countdown = -1;
+    s_mock_target_fp = NULL;
     pcap_writer_close(w_ng);
     remove(ng_path);
 }

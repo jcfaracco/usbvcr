@@ -194,6 +194,9 @@ static pcap_trace_t *pcap_trace_load_ng(FILE *fp)
 
 pcap_trace_t *pcap_trace_load(const char *path)
 {
+    if (!path)
+        return NULL;
+
     FILE *fp = fopen(path, "rb");
     if (!fp) {
         LOG_ERR("pcap: failed to open %s: %s", path, strerror(errno));
@@ -381,6 +384,9 @@ static int pcap_writer_open_ng_header(FILE *fp)
 
 pcap_writer_t *pcap_writer_open(const char *path)
 {
+    if (!path)
+        return NULL;
+
     pcap_writer_t *w = g_new0(pcap_writer_t, 1);
     int rc = 0;
 

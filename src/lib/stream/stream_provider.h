@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <glib.h>
+#include "flow.h"
 #include "stream/video_parser.h"
 
 typedef struct {
@@ -25,5 +26,6 @@ void               stream_provider_set_interval(stream_provider_t *p, uint32_t i
 int                stream_provider_produce_packet(stream_provider_t *p, uint8_t ep, uint8_t *buf, size_t cap);
 void               stream_provider_tick(stream_provider_t *p);
 void               stream_provider_free(stream_provider_t *p);
+const flow_endpoint_ops_t *stream_provider_get_ops(void);
 
 #endif /* STREAM_PROVIDER_H */

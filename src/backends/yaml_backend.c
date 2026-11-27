@@ -243,14 +243,6 @@ static int yb_control(usb_device_t *dev,
 static int yb_ep_in(usb_device_t *dev, uint8_t ep, uint8_t *buf, size_t cap)
 {
     yaml_backend_state_t *st = dev->state;
-    if (st->stream != NULL)
-    {
-        int n = stream_provider_produce_packet(st->stream, ep, buf, cap);
-        if (n >= 0)
-        {
-            return n;
-        }
-    }
     return flow_ep_in(st->dev->flow, ep, buf, cap);
 }
 
@@ -263,10 +255,6 @@ static int yb_ep_out(usb_device_t *dev, uint8_t ep, const uint8_t *buf, size_t l
 static void yb_tick(usb_device_t *dev)
 {
     yaml_backend_state_t *st = dev->state;
-    if (st->stream != NULL)
-    {
-        stream_provider_tick(st->stream);
-    }
     flow_tick(st->dev->flow);
 }
 
@@ -326,6 +314,10 @@ usb_device_t *yaml_backend_create(const char *path)
     if (yd->file != NULL)
     {
         st->stream = stream_provider_new(yd->file, yd->loop, 0);
+        if (st->stream != NULL && yd->flow != NULL)
+        {
+            flow_bind_endpoint(yd->flow, 0, stream_provider_get_ops(), st->stream);
+        }
     }
     dev->ops = &yaml_ops;
     dev->state = st;
@@ -346,7 +338,14 @@ void yaml_backend_destroy(usb_device_t *dev)
     {
         if (st->stream != NULL)
         {
-            stream_provider_free(st->stream);
+            if (st->dev != NULL && st->dev->flow != NULL)
+            {
+                flow_unbind_endpoint(st->dev->flow, 0);
+            }
+            else
+            {
+                stream_provider_free(st->stream);
+            }
         }
         if (st->desc_buf != NULL)
         {

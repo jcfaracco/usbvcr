@@ -1,0 +1,84 @@
+# Flow with common_rules and state inheritance
+common_rules:
+  - match:
+      bmRequestType: 0x80
+      bRequest: 0x00
+      wValue: 0x0000
+      wIndex: 0x0000
+    actions:
+      - respond_with:
+          hex: "0100"
+  - match:
+      endpoint_out: 0x02
+    actions:
+      - queue_endpoint_data:
+          endpoint: 0x82
+          payloads:
+            - hex: "AABB"
+
+states:
+  - name: base
+    rules:
+      - match:
+          bmRequestType: 0x80
+          bRequest: 0x06
+          wValue: 0x0100
+          wIndex: 0x0000
+        actions:
+          - respond_with:
+              hex: "12010002"
+      - match:
+          bmRequestType: 0x80
+          bRequest: 0x06
+          wValue: 0x0200
+          wIndex: 0x0000
+        actions:
+          - respond_with:
+              hex: "09022000"
+      - match:
+          bmRequestType: 0x00
+          bRequest: 0x09
+          wValue: 0x0001
+          wIndex: 0x0000
+        actions:
+          - respond_with_status: 0
+          - transition_state: "derived"
+
+  - name: derived
+    extends: "base"
+    rules:
+      - match:
+          bmRequestType: 0x80
+          bRequest: 0x06
+          wValue: 0x0200
+          wIndex: 0x0000
+        actions:
+          - respond_with:
+              hex: "0902FFFF"
+      - match:
+          bmRequestType: 0x80
+          bRequest: 0x06
+          wValue: 0x0300
+          wIndex: 0x0000
+        actions:
+          - respond_with:
+              hex: "04030904"
+      - match:
+          bmRequestType: 0x00
+          bRequest: 0x01
+          wValue: 0x0000
+          wIndex: 0x0000
+        actions:
+          - respond_with_status: 0
+          - transition_state: "standalone"
+
+  - name: standalone
+    rules:
+      - match:
+          bmRequestType: 0x80
+          bRequest: 0x06
+          wValue: 0x0400
+          wIndex: 0x0000
+        actions:
+          - respond_with:
+              hex: "08040000"

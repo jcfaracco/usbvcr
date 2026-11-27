@@ -1,5 +1,5 @@
 version: "1.0"
-name: "Virtual UVC Webcam"
+name: "Virtual Composite Webcam & Telemetry"
 
 device_descriptor:
   - bLength: 18
@@ -10,8 +10,8 @@ device_descriptor:
     bDeviceProtocol: 0x01
     bMaxPacketSize0: 64
     idVendor: 0x046d          # Logitech
-    idProduct: 0x082d         # C920 HD Pro Webcam
-    bcdDevice: 0x0000
+    idProduct: 0x082f         # Composite HD Webcam & Telemetry
+    bcdDevice: 0x0100
     iManufacturer: 1
     iProduct: 2
     iSerialNumber: 3
@@ -19,21 +19,22 @@ device_descriptor:
 
 strings:
   1: "USB VCR Project"
-  2: "Virtual UVC Webcam"
+  2: "Virtual Composite Webcam & Telemetry"
   3: "00000001"
-  4: "UVC Video Configuration"
+  4: "Composite Configuration"
   5: "UVC Video Control"
   6: "UVC Video Streaming"
+  7: "Telemetry & Status Control"
 
 configurations:
   - bLength: 9
     bDescriptorType: 0x02
-    wTotalLength: 192
-    bNumInterfaces: 2
+    wTotalLength: 208
+    bNumInterfaces: 3
     bConfigurationValue: 1
     iConfiguration: 4
     bmAttributes: 0xc0        # USB_CFG_ATT_ONE | USB_CFG_ATT_SELFPOWER
-    bMaxPower: 250            # 0xfa, 500 mA
+    bMaxPower: 250            # 500 mA
 
     interface_association:
       bLength: 8
@@ -81,7 +82,7 @@ configurations:
             bEndpointAddress: 0x81
             bmAttributes: 0x03       # Interrupt
             wMaxPacketSize: 8
-            bInterval: 0xff
+            bInterval: 10
 
         vc_cs_endpoint:
           hex: "0525030800"
@@ -124,6 +125,25 @@ configurations:
             bmAttributes: 0x05       # Isochronous, asynchronous
             wMaxPacketSize: 1023
             bInterval: 1
+
+      # Interface 2: Telemetry / Status Control
+      - bLength: 9
+        bDescriptorType: 0x04
+        bInterfaceNumber: 2
+        bAlternateSetting: 0
+        bNumEndpoints: 1
+        bInterfaceClass: 0xff      # Vendor Specific
+        bInterfaceSubClass: 0x00
+        bInterfaceProtocol: 0x00
+        iInterface: 7
+
+        endpoints:
+          - bLength: 7
+            bDescriptorType: 0x05
+            bEndpointAddress: 0x83
+            bmAttributes: 0x03       # Interrupt IN
+            wMaxPacketSize: 64
+            bInterval: 10
 
 probe_commit_response:
   hex: "00000101151605000000000000000100200000600900FF030000"

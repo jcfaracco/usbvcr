@@ -66,3 +66,10 @@ install_subdir('data', install_dir : get_option('datadir') / 'usbvcr')
 
 subdir('src')
 subdir('tests')
+
+format_script = find_program('scripts/format.py', required : false)
+if format_script.found()
+    run_target('format', command : [format_script])
+    run_target('format-check', command : [format_script, '--check'])
+    run_target('lint', command : [format_script, '--check'])
+endif

@@ -57,6 +57,7 @@ static void pcap_decode_usbmon_header(const usbmon_header_t *h, pcap_packet_t *p
     pkt->dir         = (h->epnum & 0x80) ? PCAP_DIR_IN : PCAP_DIR_OUT;
     pkt->xfer        = (pcap_xfer_t)h->xfer_type;
     pkt->event_type  = (char)h->type;
+    pkt->ndesc       = h->ndesc;
 
     /* usbmon convention: flag_setup == 0 means s.setup holds a real setup
      * packet (see pcap_init_usbmon_header for how the writer sets it). */
@@ -193,6 +194,9 @@ static pcap_trace_t *pcap_trace_load_ng(FILE *fp)
 
 pcap_trace_t *pcap_trace_load(const char *path)
 {
+    if (!path)
+        return NULL;
+
     FILE *fp = fopen(path, "rb");
     if (!fp) {
         LOG_ERR("pcap: failed to open %s: %s", path, strerror(errno));
@@ -252,13 +256,17 @@ pcap_format_t pcap_format_get(const char *str) {
 }
 
 /* Helper to safely write 4-byte padding bytes required by PCAPNG specifications */
-static void pcap_write_ng_padding(FILE *fp,
-                                  size_t unpadded_len) {
+static int pcap_write_ng_padding(FILE *fp,
+                                 size_t unpadded_len) {
     size_t remainder = unpadded_len % 4;
     if (remainder != 0) {
         uint32_t zero = 0;
-        fwrite(&zero, 1, 4 - remainder, fp);
+        size_t pad = 4 - remainder;
+        if (fwrite(&zero, 1, pad, fp) != pad) {
+            return -1;
+        }
     }
+    return 0;
 }
 
 /* Helper to map your custom pcap_packet_t layout into an explicit mon_bin_hdr packet context */
@@ -288,6 +296,7 @@ static void pcap_init_usbmon_header(usbmon_header_t *usb_hdr,
     usb_hdr->status    = 0;
     usb_hdr->length    = (uint32_t)p->data_len;
     usb_hdr->len_cap   = (uint32_t)p->data_len;
+    usb_hdr->ndesc     = p->ndesc;
 
     /* usbmon convention (verified against holtek_keyboard.pcap/usb_capture.pcap,
      * both real usbmon captures): flag_setup == 0 means a setup packet is
@@ -315,7 +324,7 @@ static void pcap_init_usbmon_header(usbmon_header_t *usb_hdr,
 
 /* ---- Writer ------------------------------------------------------------ */
 
-void pcap_writer_open_legacy_header(FILE *fp)
+static int pcap_writer_open_legacy_header(FILE *fp)
 {
     /* Write Classic Legacy Global Header */
     pcap_header_t global_hdr = {
@@ -330,10 +339,14 @@ void pcap_writer_open_legacy_header(FILE *fp)
          * Wireshark misparse every record by 16 bytes. */
         .network = 220 /* DLT_USB_LINUX_MMAPPED */
     };
-    fwrite(&global_hdr, sizeof(pcap_header_t), 1, fp);
+    if (fwrite(&global_hdr, sizeof(pcap_header_t), 1, fp) != 1) {
+        LOG_ERR("pcap: failed to write legacy header: %s", strerror(errno));
+        return -1;
+    }
+    return 0;
 }
 
-void pcap_writer_open_ng_header(FILE *fp)
+static int pcap_writer_open_ng_header(FILE *fp)
 {
     /* Write PCAPNG Section Header Block (SHB) */
     pcapng_shb_t shb = {
@@ -345,8 +358,11 @@ void pcap_writer_open_ng_header(FILE *fp)
         .minor_version = 0,
         .section_len = -1
     };
-    fwrite(&shb, sizeof(pcapng_shb_t), 1, fp);
-    fwrite(&shb.block_len, sizeof(uint32_t), 1, fp);
+    if (fwrite(&shb, sizeof(pcapng_shb_t), 1, fp) != 1 ||
+        fwrite(&shb.block_len, sizeof(uint32_t), 1, fp) != 1) {
+        LOG_ERR("pcap: failed to write SHB: %s", strerror(errno));
+        return -1;
+    }
 
     /* Write PCAPNG Interface Description Block (IDB) for USB */
     pcapng_idb_t idb = {
@@ -358,13 +374,21 @@ void pcap_writer_open_ng_header(FILE *fp)
         .reserved = 0,
         .snaplen = 65535
     };
-    fwrite(&idb, sizeof(pcapng_idb_t), 1, fp);
-    fwrite(&idb.block_len, sizeof(uint32_t), 1, fp);
+    if (fwrite(&idb, sizeof(pcapng_idb_t), 1, fp) != 1 ||
+        fwrite(&idb.block_len, sizeof(uint32_t), 1, fp) != 1) {
+        LOG_ERR("pcap: failed to write IDB: %s", strerror(errno));
+        return -1;
+    }
+    return 0;
 }
 
 pcap_writer_t *pcap_writer_open(const char *path)
 {
+    if (!path)
+        return NULL;
+
     pcap_writer_t *w = g_new0(pcap_writer_t, 1);
+    int rc = 0;
 
     w->path = g_strdup(path);
     w->fp = fopen(path, "wb");
@@ -378,22 +402,29 @@ pcap_writer_t *pcap_writer_open(const char *path)
     }
 
     if (w->format == FORMAT_PCAPNG) {
-        pcap_writer_open_ng_header(w->fp);
+        rc = pcap_writer_open_ng_header(w->fp);
     } else {
-        pcap_writer_open_legacy_header(w->fp);
+        rc = pcap_writer_open_legacy_header(w->fp);
     }
-    fflush(w->fp);  /* survive a Ctrl+C before the first packet */
+
+    if (rc < 0 || fflush(w->fp) != 0) {
+        LOG_ERR("Failed to write pcap header: %s", strerror(errno));
+        fclose(w->fp);
+        g_free(w->path);
+        g_free(w);
+        return NULL;
+    }
 
     return w;
 }
 
 /* Classic Record Output Wrapper */
-void pcap_writer_add_pcap(pcap_writer_t *w,
-                          const pcap_packet_t *pkt,
-                          usbmon_header_t usb_hdr,
-                          uint32_t payload_and_meta_len,
-                          uint32_t sec,
-                          uint32_t usec)
+static int pcap_writer_add_pcap(pcap_writer_t *w,
+                                const pcap_packet_t *pkt,
+                                usbmon_header_t usb_hdr,
+                                uint32_t payload_and_meta_len,
+                                uint32_t sec,
+                                uint32_t usec)
 {
     pcap_rec_header_t record_hdr = {
         .ts_sec = sec,
@@ -401,19 +432,29 @@ void pcap_writer_add_pcap(pcap_writer_t *w,
         .incl_len = payload_and_meta_len,
         .orig_len = payload_and_meta_len
     };
-    fwrite(&record_hdr, sizeof(pcap_rec_header_t), 1, w->fp);
+    if (fwrite(&record_hdr, sizeof(pcap_rec_header_t), 1, w->fp) != 1) {
+        LOG_ERR("pcap: failed to write record header: %s", strerror(errno));
+        return -1;
+    }
             
     // Raw sequential data block drop
-    fwrite(&usb_hdr, sizeof(usbmon_header_t), 1, w->fp);
-    if (pkt->data_len > 0 && pkt->data != NULL) {
-        fwrite(pkt->data, 1, pkt->data_len, w->fp);
+    if (fwrite(&usb_hdr, sizeof(usbmon_header_t), 1, w->fp) != 1) {
+        LOG_ERR("pcap: failed to write usbmon header: %s", strerror(errno));
+        return -1;
     }
+    if (pkt->data_len > 0 && pkt->data != NULL) {
+        if (fwrite(pkt->data, 1, pkt->data_len, w->fp) != pkt->data_len) {
+            LOG_ERR("pcap: failed to write payload: %s", strerror(errno));
+            return -1;
+        }
+    }
+    return 0;
 }
 
-void pcap_writer_add_pcapng(pcap_writer_t *w,
-                            const pcap_packet_t *pkt,
-                            usbmon_header_t usb_hdr,
-                            uint32_t payload_and_meta_len)
+static int pcap_writer_add_pcapng(pcap_writer_t *w,
+                                  const pcap_packet_t *pkt,
+                                  usbmon_header_t usb_hdr,
+                                  uint32_t payload_and_meta_len)
 {
     /* Enhanced Packet Block Processing Matrix */
     size_t unpadded_payload_len = payload_and_meta_len;
@@ -434,37 +475,70 @@ void pcap_writer_add_pcapng(pcap_writer_t *w,
     };
 
     // Write EPB Structural Header
-    fwrite(&epb, sizeof(pcapng_epb_t), 1, w->fp);
+    if (fwrite(&epb, sizeof(pcapng_epb_t), 1, w->fp) != 1) {
+        LOG_ERR("pcap: failed to write EPB: %s", strerror(errno));
+        return -1;
+    }
 
     // Write internal usbmon context block + data payload
-    fwrite(&usb_hdr, sizeof(usbmon_header_t), 1, w->fp);
+    if (fwrite(&usb_hdr, sizeof(usbmon_header_t), 1, w->fp) != 1) {
+        LOG_ERR("pcap: failed to write usbmon header: %s", strerror(errno));
+        return -1;
+    }
 
-    if (pkt->data_len > 0 && pkt->data != NULL)
-        fwrite(pkt->data, 1, pkt->data_len, w->fp);
+    if (pkt->data_len > 0 && pkt->data != NULL) {
+        if (fwrite(pkt->data, 1, pkt->data_len, w->fp) != pkt->data_len) {
+            LOG_ERR("pcap: failed to write payload: %s", strerror(errno));
+            return -1;
+        }
+    }
 
     // Write alignment padding to reach a stable 32-bit offset boundary
-    pcap_write_ng_padding(w->fp, unpadded_payload_len);
+    if (pcap_write_ng_padding(w->fp, unpadded_payload_len) < 0) {
+        LOG_ERR("pcap: failed to write padding: %s", strerror(errno));
+        return -1;
+    }
 
     // Write structural boundary trailing tracking length descriptor
-    fwrite(&total_epb_block_len, sizeof(uint32_t), 1, w->fp);
+    if (fwrite(&total_epb_block_len, sizeof(uint32_t), 1, w->fp) != 1) {
+        LOG_ERR("pcap: failed to write EPB trailing length: %s", strerror(errno));
+        return -1;
+    }
+    return 0;
 }
 
-void pcap_writer_add(pcap_writer_t *w, const pcap_packet_t *pkt)
+int pcap_writer_add(pcap_writer_t *w, const pcap_packet_t *pkt)
 {
     usbmon_header_t usb_hdr;
-    uint32_t sec = (uint32_t)(pkt->ts_usec / 1000000ULL);
-    uint32_t usec = (uint32_t)(pkt->ts_usec % 1000000ULL);
+    uint32_t sec;
+    uint32_t usec;
+    uint32_t payload_and_meta_len;
+    int rc = 0;
+
+    if (!w || !w->fp || !pkt)
+        return -1;
+
+    sec = (uint32_t)(pkt->ts_usec / 1000000ULL);
+    usec = (uint32_t)(pkt->ts_usec % 1000000ULL);
 
     pcap_init_usbmon_header(&usb_hdr, pkt, sec, usec);
 
-    uint32_t payload_and_meta_len = sizeof(usbmon_header_t) + pkt->data_len;
+    payload_and_meta_len = sizeof(usbmon_header_t) + pkt->data_len;
 
     if (w->format == FORMAT_LEGACY_PCAP) {
-        pcap_writer_add_pcap(w, pkt, usb_hdr, payload_and_meta_len, sec, usec);
+        rc = pcap_writer_add_pcap(w, pkt, usb_hdr, payload_and_meta_len, sec, usec);
     } else if (w->format == FORMAT_PCAPNG) {
-        pcap_writer_add_pcapng(w, pkt, usb_hdr, payload_and_meta_len);
+        rc = pcap_writer_add_pcapng(w, pkt, usb_hdr, payload_and_meta_len);
+    } else {
+        rc = -1;
     }
-    fflush(w->fp);  /* survive a crash mid-run */
+
+    if (rc == 0 && fflush(w->fp) != 0) {
+        LOG_ERR("pcap: fflush failed: %s", strerror(errno));
+        return -1;
+    }
+
+    return rc;
 }
 
 void pcap_writer_close(pcap_writer_t *w)

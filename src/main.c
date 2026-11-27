@@ -14,11 +14,7 @@
 #include "pcap/record.h"
 #include "version.h"
 #include "log.h"
-#include "qemu_engine.h"
-#ifdef USBVCR_HAVE_LOCAL_ENGINE
-#include "local_engine.h"
-#endif
-
+#include "engine.h"
 
 typedef struct {
     gchar *host;
@@ -43,23 +39,27 @@ typedef struct {
  * `yaml_cfg_dev` is non-NULL when a manifest's top-level `pcap:` field
  * swapped `dev` for a pcap_backend — `dev` then has no yaml_backend state,
  * so the project name must come from `yaml_cfg_dev` instead. */
-static gchar *local_instance_name(const GAppConfig *config, usb_device_t *dev,
-                                  usb_device_t *yaml_cfg_dev)
+static gchar *
+local_instance_name(const GAppConfig *config, usb_device_t *dev, usb_device_t *yaml_cfg_dev)
 {
-    if (yaml_cfg_dev) {
+    if (yaml_cfg_dev)
+    {
         const char *name = yaml_backend_get_name(yaml_cfg_dev);
         if (name)
             return g_strdup(name);
-    } else if (config->yaml) {
+    } else if (config->yaml)
+    {
         const char *name = yaml_backend_get_name(dev);
         return g_strdup(name ? name : "usbvcr");
     }
 
-    if (config->pcap || yaml_cfg_dev) {
+    if (config->pcap || yaml_cfg_dev)
+    {
         const uint8_t *desc = NULL;
         uint16_t len = 0;
-        if (dev->ops->get_descriptor(dev, USB_DESC_DEVICE, 0, 0, &desc, &len) == 0 &&
-            len >= USB_DD_idProduct + 2) {
+        if (dev->ops->get_descriptor(dev, USB_DESC_DEVICE, 0, 0, &desc, &len) == 0
+            && len >= USB_DD_idProduct + 2)
+        {
             uint16_t vid = get_u16le(desc + USB_DD_idVendor);
             uint16_t pid = get_u16le(desc + USB_DD_idProduct);
             return g_strdup_printf("usbvcr_%04x_%04x", vid, pid);
@@ -69,7 +69,8 @@ static gchar *local_instance_name(const GAppConfig *config, usb_device_t *dev,
     return g_strdup("usbvcr");
 }
 
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
     GOptionContext *context;
     GAppConfig config = {
@@ -88,17 +89,34 @@ int main(int argc, char *argv[])
     };
     GError *error = NULL;
     int rc = 0;
-    int sock = -1;
 
     GOptionEntry entries[] = {
-        { "debug", 'D', 0, G_OPTION_ARG_NONE, &config.debug, "enable debugging logs (or set connection.debug: true in the manifest).", NULL },
-        { "host", 'H', 0, G_OPTION_ARG_STRING, &config.host, "address of the host to connect (default: localhost, or manifest's connection.host).", "HOST" },
-        { "port", 'P', 0, G_OPTION_ARG_STRING, &config.port, "port of the host to connect (default: 1337, or manifest's connection.port).", "PORT" },
-        { "yaml", 0, 0, G_OPTION_ARG_FILENAME, &config.yaml, "canonical device project (devices/ flows/ ...), or a manifest whose top-level pcap: field replays a capture.", "FILE" },
-        { "pcap", 0, 0, G_OPTION_ARG_FILENAME, &config.pcap, "pcap file to replay USB behaviour (or set top-level pcap: in a --yaml manifest).", "FILE" },
-        { "record", 'r', 0, G_OPTION_ARG_FILENAME, &config.record_path, "record live USB transfers to a pcap/pcapng file, format inferred from extension (or set connection.record in the manifest).", "FILE" },
-        { "local", 0, 0, G_OPTION_ARG_NONE, &config.local, "run the device locally against a Linux USB gadget (FunctionFS/ConfigFS) instead of QEMU (or set connection.engine: local in the manifest).", NULL },
-        { "udc", 0, 0, G_OPTION_ARG_STRING, &config.udc, "UDC to bind the local gadget to, with --local (default: auto-detect, or manifest's connection.udc).", "UDC" },
+        { "debug", 'D', 0, G_OPTION_ARG_NONE, &config.debug,
+          "enable debugging logs (or set connection.debug: true in the manifest).", NULL },
+        { "host", 'H', 0, G_OPTION_ARG_STRING, &config.host,
+          "address of the host to connect (default: localhost, or manifest's connection.host).",
+          "HOST" },
+        { "port", 'P', 0, G_OPTION_ARG_STRING, &config.port,
+          "port of the host to connect (default: 1337, or manifest's connection.port).", "PORT" },
+        { "yaml", 0, 0, G_OPTION_ARG_FILENAME, &config.yaml,
+          "canonical device project (devices/ flows/ ...), or a manifest whose top-level pcap: "
+          "field replays a capture.",
+          "FILE" },
+        { "pcap", 0, 0, G_OPTION_ARG_FILENAME, &config.pcap,
+          "pcap file to replay USB behaviour (or set top-level pcap: in a --yaml manifest).",
+          "FILE" },
+        { "record", 'r', 0, G_OPTION_ARG_FILENAME, &config.record_path,
+          "record live USB transfers to a pcap/pcapng file, format inferred from extension (or set "
+          "connection.record in the manifest).",
+          "FILE" },
+        { "local", 0, 0, G_OPTION_ARG_NONE, &config.local,
+          "run the device locally against a Linux USB gadget (FunctionFS/ConfigFS) instead of QEMU "
+          "(or set connection.engine: local in the manifest).",
+          NULL },
+        { "udc", 0, 0, G_OPTION_ARG_STRING, &config.udc,
+          "UDC to bind the local gadget to, with --local (default: auto-detect, or manifest's "
+          "connection.udc).",
+          "UDC" },
         { "version", 'V', 0, G_OPTION_ARG_NONE, &config.version, "Show version and exit.", NULL },
         G_OPTION_ENTRY_NULL
     };
@@ -111,39 +129,46 @@ int main(int argc, char *argv[])
      * canonical YAML device project (emulate). Both feed the same engine. */
     usb_device_t *dev = NULL;
     usb_device_t *pcap_dev = NULL;
-    usb_device_t *yaml_cfg_dev = NULL;  /* manifest kept alive when pcap: swaps the backend */
+    usb_device_t *yaml_cfg_dev = NULL; /* manifest kept alive when pcap: swaps the backend */
+    usb_engine_t *engine = NULL;
     gchar *local_name = NULL;
-    gboolean use_local = FALSE;
+    const char *engine_name = NULL;
     const char *use_udc = NULL;
     const char *use_host = NULL;
     const char *use_port = NULL;
     const char *use_record = NULL;
 
-    if (!g_option_context_parse(context, &argc, &argv, &error)) {
+    if (!g_option_context_parse(context, &argc, &argv, &error))
+    {
         g_print("Error parsing options: %s\n", error->message);
         rc = -1;
         goto end;
     }
 
-    if (config.version) {
+    if (config.version)
+    {
         g_print("USB VCR version " USB_VCR_VERSION "\n");
-        goto end;   /* rc == 0 */
+        goto end; /* rc == 0 */
     }
 
     if (config.debug)
         current_log_level = LOG_LEVEL_DEBUG;
 
-    if (config.pcap) {
+    if (config.pcap)
+    {
         dev = pcap_backend_create(config.pcap);
-        if (!dev) {
+        if (!dev)
+        {
             LOG_ERR("failed to load pcap capture: %s", config.pcap);
             rc = -1;
             goto end;
         }
         pcap_dev = dev;
-    } else if (config.yaml) {
+    } else if (config.yaml)
+    {
         dev = yaml_backend_create(config.yaml);
-        if (!dev) {
+        if (!dev)
+        {
             LOG_ERR("failed to load device project: %s", config.yaml);
             rc = -1;
             goto end;
@@ -156,17 +181,19 @@ int main(int argc, char *argv[])
          * to replay — swap backends but keep the manifest around to read its
          * connection:/record:/debug fields below. */
         const char *manifest_pcap = yaml_backend_get_pcap(dev);
-        if (manifest_pcap) {
+        if (manifest_pcap)
+        {
             dev = pcap_backend_create(manifest_pcap);
-            if (!dev) {
-                LOG_ERR("failed to load pcap capture referenced by manifest: %s",
-                        manifest_pcap);
+            if (!dev)
+            {
+                LOG_ERR("failed to load pcap capture referenced by manifest: %s", manifest_pcap);
                 rc = -1;
                 goto end;
             }
             pcap_dev = dev;
         }
-    } else {
+    } else
+    {
         LOG_ERR("no device: pass --yaml <FILE> or --pcap <FILE>");
         rc = -1;
         goto end;
@@ -177,18 +204,22 @@ int main(int argc, char *argv[])
      * CLI flags take precedence; a manifest's connection: block fills in
      * whatever wasn't passed on the command line, so `--yaml <file>` alone
      * is enough to run. */
-    use_local  = config.local;
-    use_udc    = config.udc;
-    use_host   = config.host;
-    use_port   = config.port;
+    use_udc = config.udc;
+    use_host = config.host;
+    use_port = config.port;
     use_record = config.record_path;
-    if (config.yaml) {
+
+    if (config.local)
+        engine_name = "local";
+
+    if (config.yaml)
+    {
         /* yaml_cfg_dev, when set, is the manifest the pcap: swap read from —
          * its connection:/record:/debug fields still apply even though `dev`
          * is now the pcap backend. */
         usb_device_t *cfg = yaml_cfg_dev ? yaml_cfg_dev : dev;
-        if (!use_local && g_strcmp0(yaml_backend_get_engine(cfg), "local") == 0)
-            use_local = TRUE;
+        if (!engine_name)
+            engine_name = yaml_backend_get_engine(cfg);
         if (!use_udc)
             use_udc = yaml_backend_get_udc(cfg);
         if (!use_host)
@@ -197,76 +228,82 @@ int main(int argc, char *argv[])
             use_port = yaml_backend_get_port(cfg);
         if (!use_record)
             use_record = yaml_backend_get_record(cfg);
-        if (!config.debug && yaml_backend_get_debug(cfg)) {
+        if (!config.debug && yaml_backend_get_debug(cfg))
+        {
             config.debug = TRUE;
             current_log_level = LOG_LEVEL_DEBUG;
         }
     }
+
+    if (!engine_name)
+        engine_name = "qemu";
+
     if (!use_host)
         use_host = "localhost";
     if (!use_port)
         use_port = "1337";
 
-    if (use_local)
+    if (g_ascii_strcasecmp(engine_name, "local") == 0)
         local_name = local_instance_name(&config, dev, yaml_cfg_dev);
 
-    if (config.do_fuzz) {
+    if (config.do_fuzz)
+    {
         if (!config.have_seed)
             config.seed = ((uint64_t)time(NULL) << 16) ^ (uint64_t)getpid();
-        LOG_INFO("FUZZ seed=%llu  (reproduce: --seed %llu)",
-                 (unsigned long long)config.seed,
+        LOG_INFO("FUZZ seed=%llu  (reproduce: --seed %llu)", (unsigned long long)config.seed,
                  (unsigned long long)config.seed);
 
         fuzz_cfg_t cfg = {
             .seed = config.seed,
-            .prob = 4,              /* ~25% of mutable items */
+            .prob = 4, /* ~25% of mutable items */
             .fuzz_descriptors = 1,
             .fuzz_ep_in = 1,
             .fuzz_control = 0,
         };
         dev = fuzz_wrap(dev, &cfg);
-        if (!dev) {
+        if (!dev)
+        {
             rc = -1;
             goto end;
         }
     }
 
-    if (use_record && record_open(use_record) < 0) {
+    if (use_record && record_open(use_record) < 0)
+    {
         rc = -1;
         goto end;
     }
 
-    LOG_INFO("Running device: %s", config.pcap ? config.pcap : config.yaml);
+    LOG_INFO("Running device: %s (engine: %s)", config.pcap ? config.pcap : config.yaml,
+             engine_name);
 
-    if (use_local) {
-#ifdef USBVCR_HAVE_LOCAL_ENGINE
-        LOG_INFO("Running locally on UDC %s (gadget name '%s')",
-                 use_udc ? use_udc : "(auto-detect)", local_name);
-        rc = local_engine_run(dev, local_name, use_udc);
-#else
-        LOG_ERR("--local: local engine not built in this binary "
-                "(configure with -Denable_local_engine=true on Linux)");
+    usb_engine_config_t eng_cfg = {
+        .host = use_host,
+        .port = use_port,
+        .udc = use_udc,
+        .instance_name = local_name,
+        .debug = config.debug,
+    };
+
+    engine = usb_engine_create(engine_name, &eng_cfg);
+    if (!engine)
+    {
+        LOG_ERR("Failed to initialize engine '%s'", engine_name);
         rc = -1;
-#endif
-    } else {
-        LOG_DEBUG("Connecting to %s:%s ...", use_host, use_port);
-        sock = connect_to_server(use_host, use_port);
-        if (sock < 0) {
-            LOG_ERR("Connection failed");
-            rc = -1;
-            goto end;
-        }
-        LOG_INFO("Connected!");
-        rc = qemu_engine_run(sock, dev);
+        goto end;
     }
+
+    rc = usb_engine_run(engine, dev);
+    usb_engine_destroy(engine);
+    engine = NULL;
 
     LOG_INFO("Session ended (rc=%d)", rc);
 
 end:
+    if (engine)
+        usb_engine_destroy(engine);
     g_free(local_name);
     record_close();
-    if (sock >= 0)
-        close(sock);
     if (pcap_dev)
         pcap_backend_destroy(pcap_dev);
     if (yaml_cfg_dev)

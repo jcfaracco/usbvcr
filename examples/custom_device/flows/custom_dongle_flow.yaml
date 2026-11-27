@@ -1,0 +1,100 @@
+states:
+  - name: "unconfigured"
+    rules:
+      # Standard GET_DESCRIPTOR (device)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0100
+        actions:
+          - respond_with: "$device.device_descriptor"
+
+      # Standard GET_DESCRIPTOR (configuration)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0200
+        actions:
+          - respond_with: "$device.configurations[0]"
+
+      # Standard GET_DESCRIPTOR (string 0 - language IDs)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0300
+        actions:
+          - respond_with:
+              hex: "04030904" # English US
+
+      # Standard GET_DESCRIPTOR (string 1 - Manufacturer)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0301
+        actions:
+          - respond_with:
+              hex: "180355005300420020005600430052002000500072006F006A00650063007400" # "USB VCR Project"
+
+      # Standard GET_DESCRIPTOR (string 2 - Product)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0302
+        actions:
+          - respond_with:
+              hex: "260343007500730074006F006D00200044006F006E0067006C006500" # "Custom Dongle"
+
+      # Standard GET_DESCRIPTOR (string 3 - SerialNumber)
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0303
+        actions:
+          - respond_with:
+              hex: "120330003000300030003000300030003100" # "00000001"
+
+      # Standard Request: SET_CONFIGURATION (1)
+      - match:
+          bmRequestType: 0x00
+          bRequest: 9
+          wValue: 1
+        actions:
+          - respond_with_status: 0
+          - transition_state: "operational"
+
+  - name: "operational"
+    on_enter:
+      # Bind project-specific protocol handler script to endpoints 0x81 (IN) and 0x01 (OUT)
+      - bind_provider:
+          driver: "exec"
+          endpoints:
+            in: 0x81
+            out: 0x01
+          config:
+            command: "python3 ../scripts/dongle_service.py"
+    rules:
+      # Keep standard descriptor fetches accessible
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0100
+        actions:
+          - respond_with: "$device.device_descriptor"
+
+      - match:
+          bmRequestType: 0x80
+          bRequest: 6
+          wValue: 0x0200
+        actions:
+          - respond_with: "$device.configurations[0]"
+
+      # Handle configuration reset or de-configuration (SET_CONFIGURATION 0)
+      - match:
+          bmRequestType: 0x00
+          bRequest: 9
+          wValue: 0
+        actions:
+          - unbind_provider:
+              endpoints: [0x81, 0x01]
+          - respond_with_status: 0
+          - transition_state: "unconfigured"

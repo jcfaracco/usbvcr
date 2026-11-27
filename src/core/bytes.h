@@ -30,4 +30,45 @@ BYTES_DEFINE_LE(i64le, int64_t)
 
 #undef BYTES_DEFINE_LE
 
+/*
+ * Big-endian wire (de)serialization helpers (e.g. SCSI CDBs, network framing).
+ */
+static inline uint16_t get_u16be(const uint8_t *p)
+{
+    return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]);
+}
+
+static inline void put_u16be(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v >> 8);
+    p[1] = (uint8_t)v;
+}
+
+static inline uint32_t get_u32be(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) |
+           ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8)  |
+           ((uint32_t)p[3]);
+}
+
+static inline void put_u32be(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
+}
+
+static inline uint64_t get_u64be(const uint8_t *p)
+{
+    return ((uint64_t)get_u32be(p) << 32) | (uint64_t)get_u32be(p + 4);
+}
+
+static inline void put_u64be(uint8_t *p, uint64_t v)
+{
+    put_u32be(p, (uint32_t)(v >> 32));
+    put_u32be(p + 4, (uint32_t)v);
+}
+
 #endif /* BYTES_H */

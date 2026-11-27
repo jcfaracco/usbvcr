@@ -426,20 +426,47 @@ void ffs_teardown(ffs_ctx_t *ctx)
         ctx->ep0_fd = -1;
     }
 
-    umount(ctx->mount_path);
-    rmdir(ctx->mount_path);
+    if (ctx->mount_path != NULL)
+    {
+        if (umount(ctx->mount_path) < 0 && errno != ENOENT && errno != EINVAL)
+        {
+            LOG_WARN("ffs: umount(%s) failed: %s", ctx->mount_path, strerror(errno));
+        }
+        if (rmdir(ctx->mount_path) < 0 && errno != ENOENT)
+        {
+            LOG_WARN("ffs: rmdir(%s) failed: %s", ctx->mount_path, strerror(errno));
+        }
+    }
 
-    link_dst = g_strdup_printf("%s/configs/c.1/ffs.%s", ctx->configfs_path, ctx->name);
-    unlink(link_dst);
+    if (ctx->configfs_path != NULL)
+    {
+        link_dst = g_strdup_printf("%s/configs/c.1/ffs.%s", ctx->configfs_path, ctx->name);
+        if (unlink(link_dst) < 0 && errno != ENOENT)
+        {
+            LOG_WARN("ffs: unlink(%s) failed: %s", link_dst, strerror(errno));
+        }
 
-    fn_dir = g_strdup_printf("%s/functions/ffs.%s", ctx->configfs_path, ctx->name);
-    rmdir(fn_dir);
+        fn_dir = g_strdup_printf("%s/functions/ffs.%s", ctx->configfs_path, ctx->name);
+        if (rmdir(fn_dir) < 0 && errno != ENOENT)
+        {
+            LOG_WARN("ffs: rmdir(%s) failed: %s", fn_dir, strerror(errno));
+        }
 
-    cfg_dir = g_strdup_printf("%s/configs/c.1", ctx->configfs_path);
-    rmdir(cfg_dir);
+        cfg_dir = g_strdup_printf("%s/configs/c.1", ctx->configfs_path);
+        if (rmdir(cfg_dir) < 0 && errno != ENOENT)
+        {
+            LOG_WARN("ffs: rmdir(%s) failed: %s", cfg_dir, strerror(errno));
+        }
 
-    str_dir = g_strdup_printf("%s/strings/0x409", ctx->configfs_path);
-    rmdir(str_dir);
+        str_dir = g_strdup_printf("%s/strings/0x409", ctx->configfs_path);
+        if (rmdir(str_dir) < 0 && errno != ENOENT)
+        {
+            LOG_WARN("ffs: rmdir(%s) failed: %s", str_dir, strerror(errno));
+        }
 
-    rmdir(ctx->configfs_path);
+        if (rmdir(ctx->configfs_path) < 0 && errno != ENOENT)
+        {
+            LOG_WARN("ffs: rmdir(%s) failed: %s", ctx->configfs_path, strerror(errno));
+        }
+    }
 }

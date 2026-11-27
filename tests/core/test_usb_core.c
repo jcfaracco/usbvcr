@@ -36,6 +36,13 @@ static const uint8_t DEV_DESC[18] = {
     0x00, 0x01,
 };
 
+/* 18-byte SuperSpeed device descriptor: bcdUSB = 0x0300, bMaxPacketSize0 = 9 (512 bytes) */
+static const uint8_t SS_DEV_DESC[18] = {
+    0x12, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00, 0x09,
+    0x34, 0x12, 0x78, 0x56, 0x00, 0x01, 0x00, 0x00,
+    0x00, 0x01,
+};
+
 /* 34-byte HID-style config descriptor with one interrupt IN endpoint 0x81.
  * (Same shape as the descriptor exercised in test_descriptor.c.) */
 static const uint8_t CFG_DESC[34] = {
@@ -47,10 +54,18 @@ static const uint8_t CFG_DESC[34] = {
 };
 
 typedef struct {
+    /* descriptor overrides */
+    const uint8_t *custom_dev_desc;
+    uint16_t custom_dev_desc_len;
+    const uint8_t *custom_cfg_desc;
+    uint16_t custom_cfg_desc_len;
+    int      fail_get_descriptor;
+
     /* control() behaviour */
     int      control_ret;               /* value control() returns (-1 default) */
     uint8_t  control_data[64];          /* IN data returned when control_ret==0 */
     uint16_t control_data_len;
+    uint8_t *large_control_data;
 
     /* control() observations */
     int      control_calls;
@@ -75,9 +90,30 @@ typedef struct {
 static int fake_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
                                uint16_t lang, const uint8_t **out, uint16_t *len)
 {
-    (void)dev; (void)index; (void)lang;
-    if (type == USB_DESC_DEVICE) { *out = DEV_DESC; *len = sizeof(DEV_DESC); return 0; }
-    if (type == USB_DESC_CONFIG) { *out = CFG_DESC; *len = sizeof(CFG_DESC); return 0; }
+    fake_state *st = dev->state;
+    (void)index; (void)lang;
+    if (st->fail_get_descriptor)
+        return -1;
+    if (type == USB_DESC_DEVICE) {
+        if (st->custom_dev_desc) {
+            *out = st->custom_dev_desc;
+            *len = st->custom_dev_desc_len;
+        } else {
+            *out = DEV_DESC;
+            *len = sizeof(DEV_DESC);
+        }
+        return 0;
+    }
+    if (type == USB_DESC_CONFIG) {
+        if (st->custom_cfg_desc) {
+            *out = st->custom_cfg_desc;
+            *len = st->custom_cfg_desc_len;
+        } else {
+            *out = CFG_DESC;
+            *len = sizeof(CFG_DESC);
+        }
+        return 0;
+    }
     return -1;
 }
 
@@ -92,8 +128,13 @@ static int fake_control(usb_device_t *dev,
         st->set_config_value = setup->value;
 
     if (st->control_ret == 0) {
-        memcpy(data, st->control_data, st->control_data_len);
-        *len = st->control_data_len;
+        if (st->large_control_data && st->control_data_len > 0) {
+            memcpy(data, st->large_control_data, st->control_data_len);
+            *len = st->control_data_len;
+        } else {
+            memcpy(data, st->control_data, st->control_data_len);
+            *len = st->control_data_len;
+        }
     }
     return st->control_ret;
 }
@@ -217,6 +258,33 @@ static void peer_handshake(harness *h, usb_device_connect_header_t *connect_out)
     usb_hello_header_t hello;
     memset(&hello, 0, sizeof(hello));
     strncpy(hello.version, "test-peer", sizeof(hello.version) - 1);
+    ck_assert_int_eq(usb_conn_send(h->fds[0], RT_HELLO, 0, &hello, sizeof(hello), &h->ctx), 0);
+
+    ck_assert_int_eq(peer_recv(h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_HELLO);
+
+    ck_assert_int_eq(peer_recv(h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_INTERFACE_INFO);
+
+    ck_assert_int_eq(peer_recv(h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_EP_INFO);
+
+    ck_assert_int_eq(peer_recv(h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_DEVICE_CONNECT);
+    if (connect_out)
+        memcpy(connect_out, buf, sizeof(*connect_out));
+}
+
+static void peer_handshake_caps(harness *h, uint32_t caps, usb_device_connect_header_t *connect_out)
+{
+    usb_header_t hdr;
+    uint8_t buf[USB_VCR_BUF_SIZE];
+    size_t len;
+
+    usb_hello_header_t hello;
+    memset(&hello, 0, sizeof(hello));
+    strncpy(hello.version, "test-peer", sizeof(hello.version) - 1);
+    hello.capabilities[0] = caps;
     ck_assert_int_eq(usb_conn_send(h->fds[0], RT_HELLO, 0, &hello, sizeof(hello), &h->ctx), 0);
 
     ck_assert_int_eq(peer_recv(h, &hdr, buf, &len), 0);
@@ -510,6 +578,370 @@ START_TEST(test_idle_tick)
 }
 END_TEST
 
+START_TEST(test_announce_superspeed_and_caps)
+{
+    harness h;
+    memset(&h.state, 0, sizeof(h.state));
+    h.state.control_ret = -1;
+    h.state.set_config_value = -1;
+    h.state.speed_ret = -1;
+    h.state.custom_dev_desc = SS_DEV_DESC;
+    h.state.custom_dev_desc_len = sizeof(SS_DEV_DESC);
+    h.dev.ops = &FAKE_OPS;
+    h.dev.state = &h.state;
+    h.ctx.bus = 0;
+    h.ctx.device = 1;
+
+    ck_assert_int_eq(socketpair(AF_UNIX, SOCK_STREAM, 0, h.fds), 0);
+    struct timeval tv = {0, 100 * 1000};
+    setsockopt(h.fds[1], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ck_assert_int_eq(pthread_create(&h.thread, NULL, engine_thread, &h), 0);
+
+    uint32_t caps = (1u << USB_VCR_CAP_CONNECT_DEVICE_VERSION) |
+                    (1u << USB_VCR_CAP_EP_INFO_MAX_PACKET_SIZE) |
+                    (1u << USB_VCR_CAP_BULK_STREAMS);
+    usb_device_connect_header_t c;
+    peer_handshake_caps(&h, caps, &c);
+
+    ck_assert_uint_eq(c.speed, USB_VCR_SPEED_SUPER);
+
+    harness_stop(&h);
+}
+END_TEST
+
+START_TEST(test_handshake_bad_packet)
+{
+    harness h;
+    harness_start(&h);
+
+    /* Send RT_RESET instead of RT_HELLO */
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_RESET, 0, NULL, 0, &h.ctx), 0);
+
+    /* Engine sees wrong packet type, logs warning and terminates */
+    pthread_join(h.thread, NULL);
+    close(h.fds[0]);
+    close(h.fds[1]);
+}
+END_TEST
+
+START_TEST(test_announce_missing_descriptors)
+{
+    harness h;
+    memset(&h.state, 0, sizeof(h.state));
+    h.state.fail_get_descriptor = 1;
+    h.dev.ops = &FAKE_OPS;
+    h.dev.state = &h.state;
+    h.ctx.bus = 0;
+    h.ctx.device = 1;
+    ck_assert_int_eq(socketpair(AF_UNIX, SOCK_STREAM, 0, h.fds), 0);
+    ck_assert_int_eq(pthread_create(&h.thread, NULL, engine_thread, &h), 0);
+
+    usb_hello_header_t hello;
+    memset(&hello, 0, sizeof(hello));
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_HELLO, 0, &hello, sizeof(hello), &h.ctx), 0);
+
+    usb_header_t hdr;
+    uint8_t buf[USB_VCR_BUF_SIZE];
+    size_t len;
+    ck_assert_int_eq(peer_recv(&h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_HELLO);
+
+    pthread_join(h.thread, NULL);
+    close(h.fds[0]);
+    close(h.fds[1]);
+}
+END_TEST
+
+START_TEST(test_announce_bad_config)
+{
+    static const uint8_t bad_cfg[2] = { 0x00, 0x02 }; /* blen == 0 triggers desc_parse_config error */
+    harness h;
+    memset(&h.state, 0, sizeof(h.state));
+    h.state.custom_cfg_desc = bad_cfg;
+    h.state.custom_cfg_desc_len = sizeof(bad_cfg);
+    h.dev.ops = &FAKE_OPS;
+    h.dev.state = &h.state;
+    h.ctx.bus = 0;
+    h.ctx.device = 1;
+    ck_assert_int_eq(socketpair(AF_UNIX, SOCK_STREAM, 0, h.fds), 0);
+    ck_assert_int_eq(pthread_create(&h.thread, NULL, engine_thread, &h), 0);
+
+    usb_hello_header_t hello;
+    memset(&hello, 0, sizeof(hello));
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_HELLO, 0, &hello, sizeof(hello), &h.ctx), 0);
+
+    usb_header_t hdr;
+    uint8_t buf[USB_VCR_BUF_SIZE];
+    size_t len;
+    ck_assert_int_eq(peer_recv(&h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_HELLO);
+
+    /* Engine fails at announce_device and terminates */
+    pthread_join(h.thread, NULL);
+    close(h.fds[0]);
+    close(h.fds[1]);
+}
+END_TEST
+
+START_TEST(test_control_large_payload)
+{
+    harness h;
+    harness_start(&h);
+    uint8_t large_buf[4090];
+    memset(large_buf, 0x55, sizeof(large_buf));
+    h.state.control_ret = 0;
+    h.state.large_control_data = large_buf;
+    h.state.control_data_len = sizeof(large_buf);
+    peer_handshake(&h, NULL);
+
+    usb_control_packet_header_t setup;
+    memset(&setup, 0, sizeof(setup));
+    setup.requesttype = USB_DIR_IN | USB_TYPE_CLASS;
+    setup.request     = 0x99;
+    setup.length      = sizeof(large_buf);
+    peer_send_control(&h, 88, &setup);
+
+    usb_header_t hdr;
+    uint8_t *resp = malloc(USB_VCR_BUF_SIZE);
+    size_t len;
+    ck_assert_int_eq(peer_recv(&h, &hdr, resp, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_CONTROL_PACKET);
+
+    usb_control_packet_header_t reply;
+    memcpy(&reply, resp, sizeof(reply));
+    ck_assert_uint_eq(reply.status, 0);
+    ck_assert_uint_eq(reply.length, sizeof(large_buf));
+    ck_assert_mem_eq(resp + sizeof(reply), large_buf, sizeof(large_buf));
+
+    free(resp);
+    harness_stop(&h);
+}
+END_TEST
+
+START_TEST(test_control_get_descriptor_stall)
+{
+    harness h;
+    harness_start(&h);
+    peer_handshake(&h, NULL);
+
+    usb_control_packet_header_t setup;
+    memset(&setup, 0, sizeof(setup));
+    setup.requesttype = USB_DIR_IN;
+    setup.request     = USB_REQ_GET_DESCRIPTOR;
+    setup.value       = (0x99 << 8); /* Unknown descriptor type */
+    setup.length      = 8;
+    peer_send_control(&h, 45, &setup);
+
+    usb_header_t hdr;
+    uint8_t buf[USB_VCR_BUF_SIZE];
+    size_t len;
+    ck_assert_int_eq(peer_recv(&h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_CONTROL_PACKET);
+
+    usb_control_packet_header_t reply;
+    memcpy(&reply, buf, sizeof(reply));
+    ck_assert_uint_eq(reply.status, 1); /* STALL */
+    ck_assert_uint_eq(reply.length, 0);
+
+    harness_stop(&h);
+}
+END_TEST
+
+START_TEST(test_control_get_status)
+{
+    harness h;
+    harness_start(&h);
+    peer_handshake(&h, NULL);
+
+    usb_control_packet_header_t setup;
+    memset(&setup, 0, sizeof(setup));
+    setup.requesttype = USB_DIR_IN | 0x00; /* Device recipient */
+    setup.request     = USB_REQ_GET_STATUS;
+    setup.length      = 2;
+    peer_send_control(&h, 46, &setup);
+
+    usb_header_t hdr;
+    uint8_t buf[USB_VCR_BUF_SIZE];
+    size_t len;
+    ck_assert_int_eq(peer_recv(&h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_CONTROL_PACKET);
+
+    usb_control_packet_header_t reply;
+    memcpy(&reply, buf, sizeof(reply));
+    ck_assert_uint_eq(reply.status, 0);
+    ck_assert_uint_eq(reply.length, 2);
+    ck_assert_uint_eq(buf[sizeof(reply)], 0x01); /* Self-powered */
+    ck_assert_uint_eq(buf[sizeof(reply) + 1], 0x00);
+
+    harness_stop(&h);
+}
+END_TEST
+
+START_TEST(test_set_alt_setting)
+{
+    harness h;
+    harness_start(&h);
+    peer_handshake(&h, NULL);
+
+    usb_set_alt_setting_header_t req = {
+        .interface = 1,
+        .alt = 2,
+    };
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_SET_ALT_SETTING, 13, &req, sizeof(req), &h.ctx), 0);
+
+    usb_header_t hdr;
+    uint8_t buf[USB_VCR_BUF_SIZE];
+    size_t len;
+    ck_assert_int_eq(peer_recv(&h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_ALT_SETTING_STATUS);
+
+    usb_alt_setting_status_header_t reply;
+    memcpy(&reply, buf, sizeof(reply));
+    ck_assert_uint_eq(reply.status, 0);
+    ck_assert_uint_eq(reply.interface, 1);
+    ck_assert_uint_eq(reply.alt, 2);
+
+    harness_stop(&h);
+}
+END_TEST
+
+START_TEST(test_iso_stream)
+{
+    static const uint8_t isoc_data[16] = "ISO_STREAM_TEST";
+    harness h;
+    harness_start(&h);
+    h.state.ep_in_ep = 0x82;
+    h.state.ep_in_data = isoc_data;
+    h.state.ep_in_len = sizeof(isoc_data);
+    peer_handshake(&h, NULL);
+
+    /* Start ISO stream on EP 0x82 */
+    uint8_t ep = 0x82;
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_START_ISO_STREAM, 20, &ep, 1, &h.ctx), 0);
+
+    usb_header_t hdr;
+    uint8_t buf[USB_VCR_BUF_SIZE];
+    size_t len;
+    ck_assert_int_eq(peer_recv(&h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_ISO_STREAM_STATUS);
+    usb_iso_stream_status_header_t isostatus;
+    memcpy(&isostatus, buf, sizeof(isostatus));
+    ck_assert_uint_eq(isostatus.status, 0);
+    ck_assert_uint_eq(isostatus.endpoint, 0x82);
+
+    /* Wait for idle tick to poll ISO endpoints and push packet */
+    ck_assert_int_eq(peer_recv(&h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_ISO_PACKET);
+    usb_iso_packet_header_t isohdr;
+    memcpy(&isohdr, buf, sizeof(isohdr));
+    ck_assert_uint_eq(isohdr.endpoint, 0x82);
+    ck_assert_uint_eq(isohdr.length, sizeof(isoc_data));
+    ck_assert_mem_eq(buf + sizeof(isohdr), isoc_data, sizeof(isoc_data));
+
+    /* Stop ISO stream */
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_STOP_ISO_STREAM, 21, &ep, 1, &h.ctx), 0);
+    ck_assert_int_eq(peer_recv(&h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_ISO_STREAM_STATUS);
+
+    harness_stop(&h);
+}
+END_TEST
+
+START_TEST(test_bulk_in_and_out)
+{
+    static const uint8_t bulk_data[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    harness h;
+    harness_start(&h);
+    h.state.ep_in_ep = 0x82;
+    h.state.ep_in_data = bulk_data;
+    h.state.ep_in_len = sizeof(bulk_data);
+    peer_handshake(&h, NULL);
+
+    /* 1. Test Bulk IN: Host requests 8 bytes from EP 0x82 */
+    usb_bulk_packet_header_t in_req = {
+        .endpoint = 0x82,
+        .status = 0,
+        .length = 8,
+        .length_high = 0,
+    };
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_BULK_PACKET, 30, &in_req, sizeof(in_req), &h.ctx), 0);
+
+    usb_header_t hdr;
+    uint8_t buf[USB_VCR_BUF_SIZE];
+    size_t len;
+    ck_assert_int_eq(peer_recv(&h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_BULK_PACKET);
+    ck_assert_int_eq(hdr.id, 30);
+
+    usb_bulk_packet_header_t in_resp;
+    memcpy(&in_resp, buf, sizeof(in_resp));
+    ck_assert_uint_eq(in_resp.endpoint, 0x82);
+    ck_assert_uint_eq(in_resp.length, 8);
+    ck_assert_mem_eq(buf + sizeof(in_resp), bulk_data, 8);
+
+    /* 1b. Test Bulk IN clamp when requested length exceeds max_in */
+    h.state.ep_in_sent = 0;
+    usb_bulk_packet_header_t large_in_req = {
+        .endpoint = 0x82,
+        .status = 0,
+        .length = 0xFFFF,
+        .length_high = 0x0002,
+    };
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_BULK_PACKET, 35, &large_in_req, sizeof(large_in_req), &h.ctx), 0);
+    ck_assert_int_eq(peer_recv(&h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_BULK_PACKET);
+
+    /* 1c. Test Bulk packet too short (dropped) */
+    uint8_t short_bulk[3] = { 0x01, 0x02, 0x03 };
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_BULK_PACKET, 36, short_bulk, sizeof(short_bulk), &h.ctx), 0);
+
+    /* 2. Test Bulk OUT: Host sends 5 bytes to EP 0x02 */
+    uint8_t out_frame[sizeof(usb_bulk_packet_header_t) + 5];
+    usb_bulk_packet_header_t out_req = {
+        .endpoint = 0x02,
+        .status = 0,
+        .length = 5,
+        .length_high = 0,
+    };
+    memcpy(out_frame, &out_req, sizeof(out_req));
+    memcpy(out_frame + sizeof(out_req), "HELLO", 5);
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_BULK_PACKET, 31, out_frame, sizeof(out_frame), &h.ctx), 0);
+
+    ck_assert_int_eq(peer_recv(&h, &hdr, buf, &len), 0);
+    ck_assert_uint_eq(hdr.type, RT_BULK_PACKET);
+    ck_assert_int_eq(hdr.id, 31);
+
+    harness_stop(&h);
+
+    ck_assert_uint_eq(h.state.ep_out_ep, 0x02);
+    ck_assert_uint_eq(h.state.ep_out_len, 5);
+    ck_assert_mem_eq(h.state.ep_out_buf, "HELLO", 5);
+}
+END_TEST
+
+START_TEST(test_bus_reset_cancel_and_unhandled)
+{
+    harness h;
+    harness_start(&h);
+    peer_handshake(&h, NULL);
+
+    /* Stop interrupt receiving */
+    uint8_t ep = 0x81;
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_STOP_INTERRUPT_RECEIVING, 0, &ep, 1, &h.ctx), 0);
+
+    /* Bus reset */
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_RESET, 0, NULL, 0, &h.ctx), 0);
+
+    /* Cancel data packet */
+    ck_assert_int_eq(usb_conn_send(h.fds[0], RT_CANCEL_DATA_PACKET, 999, NULL, 0, &h.ctx), 0);
+
+    /* Unhandled packet type */
+    ck_assert_int_eq(usb_conn_send(h.fds[0], 0xFE, 1000, NULL, 0, &h.ctx), 0);
+
+    harness_stop(&h);
+}
+END_TEST
+
 /* ------------------------------------------------------------------ */
 
 static Suite *usb_core_suite(void)
@@ -519,6 +951,10 @@ static Suite *usb_core_suite(void)
     TCase *tc_hs = tcase_create("handshake");
     tcase_add_test(tc_hs, test_handshake_and_announce);
     tcase_add_test(tc_hs, test_announce_speed_override);
+    tcase_add_test(tc_hs, test_announce_superspeed_and_caps);
+    tcase_add_test(tc_hs, test_handshake_bad_packet);
+    tcase_add_test(tc_hs, test_announce_missing_descriptors);
+    tcase_add_test(tc_hs, test_announce_bad_config);
     suite_add_tcase(s, tc_hs);
 
     TCase *tc_ctl = tcase_create("control");
@@ -526,16 +962,23 @@ static Suite *usb_core_suite(void)
     tcase_add_test(tc_ctl, test_control_backend_handled);
     tcase_add_test(tc_ctl, test_control_stall);
     tcase_add_test(tc_ctl, test_control_too_short);
+    tcase_add_test(tc_ctl, test_control_large_payload);
+    tcase_add_test(tc_ctl, test_control_get_descriptor_stall);
+    tcase_add_test(tc_ctl, test_control_get_status);
     suite_add_tcase(s, tc_ctl);
 
     TCase *tc_cfg = tcase_create("config");
     tcase_add_test(tc_cfg, test_set_configuration);
+    tcase_add_test(tc_cfg, test_set_alt_setting);
     suite_add_tcase(s, tc_cfg);
 
     TCase *tc_ep = tcase_create("endpoints");
     tcase_add_test(tc_ep, test_interrupt_in);
     tcase_add_test(tc_ep, test_interrupt_out);
     tcase_add_test(tc_ep, test_idle_tick);
+    tcase_add_test(tc_ep, test_iso_stream);
+    tcase_add_test(tc_ep, test_bulk_in_and_out);
+    tcase_add_test(tc_ep, test_bus_reset_cancel_and_unhandled);
     suite_add_tcase(s, tc_ep);
 
     return s;

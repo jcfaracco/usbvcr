@@ -1,0 +1,347 @@
+version: "1.0"
+name: "composite_flow"
+
+# ==============================================================================
+# 1. COMMON RULES (Global Device-Level Rules)
+# ==============================================================================
+# Rules defined in 'common_rules' are evaluated for every packet across ALL
+# states and ALL state machines. Use this to handle standard USB enumeration
+# requests (GET_DESCRIPTOR, SET_CONFIGURATION) once, without repeating them.
+common_rules:
+  # Standard GET_DESCRIPTOR (device)
+  - match:
+      bmRequestType: 0x80
+      bRequest: 6
+      wValue: 0x0100
+    actions:
+      - respond_with: "$device.device_descriptor"
+
+  # Standard GET_DESCRIPTOR (configuration)
+  - match:
+      bmRequestType: 0x80
+      bRequest: 6
+      wValue: 0x0200
+    actions:
+      - respond_with: "$device.configurations[0]"
+
+  # Standard GET_DESCRIPTOR (string descriptors)
+  - match:
+      bmRequestType: 0x80
+      bRequest: 6
+      wValue: 0x0300
+    actions:
+      - respond_with:
+          hex: "04030904" # LangID English (0x0409)
+
+  - match:
+      bmRequestType: 0x80
+      bRequest: 6
+      wValue: 0x0301
+    actions:
+      - respond_with:
+          hex: "200355005300420020005600430052002000500072006F006A00650063007400" # "USB VCR Project"
+
+  - match:
+      bmRequestType: 0x80
+      bRequest: 6
+      wValue: 0x0302
+    actions:
+      - respond_with:
+          hex: "4A035600690072007400750061006C00200043006F006D0070006F0073006900740065002000570065006200630061006D00200026002000540065006C0065006D006500740072007900" # "Virtual Composite Webcam & Telemetry"
+
+  # Standard SET_CONFIGURATION(1)
+  - match:
+      bmRequestType: 0x00
+      bRequest: 9
+      wValue: 1
+    actions:
+      - respond_with_status: 0
+
+
+# ==============================================================================
+# 2. ORTHOGONAL STATE MACHINES (Per-Interface Concurrent FSMs)
+# ==============================================================================
+# In a composite USB device, each interface represents an independent function
+# (e.g. video streaming, audio, HID buttons, or telemetry).
+# Rather than managing one monolithic state explosion, 'machines:' allows running
+# independent state machines in parallel.
+machines:
+
+  # ----------------------------------------------------------------------------
+  # Machine A: Video Streaming State Machine (Interface 1)
+  # ----------------------------------------------------------------------------
+  - name: "video_stream"
+    interface: 1
+    states:
+
+      # Initial state: Standby (AltSetting 0, zero bandwidth allocated)
+      - name: "idle"
+        rules:
+          # UVC VS PROBE_CONTROL (cs=0x01) GET_CUR / GET_MIN / GET_MAX / GET_DEF
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x81
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0x81
+              bRequest: 0x81
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x82
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0x81
+              bRequest: 0x82
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x83
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0x81
+              bRequest: 0x83
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x87
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0x81
+              bRequest: 0x87
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+
+          # UVC VS COMMIT_CONTROL (cs=0x02) GET_CUR / GET_MIN / GET_MAX / GET_DEF
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x81
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0x81
+              bRequest: 0x81
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x82
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x83
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x87
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with: "$device.probe_commit_response"
+
+          # UVC PROBE_CONTROL and COMMIT_CONTROL SET_CUR
+          - match:
+              bmRequestType: 0x21
+              bRequest: 0x01
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with_status: 0
+          - match:
+              bmRequestType: 0x01
+              bRequest: 0x01
+              wValue: 0x0100
+              wIndex: 0x0001
+            actions:
+              - respond_with_status: 0
+          - match:
+              bmRequestType: 0x21
+              bRequest: 0x01
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with_status: 0
+          - match:
+              bmRequestType: 0x01
+              bRequest: 0x01
+              wValue: 0x0200
+              wIndex: 0x0001
+            actions:
+              - respond_with_status: 0
+
+          # SU4 selector unit controls (unit 4, iface 0)
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x81
+              wValue: 0x0100
+              wIndex: 0x0004
+            actions:
+              - respond_with: "$device.selector_input_response"
+          - match:
+              bmRequestType: 0x81
+              bRequest: 0x81
+              wValue: 0x0100
+              wIndex: 0x0004
+            actions:
+              - respond_with: "$device.selector_input_response"
+          - match:
+              bmRequestType: 0x21
+              bRequest: 0x01
+              wValue: 0x0100
+              wIndex: 0x0004
+            actions:
+              - respond_with_status: 0
+          - match:
+              bmRequestType: 0x01
+              bRequest: 0x01
+              wValue: 0x0100
+              wIndex: 0x0004
+            actions:
+              - respond_with_status: 0
+
+          # Processing unit (unit 5, iface 0)
+          - match:
+              bmRequestType: 0xA1
+              bRequest: 0x81
+              wValue: 0x0100
+              wIndex: 0x0005
+            actions:
+              - respond_with:
+                  hex: "0100"
+
+          # Host requests Alternate Setting 1 to start video streaming.
+          # SYNCHRONOUS TRANSITION: transitions state immediately upon matching,
+          # so the very next packet requested is serviced in the 'streaming' state!
+          - match:
+              bmRequestType: 0x01
+              bRequest: 0x0B
+              wValue: 0x0001
+              wIndex: 0x0001
+            actions:
+              - respond_with_status: 0
+              - transition_state: "streaming"
+
+          # When idle, polling the isochronous video endpoint returns NAK
+          - match:
+              endpoint_poll: 0x82
+            actions:
+              - return_nak_if_queue_empty: true
+
+      # Active streaming state:
+      # STATE INHERITANCE: 'extends: "idle"' inherits all probe/commit control rules
+      # and descriptor handling from 'idle'. We only override what changes!
+      - name: "streaming"
+        extends: "idle"
+        rules:
+          # Host requests Alternate Setting 0 to stop video streaming -> transition back to idle
+          - match:
+              bmRequestType: 0x01
+              bRequest: 0x0B
+              wValue: 0x0000
+              wIndex: 0x0001
+            actions:
+              - respond_with_status: 0
+              - transition_state: "idle"
+
+          # STREAMING ENDPOINT PROVIDER:
+          # Streams live MJPEG video frames directly to isochronous EP 0x82!
+          - match:
+              endpoint_poll: 0x82
+            actions:
+              - stream_from_file:
+                  file: "payloads/stream.mjpeg"
+                  loop: true
+
+
+  # ----------------------------------------------------------------------------
+  # Machine B: Camera Telemetry & Privacy Control (Interface 2)
+  # ----------------------------------------------------------------------------
+  - name: "camera_telemetry"
+    interface: 2
+    states:
+
+      # Initial state: Normal operating mode
+      - name: "normal"
+        on_enter:
+          # Queue an initial status packet on interrupt endpoint 0x83
+          - queue_endpoint_data:
+              endpoint: 0x83
+              payloads:
+                - hex: "0100" # Status byte: Normal (0x00)
+
+        rules:
+          # Vendor Control Request: Enable Privacy Mode (e.g. physical privacy shutter closed)
+          - match:
+              bmRequestType: 0x41
+              bRequest: 0x10
+              wValue: 0x0001
+            actions:
+              - respond_with_status: 0
+              - transition_state: "privacy_mode"
+
+          # Endpoint poll on 0x83 returns NAK once telemetry queue is empty
+          - match:
+              endpoint_poll: 0x83
+            actions:
+              - return_nak_if_queue_empty: true
+
+      # Privacy Shutter Activated:
+      # Extends 'normal', but on enter alerts the host and forces the video machine to idle
+      - name: "privacy_mode"
+        extends: "normal"
+        on_enter:
+          - queue_endpoint_data:
+              endpoint: 0x83
+              payloads:
+                - hex: "0101" # Status byte: Privacy Enabled (0x01)
+
+          # CROSS-MACHINE TRANSITION:
+          # Transition an orthogonal state machine to a specific state using dot notation
+          # or the machine: / state: structure. Here, entering privacy mode forces
+          # the video streaming machine back into 'idle'!
+          - transition_state:
+              machine: "video_stream"
+              state: "idle"
+
+        rules:
+          # Vendor Control Request: Disable Privacy Mode
+          - match:
+              bmRequestType: 0x41
+              bRequest: 0x10
+              wValue: 0x0000
+            actions:
+              - respond_with_status: 0
+              - transition_state: "normal"

@@ -16,6 +16,7 @@ lib_sources = files(
   'stream/video_parser.c',
   'stream/stream_provider.c',
   'storage/disk_provider.c',
+  'exec_provider.c',
 )
 
 if have_local_engine

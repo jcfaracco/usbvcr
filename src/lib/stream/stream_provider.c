@@ -161,3 +161,30 @@ void stream_provider_free(stream_provider_t *p)
     g_free(p->file_path);
     g_free(p);
 }
+
+static int stream_produce_in(void *ctx, uint8_t ep, uint8_t *buf, size_t cap)
+{
+    return stream_provider_produce_packet((stream_provider_t *)ctx, ep, buf, cap);
+}
+
+static void stream_tick_op(void *ctx)
+{
+    stream_provider_tick((stream_provider_t *)ctx);
+}
+
+static void stream_free_op(void *ctx)
+{
+    stream_provider_free((stream_provider_t *)ctx);
+}
+
+static const flow_endpoint_ops_t stream_endpoint_ops = {
+    .produce_in = stream_produce_in,
+    .consume_out = NULL,
+    .tick = stream_tick_op,
+    .free = stream_free_op,
+};
+
+const flow_endpoint_ops_t *stream_provider_get_ops(void)
+{
+    return &stream_endpoint_ops;
+}

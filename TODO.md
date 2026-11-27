@@ -31,38 +31,6 @@ This makes debugging malformed manifests difficult because it provides:
 
 ---
 
-### `[flow/decouple]` Decouple protocol-specific logic (MSC BOT / SCSI) and streaming from generic flow engine
-**File:** `src/lib/flow.c:65, 542-551, 662-667`, `src/lib/flow.h`, `src/lib/storage/disk_provider.c`, `src/lib/stream/stream_provider.c`
-**Complexity:** High
-
-The generic flow engine currently has device-class-specific framing and protocol logic
-hardcoded directly into its structures and packet handlers:
-* `flow_t` carries USB Mass Storage (MSC) Command Block Wrapper (CBW) tracking state (`last_cbw_tag[4]` and `has_cbw_tag`).
-* `flow_ep_out()` inspects payload length and checks `memcmp(buf, "USBC", 4) == 0` to intercept MSC CBW tags.
-* `execute_actions()` (`ACT_QUEUE_ENDPOINT_DATA`) dynamically rewrites bytes 4..7 of 13-byte Command Status Wrappers (`USBS`) to match the intercepted CBW tag.
-* `ACT_DISK_FROM_FILE` and `ACT_STREAM_FROM_FILE` are baked as monolithic action types into `flow_action_type_t`, embedding SCSI command execution (`disk_provider`) and MJPEG parsing (`stream_provider`) inside `flow.c`.
-* `stream_provider` is duplicated: checked both as a flow action and separately on `yaml_backend_state_t` (`yb_ep_in` and `yb_tick`).
-
-**Target Improvements:**
-* Remove CBW/CSW tag tracking and magic byte checks from `flow.c`.
-* Replace `ACT_DISK_FROM_FILE` and `ACT_STREAM_FROM_FILE` with a generic endpoint provider/filter interface (`flow_bind_endpoint(ep, provider_ops)`).
-* Encapsulate BOT framing and SCSI CDB handling entirely inside `disk_provider`.
-* Unify endpoint streaming and packet consumption into a single dispatch path.
-
----
-
-### `[yaml/loader]` Flow model is not loaded from `flows/` (manifest step 4 is dead)
-**File:** `src/lib/yaml/loader.h:39`, `src/lib/yaml/loader.c:10`
-**Complexity:** Medium
-
-`yaml_dev_entry_t.flow` is populated by `flow_load(e->flow_path)` already,
-but the YAML loader's own manifest step 4 — scanning the `flows/` directory
-and wiring each loaded `Flow*` into the device model — is not implemented.
-Devices that rely on a flow for their `ep_in` / `ep_out` / `control`
-behaviour will silently get a NULL flow and fall through every match.
-
----
-
 ### `[yaml/loader]` `parse_tests()` is a no-op stub
 **File:** `src/lib/yaml/loader.c:101-105`
 **Complexity:** Medium
@@ -84,19 +52,6 @@ runtime.
 
 ## Medium Priority
 
-### `[architecture/engine-ops]` Standardize execution engines on an `engine_ops_t` interface
-**File:** `src/engine/qemu_engine.h`, `src/engine/local_engine.h`, `src/main.c:241-261`
-**Complexity:** Medium
-
-Backends are cleanly abstracted behind `usb_device_ops_t` (`yaml_backend`, `pcap_backend`),
-allowing `main.c` to swap them seamlessly. However, execution engines (`qemu_engine` vs
-`local_engine`) are hardcoded in `main.c` behind branching `if (use_local) ... else ...` blocks.
-Introducing a standardized `usb_engine_ops_t` interface (`init`, `run`, `stop`, `cleanup`) will:
-* Decouple `main.c` from target engine runtime specifics.
-* Allow engines to be selected and configured dynamically via CLI or manifest (`connection.engine`).
-* Provide a clean extension point for future execution targets (e.g. USBIP daemon, WebUSB, or Linux kernel vhci-hcd).
-
----
 
 ### `[style/memory]` Standardize memory management on GLib primitives and `g_auto*` macros
 **File:** `src/core/usb_core.c:194, 558, 611`, `src/lib/pcap/pcap.c`, `src/lib/`
@@ -122,43 +77,6 @@ cause of error. Callers are unable to distinguish between I/O errors, YAML synta
 schema validation failures, or missing files. Standardizing these APIs to follow the GLib
 `GError **error` convention (`USBVCR_ERROR` quark) enables rich, context-aware error propagation
 directly up to CLI diagnostic outputs and test suites.
-
----
-
-### `[flow/rules]` Common/global rules and state inheritance for flow FSM
-**File:** `src/lib/flow.c:575-603`, `src/lib/flow.h`
-**Complexity:** Medium
-
-The flow engine matches rules strictly within the current state (`flow->state`).
-Because USB hosts can re-request descriptors or standard requests (`GET_DESCRIPTOR`,
-`SET_CONFIGURATION`, `GET_REPORT`) at any time, every state in a multi-state flow
-(such as `idle` and `streaming` in UVC) is forced to duplicate ~150 lines of
-standard enumeration rules. In simpler devices (e.g. keyboards), authors are forced
-to collapse the entire device into a single monolithic state.
-
-**Target Improvements:**
-* Add a `common_rules:` block in YAML flow definitions that applies across all states.
-* Support state inheritance (`states: - name: streaming, extends: idle`).
-* In `flow_control()`, evaluate `st->rules` first; if unhandled, fall through to `common_rules`.
-
----
-
-### `[flow]` Orthogonal (and hierarchical) state machine support
-**File:** `src/lib/flow.c`, `src/lib/flow.h`
-**Complexity:** High
-
-The current flow state machine is flat: it tracks a single global scalar state
-(`flow->state`), which requires duplicating common rules (such as standard
-descriptors and control transfers) across all operational states (`idle`,
-`streaming`, etc.).
-
-For composite USB devices (e.g., webcam with VideoControl, VideoStreaming,
-and Audio interfaces), alternate settings and endpoint lifecycles across
-interfaces are completely independent. Supporting **orthogonal state machines**
-(concurrent, parallel state machines running per interface or component) and
-**hierarchical states** (nested sub-states inheriting rules from parent states)
-will prevent combinatorial state explosion and naturally model independent
-interface behaviors.
 
 ---
 
@@ -196,19 +114,6 @@ executes `g_strsplit()` and walks the `usb_node_t` property tree on the hot path
 every single control transaction. Resolving these symbolic references once during
 flow loading and caching direct byte slice pointers will eliminate repeated heap
 allocations and string parsing during USB enumeration.
-
----
-
-### `[flow/transitions]` Synchronous state transitions on packet handling
-**File:** `src/lib/flow.c:529-533, 715-724`
-**Complexity:** Low
-
-`ACT_TRANSITION_STATE` only updates `flow->next_state`. The actual state change and
-execution of `on_enter` actions are deferred until the next `flow_tick()` call.
-In scenarios where subsequent packets arrive before the tick executes, or where
-an action requires immediate state progression, this can lead to subtle race conditions
-or dropped packet matches. Transitions should be applied synchronously upon action
-completion or provide explicit atomic transition semantics.
 
 ---
 
@@ -281,76 +186,8 @@ enumerate correctly.
 
 ## Low Priority
 
-### `[bytes/endianness]` Standardize multi-byte wire serialization via `bytes.h` helpers
-**File:** `src/lib/flow.c:184-188`, `src/lib/storage/disk_provider.c:141-144, 188-196`, `src/core/bytes.h`
-**Complexity:** Low
-
-Several modules perform manual bitwise shifts (e.g. `buf[0] | (buf[1] << 8)`) or raw byte
-casts for little-endian decoding and encoding, rather than using the inline primitives defined
-in `src/core/bytes.h` (`get_u16le()`, `get_u32le()`, `put_u16le()`, `put_u32le()`). Standardizing
-all multi-byte wire manipulations across `flow.c`, `disk_provider.c`, and `usb_core.c` guarantees
-unaligned access safety, strict-aliasing compliance, and platform portability.
+*(No open low-priority items currently tracked.)*
 
 ---
 
-### `[style/formatting]` Enforce GNOME / GLib coding standards with `.clang-format`
-**File:** `.clang-format`, `meson.build`
-**Complexity:** Low
-
-The project protocol specifies GNOME coding style (4 spaces indentation, braces on new lines
-for control statements, function header variable declarations, `_t` typedefs). Currently, style
-conventions vary across files (mix of K&R braces, mid-scope declarations, and single-line blocks).
-Adding a repository-level `.clang-format` matching GNOME/GLib rules along with a Meson `format`
-or `lint` build target will provide automated enforcement.
-
----
-
-### `[lib/utils]` `trim_string()` could be replaced by a GLib call
-**File:** `src/lib/utils.c:47`
-**Complexity:** Low
-
-The hand-rolled `trim_string` duplicates functionality already available in
-GLib. `g_strstrip()` (in-place) or a combination of `g_strchomp()` /
-`g_strchug()` could replace it. Worth evaluating once the dependency on the
-`#` comment-stripping behaviour is clarified — GLib's strip does not strip
-`#`-delimited comments.
-
----
-
-### `[fuzz]` Fuzzer has no corpus coverage for multi-configuration devices
-**File:** `src/fuzz/fuzz.c` — `fuzz_mutate_descriptor()`
-**Complexity:** Medium
-
-The structure-aware descriptor mutator walks descriptors by `bLength` but
-starts at offset 0, implicitly treating the whole buffer as a single
-configuration. A device with multiple `bNumConfigurations > 1` and a
-wTotalLength-delimited config boundary is not modelled. The corpus should
-include multi-config descriptors and the walker should respect
-`wTotalLength`.
-
----
-
-### `[pcap]` pcap writer does not check `fwrite` return values
-**File:** `src/lib/pcap/pcap.c` — `pcap_writer_add_pcap()`,
-`pcap_writer_add_pcapng()`, `pcap_writer_open_legacy_header()`,
-`pcap_writer_open_ng_header()`
-**Complexity:** Low
-
-All `fwrite` calls in the writer path silently discard their return value.
-A full disk or a closed file descriptor would corrupt the output file without
-any error being surfaced to the caller. Each write should be checked and the
-writer should propagate an error code up to `pcap_writer_add()`.
-
----
-
-### `[ffs]` `ffs_teardown()` does not check `umount()` / `rmdir()` errors
-**File:** `src/lib/ffs/ffs.c` — `ffs_teardown()`
-**Complexity:** Low
-
-`umount()`, `rmdir()`, and `unlink()` return values are silently discarded.
-A failed unmount (e.g. the mount point is busy) leaves a stale gadget bound
-to the UDC. Each syscall should be checked and logged on failure.
-
----
-
-*Last updated: 2026-11-25*
+*Last updated: 2026-11-26*

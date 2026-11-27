@@ -1,0 +1,7 @@
+device_descriptor:
+  template: "msc.device_descriptor"
+  idVendor: 0x0951          # Kingston Technology
+  idProduct: 0x1666         # DataTraveler 100 G3
+
+configurations:
+  - template: "msc.configuration_descriptor"

@@ -1,0 +1,11 @@
+version: "1.0"
+name: "Virtual Kingston DataTraveler"
+
+connection:
+  engine: "qemu"
+  host: "127.0.0.1"
+  port: "4001"
+
+devices:
+  - device: "devices/msc_kingston.yaml"
+    flow: "flows/msc_flow.yaml"

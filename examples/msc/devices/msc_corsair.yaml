@@ -1,0 +1,7 @@
+device_descriptor:
+  template: "msc.device_descriptor"
+  idVendor: 0x1b1c          # Corsair
+  idProduct: 0x1a03         # Flash Voyager
+
+configurations:
+  - template: "msc.configuration_descriptor"

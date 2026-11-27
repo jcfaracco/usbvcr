@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <check.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <glib.h>
 
 #include "flow.h"
@@ -708,6 +709,71 @@ START_TEST(test_flow_load_malformed_syntax)
 }
 END_TEST
 
+START_TEST(test_flow_bind_and_unbind_provider)
+{
+    g_autofree char *tmp = g_dir_make_tmp("usbvcr_flow_prov_XXXXXX", NULL);
+    g_autofree char *script_path = g_strdup_printf("%s/echo.sh", tmp);
+    g_autofree char *flow_path = g_strdup_printf("%s/flow.yaml", tmp);
+
+    const char *script_content = "#!/bin/sh\nwhile dd bs=4 count=1 2>/dev/null; do :; done\n";
+    ck_assert(g_file_set_contents(script_path, script_content, -1, NULL));
+    chmod(script_path, 0755);
+
+    const char *flow_yaml =
+        "version: \"1.0\"\n"
+        "states:\n"
+        "  - name: \"init\"\n"
+        "    rules: []\n"
+        "  - name: \"active\"\n"
+        "    on_enter:\n"
+        "      - bind_provider:\n"
+        "          driver: \"exec\"\n"
+        "          endpoints:\n"
+        "            in: 0x81\n"
+        "            out: 0x01\n"
+        "          config:\n"
+        "            command: \"./echo.sh\"\n"
+        "  - name: \"idle\"\n"
+        "    on_enter:\n"
+        "      - unbind_provider:\n"
+        "          endpoints: [0x81, 0x01]\n";
+
+    ck_assert(g_file_set_contents(flow_path, flow_yaml, -1, NULL));
+
+    flow_t *f = flow_load(flow_path);
+    ck_assert_ptr_nonnull(f);
+    ck_assert_str_eq(flow_current_state(f), "init");
+
+    /* Transition to active triggers on_enter and binds the provider */
+    ck_assert_int_eq(flow_transition_to(f, "active"), 0);
+    ck_assert_str_eq(flow_current_state(f), "active");
+
+    /* Test sending data OUT to the process */
+    ck_assert_int_eq(flow_ep_out(f, 0x01, (const uint8_t *)"ping", 4), 0);
+
+    /* Allow the subprocess to echo back through pipe */
+    usleep(30000);
+
+    /* Test receiving data IN from the process */
+    uint8_t in_buf[16] = {0};
+    int n = flow_ep_in(f, 0x81, in_buf, sizeof(in_buf));
+    ck_assert_int_eq(n, 4);
+    ck_assert_mem_eq(in_buf, "ping", 4);
+
+    ck_assert_int_eq(flow_transition_to(f, "idle"), 0);
+    ck_assert_str_eq(flow_current_state(f), "idle");
+
+    memset(in_buf, 0, sizeof(in_buf));
+    ck_assert_int_eq(flow_ep_in(f, 0x81, in_buf, sizeof(in_buf)), 0);
+
+    flow_free(f);
+
+    unlink(script_path);
+    unlink(flow_path);
+    rmdir(tmp);
+}
+END_TEST
+
 static Suite *
 flow_suite(void)
 {
@@ -728,6 +794,7 @@ flow_suite(void)
     tcase_add_test(tc_core, test_flow_ep_in_partial_and_ep_out_logging);
     tcase_add_test(tc_core, test_flow_yaml_edge_cases_and_disk);
     tcase_add_test(tc_core, test_flow_load_malformed_syntax);
+    tcase_add_test(tc_core, test_flow_bind_and_unbind_provider);
     suite_add_tcase(s, tc_core);
 
     return s;

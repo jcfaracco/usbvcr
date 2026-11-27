@@ -1,0 +1,2 @@
+# Exclude external dynamic badges prone to rate-limiting / timeouts
+https://img.shields.io/.*

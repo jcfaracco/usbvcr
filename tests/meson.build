@@ -202,6 +202,7 @@ if check_dep.found()
     ),
     include_directories : [lib],
     dependencies : [check_dep, glib_dep],
+    link_args : ['-Wl,--wrap=fwrite', '-Wl,--wrap=fflush', '-Wl,--wrap=fseek'],
   )
   test('pcap_roundtrip', test_pcap_roundtrip)
 

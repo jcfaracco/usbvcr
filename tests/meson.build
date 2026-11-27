@@ -44,6 +44,18 @@ if check_dep.found()
   )
   test('stream', test_stream, env : test_env)
 
+  test_disk_provider = executable(
+    'test_disk_provider',
+    'lib/test_disk_provider.c',
+    files(
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib, core],
+    dependencies : [check_dep, glib_dep],
+    link_args : ['-Wl,--wrap=fstat64', '-Wl,--wrap=pread64', '-Wl,--wrap=pwrite64'],
+  )
+  test('disk_provider', test_disk_provider, env : test_env)
+
   test_yaml_loader = executable(
     'test_yaml_loader',
     'lib/test_yaml_loader.c',

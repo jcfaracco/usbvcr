@@ -995,7 +995,7 @@ START_TEST(test_ffs_setup_ep0_write_fail)
     /* Pre-create ep0 as a symlink to /dev/full (which fails on write with ENOSPC) */
     g_mkdir_with_parents(ctx->mount_path, 0755);
     g_autofree char *ep0_path = g_strdup_printf("%s/ep0", ctx->mount_path);
-    symlink("/dev/full", ep0_path);
+    ck_assert_int_eq(symlink("/dev/full", ep0_path), 0);
 
     usb_device_ops_t ops;
     memset(&ops, 0, sizeof(ops));

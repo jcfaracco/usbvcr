@@ -122,6 +122,20 @@ if check_dep.found()
   )
   test('usb_node', test_usb_node)
 
+  test_codec = executable(
+    'test_codec',
+    'lib/test_codec.c',
+    files(
+      '../src/lib/yaml/util.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib, core],
+    dependencies : [check_dep, glib_dep, yaml_dep],
+    c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+    link_args : ['-Wl,--wrap=yaml_parser_initialize'],
+  )
+  test('codec', test_codec, env : test_env)
+
   test_descriptor = executable(
     'test_descriptor',
     'lib/test_descriptor.c',

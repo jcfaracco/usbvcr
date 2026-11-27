@@ -7,6 +7,7 @@ main_sources = files(
   'fuzz/fuzz_wrap.c',
   'backends/yaml_backend.c',
   'backends/pcap_backend.c',
+  'engine/engine.c',
   'engine/qemu_engine.c',
 )
 

@@ -18,20 +18,22 @@
 #include <glib.h>
 
 typedef struct {
-    uint8_t  ep_addr;
-    int      fd;
+    uint8_t ep_addr;
+    int fd;
     gboolean is_in;
 } local_ep_t;
 
 static volatile sig_atomic_t g_stop = 0;
 
-static void on_signal(int sig)
+static void
+on_signal(int sig)
 {
     (void)sig;
     g_stop = 1;
 }
 
-static GArray *open_endpoints(ffs_ctx_t *ctx, usb_device_t *dev)
+static GArray *
+open_endpoints(ffs_ctx_t *ctx, usb_device_t *dev)
 {
     const uint8_t *cd;
     uint16_t cdlen;
@@ -60,7 +62,7 @@ static GArray *open_endpoints(ffs_ctx_t *ctx, usb_device_t *dev)
             break;
         }
 
-        if (sub_type == 0x05 && sub_len >= 7)  /* Endpoint descriptor */
+        if (sub_type == 0x05 && sub_len >= 7) /* Endpoint descriptor */
         {
             local_ep_t ep;
             g_autofree char *path = NULL;
@@ -74,10 +76,9 @@ static GArray *open_endpoints(ffs_ctx_t *ctx, usb_device_t *dev)
             if (ep.fd >= 0)
             {
                 g_array_append_val(eps, ep);
-                LOG_INFO("local_engine: opened %s for ep 0x%02x (%s)",
-                         path, ep.ep_addr, ep.is_in ? "IN" : "OUT");
-            }
-            else
+                LOG_INFO("local_engine: opened %s for ep 0x%02x (%s)", path, ep.ep_addr,
+                         ep.is_in ? "IN" : "OUT");
+            } else
             {
                 LOG_WARN("local_engine: failed to open %s: %s", path, g_strerror(errno));
             }
@@ -89,7 +90,8 @@ static GArray *open_endpoints(ffs_ctx_t *ctx, usb_device_t *dev)
     return eps;
 }
 
-static void close_endpoints(GArray *eps)
+static void
+close_endpoints(GArray *eps)
 {
     if (eps == NULL)
     {
@@ -108,9 +110,8 @@ static void close_endpoints(GArray *eps)
     g_array_free(eps, TRUE);
 }
 
-static void handle_control_event(ffs_ctx_t *ctx,
-                                 usb_device_t *dev,
-                                 const struct usb_ctrlrequest *req)
+static void
+handle_control_event(ffs_ctx_t *ctx, usb_device_t *dev, const struct usb_ctrlrequest *req)
 {
     usb_control_packet_header_t setup;
     uint8_t data[USB_VCR_BUF_SIZE];
@@ -119,10 +120,10 @@ static void handle_control_event(ffs_ctx_t *ctx,
 
     memset(&setup, 0, sizeof(setup));
     setup.requesttype = req->bRequestType;
-    setup.request     = req->bRequest;
-    setup.value       = get_u16le((const uint8_t *)&req->wValue);
-    setup.index       = get_u16le((const uint8_t *)&req->wIndex);
-    setup.length      = get_u16le((const uint8_t *)&req->wLength);
+    setup.request = req->bRequest;
+    setup.value = get_u16le((const uint8_t *)&req->wValue);
+    setup.index = get_u16le((const uint8_t *)&req->wIndex);
+    setup.length = get_u16le((const uint8_t *)&req->wLength);
 
     n = 0;
     rc = -1;
@@ -139,26 +140,23 @@ static void handle_control_event(ffs_ctx_t *ctx,
             {
                 LOG_WARN("local_engine: ep0 write failed: %s", g_strerror(errno));
             }
-        }
-        else
+        } else
         {
             if (write(ctx->ep0_fd, NULL, 0) < 0)
             {
                 LOG_WARN("local_engine: ep0 status ACK failed: %s", g_strerror(errno));
             }
         }
-    }
-    else
+    } else
     {
         uint8_t dummy;
         if (setup.requesttype & 0x80)
         {
-            if (read(ctx->ep0_fd, &dummy, 0) < 0)   /* Stall IN */
+            if (read(ctx->ep0_fd, &dummy, 0) < 0) /* Stall IN */
             {
                 LOG_WARN("local_engine: ep0 stall (IN) failed: %s", g_strerror(errno));
             }
-        }
-        else
+        } else
         {
             if (write(ctx->ep0_fd, NULL, 0) < 0)
             {
@@ -168,7 +166,8 @@ static void handle_control_event(ffs_ctx_t *ctx,
     }
 }
 
-static void handle_ep0(ffs_ctx_t *ctx, usb_device_t *dev)
+static void
+handle_ep0(ffs_ctx_t *ctx, usb_device_t *dev)
 {
     struct usb_functionfs_event ev;
     ssize_t ret;
@@ -201,7 +200,8 @@ static void handle_ep0(ffs_ctx_t *ctx, usb_device_t *dev)
     }
 }
 
-static void service_endpoints(usb_device_t *dev, GArray *eps)
+static void
+service_endpoints(usb_device_t *dev, GArray *eps)
 {
     uint8_t buf[USB_VCR_BUF_SIZE];
 
@@ -225,12 +225,11 @@ static void service_endpoints(usb_device_t *dev, GArray *eps)
             {
                 if (write(ep->fd, buf, (size_t)n) < 0)
                 {
-                    LOG_WARN("local_engine: ep 0x%02x write failed: %s",
-                             ep->ep_addr, g_strerror(errno));
+                    LOG_WARN("local_engine: ep 0x%02x write failed: %s", ep->ep_addr,
+                             g_strerror(errno));
                 }
             }
-        }
-        else if (!ep->is_in && dev->ops->ep_out != NULL)
+        } else if (!ep->is_in && dev->ops->ep_out != NULL)
         {
             ssize_t r = read(ep->fd, buf, sizeof(buf));
             if (r > 0)
@@ -241,7 +240,8 @@ static void service_endpoints(usb_device_t *dev, GArray *eps)
     }
 }
 
-int local_engine_run(usb_device_t *dev, const char *name, const char *udc)
+int
+local_engine_run(usb_device_t *dev, const char *name, const char *udc)
 {
     ffs_ctx_t *ctx;
     GArray *eps;
@@ -273,7 +273,7 @@ int local_engine_run(usb_device_t *dev, const char *name, const char *udc)
         pfd.events = POLLIN;
         pfd.revents = 0;
 
-        r = poll(&pfd, 1, 10);  /* 10ms timeout for periodic ticks and endpoint polls */
+        r = poll(&pfd, 1, 10); /* 10ms timeout for periodic ticks and endpoint polls */
         if (r > 0 && (pfd.revents & POLLIN))
         {
             handle_ep0(ctx, dev);
@@ -292,4 +292,64 @@ int local_engine_run(usb_device_t *dev, const char *name, const char *udc)
     ffs_teardown(ctx);
     ffs_ctx_free(ctx);
     return 0;
+}
+
+typedef struct {
+    char *name;
+    char *udc;
+} local_engine_priv_t;
+
+static int
+local_engine_init_impl(usb_engine_t *engine, const usb_engine_config_t *config)
+{
+    local_engine_priv_t *priv = g_new0(local_engine_priv_t, 1);
+    priv->name = g_strdup(config ? config->instance_name : NULL);
+    priv->udc = g_strdup(config ? config->udc : NULL);
+    engine->priv = priv;
+    return 0;
+}
+
+static int
+local_engine_run_ops(usb_engine_t *engine, usb_device_t *dev)
+{
+    if (!engine || !engine->priv || !dev || !dev->ops)
+        return -1;
+    local_engine_priv_t *priv = engine->priv;
+    LOG_INFO("Running locally on UDC %s (gadget name '%s')",
+             priv->udc ? priv->udc : "(auto-detect)", priv->name ? priv->name : "usbvcr");
+    return local_engine_run(dev, priv->name, priv->udc);
+}
+
+static void
+local_engine_stop_ops(usb_engine_t *engine)
+{
+    (void)engine;
+    g_stop = 1;
+}
+
+static void
+local_engine_destroy_ops(usb_engine_t *engine)
+{
+    if (!engine || !engine->priv)
+        return;
+    local_engine_priv_t *priv = engine->priv;
+    g_free(priv->name);
+    g_free(priv->udc);
+    g_free(priv);
+    engine->priv = NULL;
+}
+
+static const usb_engine_ops_t local_engine_ops = {
+    .name = "local",
+    .description = "Local Linux kernel USB gadget emulation via FunctionFS and ConfigFS",
+    .init = local_engine_init_impl,
+    .run = local_engine_run_ops,
+    .stop = local_engine_stop_ops,
+    .destroy = local_engine_destroy_ops,
+};
+
+const usb_engine_ops_t *
+local_engine_get_ops(void)
+{
+    return &local_engine_ops;
 }

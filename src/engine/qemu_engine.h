@@ -5,9 +5,13 @@
 #ifndef QEMU_ENGINE_H
 #define QEMU_ENGINE_H
 
-#include "device.h"
+#include "engine.h"
 
-/* Run USB device emulation against QEMU over a connected usbredir socket. */
+/* Returns the ops table for QEMU / usbredir engine */
+const usb_engine_ops_t *qemu_engine_get_ops(void);
+
+/* Backward compatibility helper: run USB device emulation over an already connected usbredir socket
+ */
 int qemu_engine_run(int sock, usb_device_t *dev);
 
 #endif /* QEMU_ENGINE_H */

@@ -277,6 +277,46 @@ if check_dep.found()
   )
   test('yaml_backend', test_yaml_backend, env : test_env)
 
+  engine_test_sources = files(
+    '../src/engine/engine.c',
+    '../src/engine/qemu_engine.c',
+    '../src/core/usb_core.c',
+    '../src/core/transport.c',
+    '../src/core/descriptor.c',
+    '../src/lib/log.c',
+    '../src/lib/pcap/pcap.c',
+    '../src/lib/pcap/record.c',
+  )
+  if have_local_engine
+    engine_test_sources += files(
+      '../src/engine/local_engine.c',
+      '../src/lib/ffs/ffs.c',
+      '../src/lib/utils.c',
+      '../src/lib/version.c',
+      '../src/backends/yaml_backend.c',
+      '../src/lib/yaml/loader.c',
+      '../src/lib/yaml/tree.c',
+      '../src/lib/yaml/util.c',
+      '../src/lib/schema.c',
+      '../src/lib/flow.c',
+      '../src/lib/usb_node.c',
+      '../src/lib/codec.c',
+      '../src/lib/stream/video_parser.c',
+      '../src/lib/stream/stream_provider.c',
+      '../src/lib/storage/disk_provider.c',
+    )
+  endif
+
+  test_engine = executable(
+    'test_engine',
+    'engine/test_engine.c',
+    engine_test_sources,
+    include_directories : [lib, core, engine, backends],
+    dependencies : [check_dep, glib_dep, yaml_dep, dependency('threads')],
+    c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+  )
+  test('engine', test_engine, env : test_env)
+
   if have_local_engine
     test_ffs = executable(
       'test_ffs',

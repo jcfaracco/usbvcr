@@ -360,6 +360,7 @@ if check_dep.found()
       include_directories : [lib, core, backends],
       dependencies : [check_dep, glib_dep, yaml_dep],
       c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+      link_args : ['-Wl,--wrap=mount', '-Wl,--wrap=umount', '-Wl,--wrap=opendir'],
     )
     test('ffs', test_ffs, env : test_env)
 

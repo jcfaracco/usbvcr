@@ -293,6 +293,7 @@ static void pcap_init_usbmon_header(usbmon_header_t *usb_hdr,
     usb_hdr->status    = 0;
     usb_hdr->length    = (uint32_t)p->data_len;
     usb_hdr->len_cap   = (uint32_t)p->data_len;
+    usb_hdr->ndesc     = p->ndesc;
 
     /* usbmon convention (verified against holtek_keyboard.pcap/usb_capture.pcap,
      * both real usbmon captures): flag_setup == 0 means a setup packet is

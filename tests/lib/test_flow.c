@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdint.h>
+#include <unistd.h>
 #include <check.h>
 #include <string.h>
 #include <glib.h>
@@ -52,7 +53,7 @@ START_TEST(test_flow_load_example1)
     uint8_t ep_buf[8];
     rc = flow_ep_in(f, 0x81, ep_buf, sizeof(ep_buf));
     ck_assert_int_gt(rc, 0); /* Expecting data, 8 bytes probably */
-    
+
     /* First hex payload is "02000B0000000000" (8 bytes) */
     ck_assert_int_eq(rc, 8);
     ck_assert_int_eq(ep_buf[0], 0x02);
@@ -90,7 +91,7 @@ START_TEST(test_flow_stream_from_file_state_machine)
 
     /* 3. EP 0x81 should now produce stream packet with UVC header */
     n = flow_ep_in(f, 0x81, buf, sizeof(buf));
-    ck_assert_int_eq(n, 8); /* 2 byte header + 6 byte frame */
+    ck_assert_int_eq(n, 8);         /* 2 byte header + 6 byte frame */
     ck_assert_int_eq(buf[0], 0x02); /* UVC header len */
     ck_assert_int_eq(buf[1], 0x02); /* FID=0, EOF=1 */
     ck_assert_int_eq(buf[2], 0xFF); /* SOI */
@@ -196,11 +197,11 @@ START_TEST(test_flow_rules_inheritance)
     int rc;
 
     /* Setup packets */
-    uint8_t setup_common[8]   = { 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00 };
-    uint8_t setup_rule_a[8]   = { 0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x04, 0x00 }; /* 0x0100 */
-    uint8_t setup_rule_b[8]   = { 0x80, 0x06, 0x00, 0x02, 0x00, 0x00, 0x04, 0x00 }; /* 0x0200 */
-    uint8_t setup_rule_c[8]   = { 0x80, 0x06, 0x00, 0x03, 0x00, 0x00, 0x04, 0x00 }; /* 0x0300 */
-    uint8_t setup_rule_d[8]   = { 0x80, 0x06, 0x00, 0x04, 0x00, 0x00, 0x04, 0x00 }; /* 0x0400 */
+    uint8_t setup_common[8] = { 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00 };
+    uint8_t setup_rule_a[8] = { 0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x04, 0x00 }; /* 0x0100 */
+    uint8_t setup_rule_b[8] = { 0x80, 0x06, 0x00, 0x02, 0x00, 0x00, 0x04, 0x00 }; /* 0x0200 */
+    uint8_t setup_rule_c[8] = { 0x80, 0x06, 0x00, 0x03, 0x00, 0x00, 0x04, 0x00 }; /* 0x0300 */
+    uint8_t setup_rule_d[8] = { 0x80, 0x06, 0x00, 0x04, 0x00, 0x00, 0x04, 0x00 }; /* 0x0400 */
     uint8_t setup_to_derived[8] = { 0x00, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
     uint8_t setup_to_standalone[8] = { 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
@@ -408,12 +409,14 @@ typedef struct {
     uint8_t last_consumed_byte;
 } mock_provider_ctx_t;
 
-static int mock_produce_in(void *ctx, uint8_t ep, uint8_t *buf, size_t cap)
+static int
+mock_produce_in(void *ctx, uint8_t ep, uint8_t *buf, size_t cap)
 {
     (void)ep;
     mock_provider_ctx_t *m = ctx;
     m->produce_called++;
-    if (cap < 4) return -1;
+    if (cap < 4)
+        return -1;
     buf[0] = 0xAA;
     buf[1] = 0xBB;
     buf[2] = 0xCC;
@@ -421,7 +424,8 @@ static int mock_produce_in(void *ctx, uint8_t ep, uint8_t *buf, size_t cap)
     return 4;
 }
 
-static int mock_consume_out(void *ctx, uint8_t ep, const uint8_t *buf, size_t len, GQueue *in_queue)
+static int
+mock_consume_out(void *ctx, uint8_t ep, const uint8_t *buf, size_t len, GQueue *in_queue)
 {
     (void)ep;
     (void)in_queue;
@@ -432,13 +436,15 @@ static int mock_consume_out(void *ctx, uint8_t ep, const uint8_t *buf, size_t le
     return 0;
 }
 
-static void mock_tick(void *ctx)
+static void
+mock_tick(void *ctx)
 {
     mock_provider_ctx_t *m = ctx;
     m->tick_called++;
 }
 
-static void mock_free(void *ctx)
+static void
+mock_free(void *ctx)
 {
     mock_provider_ctx_t *m = ctx;
     m->free_called++;
@@ -454,8 +460,8 @@ static const flow_endpoint_ops_t mock_ops = {
 START_TEST(test_flow_endpoint_provider_binding)
 {
     flow_t *f = flow_create();
-    mock_provider_ctx_t ctx1 = {0};
-    mock_provider_ctx_t ctx2 = {0};
+    mock_provider_ctx_t ctx1 = { 0 };
+    mock_provider_ctx_t ctx2 = { 0 };
     uint8_t buf[64];
     uint8_t out_pkt[2] = { 0x42, 0x43 };
     int n;
@@ -508,7 +514,202 @@ START_TEST(test_flow_free_null)
 }
 END_TEST
 
-static Suite *flow_suite(void)
+START_TEST(test_flow_null_inputs)
+{
+    uint8_t buf[128];
+    uint16_t len = 0;
+    uint8_t setup[8] = { 0 };
+
+    ck_assert_int_eq(flow_control(NULL, setup, buf, &len), -1);
+    ck_assert_int_eq(flow_ep_in(NULL, 0x81, buf, sizeof(buf)), 0);
+    ck_assert_int_eq(flow_ep_out(NULL, 0x02, buf, sizeof(buf)), -1);
+    flow_tick(NULL);
+    ck_assert_ptr_null(flow_current_state(NULL));
+    ck_assert_ptr_null(flow_machine_state(NULL, "m"));
+    ck_assert_int_eq(flow_transition_to(NULL, "s"), -1);
+    ck_assert_int_eq(flow_transition_machine_to(NULL, "m", "s"), -1);
+    flow_unbind_endpoint(NULL, 0x81);
+}
+END_TEST
+
+START_TEST(test_flow_ep_in_partial_and_ep_out_logging)
+{
+    /* Use example1 flow, trigger SET_CONFIGURATION to load queue */
+    flow_t *f = flow_load(TEST_DATA_DIR "/example1/flows/hello_world_flow.yaml");
+    ck_assert_ptr_nonnull(f);
+
+    uint8_t setup[8] = { 0x00, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    uint8_t out[64];
+    uint16_t len = 0;
+    ck_assert_int_eq(flow_control(f, setup, out, &len), 0);
+
+    /* The queue has 8-byte reports. Drain partially with cap = 3 */
+    uint8_t buf[3];
+    int n = flow_ep_in(f, 0x81, buf, sizeof(buf));
+    ck_assert_int_eq(n, 3);
+    ck_assert_int_eq(buf[0], 0x02);
+
+    /* Drain the remaining 5 bytes of that report */
+    uint8_t buf5[5];
+    n = flow_ep_in(f, 0x81, buf5, sizeof(buf5));
+    ck_assert_int_eq(n, 5);
+
+    /* Test flow_ep_out with long buffer (>32 bytes to hit "..." logging) */
+    uint8_t long_out[40];
+    memset(long_out, 0xAB, sizeof(long_out));
+    ck_assert_int_eq(flow_ep_out(f, 0x02, long_out, sizeof(long_out)), 0);
+
+    /* Test flow_ep_out with zero length */
+    ck_assert_int_eq(flow_ep_out(f, 0x02, NULL, 0), 0);
+
+    flow_free(f);
+}
+END_TEST
+
+START_TEST(test_flow_yaml_edge_cases_and_disk)
+{
+    const char *yaml_content = "common_rules:\n"
+                               "  - match: \"invalid_scalar_match\"\n"
+                               "    actions:\n"
+                               "      - stream_from_file: \"video.mjpeg\"\n"
+                               "        loop: false\n"
+                               "  - match:\n"
+                               "      bmRequestType: 0x40\n"
+                               "      bRequest: 0x01\n"
+                               "    actions:\n"
+                               "      - respond_with_status: 1\n"
+                               "  - match:\n"
+                               "      endpoint_out: 0x02\n"
+                               "      payload:\n"
+                               "        hex: \"AABB\"\n"
+                               "    actions:\n"
+                               "      - transition_state:\n"
+                               "          machine: \"sub\"\n"
+                               "          state: \"s2\"\n"
+                               "  - match:\n"
+                               "      endpoint_out: 0x02\n"
+                               "      hex: \"CCDD\"\n"
+                               "    actions:\n"
+                               "      - respond_with:\n"
+                               "          hex: \"EEFF\"\n"
+                               "machines:\n"
+                               "  - \"ignore_non_map\"\n"
+                               "  - name: \"sub\"\n"
+                               "    interface: 1\n"
+                               "    initial_state: \"s1\"\n"
+                               "    states:\n"
+                               "      - \"ignore_non_map\"\n"
+                               "      - extends: \"no_name_state\"\n"
+                               "      - name: \"s1\"\n"
+                               "        on_enter:\n"
+                               "          - disk_from_file:\n"
+                               "              file: \"test_disk.img\"\n"
+                               "              endpoint_in: \"0x81\"\n"
+                               "              endpoint_out: \"0x02\"\n"
+                               "        rules:\n"
+                               "          - match:\n"
+                               "              endpoint_poll: 0x81\n"
+                               "            actions:\n"
+                               "              - return_nak_if_queue_empty: true\n"
+                               "          - match:\n"
+                               "              endpoint_out: 0x02\n"
+                               "            actions:\n"
+                               "              - disk_from_file:\n"
+                               "                  file: \"test_disk.img\"\n"
+                               "                  endpoint_in: \"0x81\"\n"
+                               "                  endpoint_out: \"0x02\"\n"
+                               "      - name: \"s2\"\n"
+                               "        on_enter:\n"
+                               "          - attach_disk: \"raw_disk.img\"\n"
+                               "          - stream_from_file:\n"
+                               "              file: \"video.mjpeg\"\n"
+                               "              loop: false\n";
+
+    g_autofree char *tmp = g_dir_make_tmp("usbvcr_flow_test_XXXXXX", NULL);
+    g_autofree char *yaml_path = g_strdup_printf("%s/test_flow.yaml", tmp);
+    ck_assert(g_file_set_contents(yaml_path, yaml_content, -1, NULL));
+
+    /* Create dummy disk/video files in tmp directory */
+    g_autofree char *disk_path = g_strdup_printf("%s/test_disk.img", tmp);
+    g_autofree char *raw_disk = g_strdup_printf("%s/raw_disk.img", tmp);
+    g_autofree char *video_path = g_strdup_printf("%s/video.mjpeg", tmp);
+    ck_assert(g_file_set_contents(disk_path, "dummy", 5, NULL));
+    ck_assert(g_file_set_contents(raw_disk, "dummy", 5, NULL));
+    ck_assert(g_file_set_contents(video_path, "dummy", 5, NULL));
+
+    flow_t *f = flow_load_with_dir(yaml_path, tmp);
+    ck_assert_ptr_nonnull(f);
+
+    /* Machine 'sub' initial state is 's1' */
+    ck_assert_str_eq(flow_machine_state(f, "sub"), "s1");
+
+    /* Send a SCSI CBW to ep 0x02 to trigger disk provider consume_out */
+    uint8_t cbw[31];
+    memset(cbw, 0, sizeof(cbw));
+    cbw[0] = 0x55;
+    cbw[1] = 0x53;
+    cbw[2] = 0x42;
+    cbw[3] = 0x43;  /* 'USBC' */
+    cbw[14] = 6;    /* cdb length */
+    cbw[15] = 0x12; /* INQUIRY */
+    cbw[19] = 36;   /* alloc len */
+    flow_ep_out(f, 0x02, cbw, sizeof(cbw));
+
+    /* Test respond_with_status on common_rules */
+    uint8_t setup_status[8] = { 0x40, 0x01, 0, 0, 0, 0, 0, 0 };
+    uint8_t out[16];
+    uint16_t len = sizeof(out);
+    ck_assert_int_eq(flow_control(f, setup_status, out, &len), 0);
+    ck_assert_int_eq(len, 0);
+
+    /* Test ep_out matching payload AABB */
+    uint8_t pkt_match[2] = { 0xAA, 0xBB };
+    ck_assert_int_eq(flow_ep_out(f, 0x02, pkt_match, sizeof(pkt_match)), 0);
+    ck_assert_str_eq(flow_machine_state(f, "sub"), "s2");
+
+    /* Test ep_out matching direct hex CCDD */
+    uint8_t pkt_ccdd[2] = { 0xCC, 0xDD };
+    ck_assert_int_eq(flow_ep_out(f, 0x02, pkt_ccdd, sizeof(pkt_ccdd)), 0);
+
+    /* Test ep_out mismatching payload */
+    uint8_t pkt_mismatch[2] = { 0x11, 0x22 };
+    flow_ep_out(f, 0x02, pkt_mismatch, sizeof(pkt_mismatch));
+
+    /* Test transition on machine */
+    ck_assert_int_eq(flow_transition_machine_to(f, "sub", "s1"), 0);
+    ck_assert_str_eq(flow_machine_state(f, "sub"), "s1");
+    flow_tick(f);
+
+    flow_free(f);
+
+    unlink(yaml_path);
+    unlink(disk_path);
+    unlink(raw_disk);
+    unlink(video_path);
+    rmdir(tmp);
+}
+END_TEST
+
+START_TEST(test_flow_load_malformed_syntax)
+{
+    g_autofree char *tmp = g_dir_make_tmp("usbvcr_flow_err_XXXXXX", NULL);
+    g_autofree char *path = g_strdup_printf("%s/bad.yaml", tmp);
+
+    /* 1. Invalid YAML syntax */
+    ck_assert(g_file_set_contents(path, "key: [unclosed sequence", -1, NULL));
+    ck_assert_ptr_null(flow_load(path));
+
+    /* 2. Top-level scalar instead of mapping */
+    ck_assert(g_file_set_contents(path, "just a scalar\n", -1, NULL));
+    ck_assert_ptr_null(flow_load(path));
+
+    unlink(path);
+    rmdir(tmp);
+}
+END_TEST
+
+static Suite *
+flow_suite(void)
 {
     Suite *s = suite_create("flow");
 
@@ -523,12 +724,17 @@ static Suite *flow_suite(void)
     tcase_add_test(tc_core, test_flow_orthogonal_state_machines);
     tcase_add_test(tc_core, test_flow_endpoint_provider_binding);
     tcase_add_test(tc_core, test_flow_free_null);
+    tcase_add_test(tc_core, test_flow_null_inputs);
+    tcase_add_test(tc_core, test_flow_ep_in_partial_and_ep_out_logging);
+    tcase_add_test(tc_core, test_flow_yaml_edge_cases_and_disk);
+    tcase_add_test(tc_core, test_flow_load_malformed_syntax);
     suite_add_tcase(s, tc_core);
 
     return s;
 }
 
-int main(void)
+int
+main(void)
 {
     SRunner *sr = srunner_create(flow_suite());
     srunner_run_all(sr, CK_NORMAL);

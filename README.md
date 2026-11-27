@@ -7,7 +7,7 @@ recompiling: one generic engine turns a YAML project into binary USB frames
 and drives the state machine.
 
 [![CI](https://github.com/jcfaracco/usbvcr/actions/workflows/ci.yml/badge.svg)](https://github.com/jcfaracco/usbvcr/actions/workflows/ci.yml)
-[![Coverage: 72%](https://img.shields.io/badge/coverage-72%25-brightgreen.svg)](tests)
+[![Coverage: 87%](https://img.shields.io/badge/coverage-87%25-brightgreen.svg)](tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![C11](https://img.shields.io/badge/C-11-00599C.svg)](src)
 [![Build: Meson](https://img.shields.io/badge/build-meson%20%2B%20ninja-informational.svg)](meson.build)

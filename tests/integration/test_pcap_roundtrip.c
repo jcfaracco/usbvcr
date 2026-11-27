@@ -18,40 +18,24 @@
 
 #define N_VECTORS 6
 
-/* Real libc functions for linker wrapping */
-FILE *__real_fopen(const char *path, const char *mode);
-FILE *__real_fopen64(const char *path, const char *mode);
-size_t __real_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
-int __real_fflush(FILE *stream);
-int __real_fseek(FILE *stream, long offset, int whence);
-
 static FILE *s_mock_target_fp = NULL;
 static int s_mock_track_fopen = 0;
 static int s_mock_fwrite_fail_countdown = -1;
 static int s_mock_fflush_fail = 0;
 static int s_mock_fseek_fail = 0;
 
-FILE *__wrap_fopen(const char *path, const char *mode)
+static inline FILE *mock_fopen(const char *path, const char *mode)
 {
-    FILE *fp = __real_fopen(path, mode);
+    FILE *fp = fopen(path, mode);
     if (s_mock_track_fopen)
     {
         s_mock_target_fp = fp;
     }
     return fp;
 }
+#define fopen mock_fopen
 
-FILE *__wrap_fopen64(const char *path, const char *mode)
-{
-    FILE *fp = __real_fopen64(path, mode);
-    if (s_mock_track_fopen)
-    {
-        s_mock_target_fp = fp;
-    }
-    return fp;
-}
-
-size_t __wrap_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
+static inline size_t mock_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
     if (s_mock_target_fp != NULL && stream == s_mock_target_fp)
     {
@@ -65,10 +49,11 @@ size_t __wrap_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
             s_mock_fwrite_fail_countdown--;
         }
     }
-    return __real_fwrite(ptr, size, nmemb, stream);
+    return fwrite(ptr, size, nmemb, stream);
 }
+#define fwrite mock_fwrite
 
-int __wrap_fflush(FILE *stream)
+static inline int mock_fflush(FILE *stream)
 {
     if (s_mock_target_fp != NULL && stream == s_mock_target_fp)
     {
@@ -78,10 +63,11 @@ int __wrap_fflush(FILE *stream)
             return EOF;
         }
     }
-    return __real_fflush(stream);
+    return fflush(stream);
 }
+#define fflush mock_fflush
 
-int __wrap_fseek(FILE *stream, long offset, int whence)
+static inline int mock_fseek(FILE *stream, long offset, int whence)
 {
     if (s_mock_target_fp != NULL && stream == s_mock_target_fp)
     {
@@ -91,21 +77,16 @@ int __wrap_fseek(FILE *stream, long offset, int whence)
             return -1;
         }
     }
-    return __real_fseek(stream, offset, whence);
+    return fseek(stream, offset, whence);
 }
+#define fseek mock_fseek
 
-struct pcap_writer {
-    pcap_format_t format;
-    FILE *fp;
-    char *path;
-};
+#include "pcap/pcap.c"
 
-struct pcap_trace {
-    GArray    *packets;
-    GPtrArray *payloads;
-};
-
-pcap_format_t pcap_format_get(const char *str);
+#undef fopen
+#undef fwrite
+#undef fflush
+#undef fseek
 
 typedef struct {
     pcap_packet_t pkt;

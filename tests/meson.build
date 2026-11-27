@@ -51,7 +51,6 @@ if check_dep.found()
     ),
     include_directories : [lib, core],
     dependencies : [check_dep, glib_dep],
-    link_args : ['-Wl,--wrap=fstat64', '-Wl,--wrap=pread64', '-Wl,--wrap=pwrite64'],
   )
   test('disk_provider', test_disk_provider, env : test_env)
 
@@ -143,7 +142,6 @@ if check_dep.found()
     include_directories : [lib, core],
     dependencies : [check_dep, glib_dep, yaml_dep],
     c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
-    link_args : ['-Wl,--wrap=yaml_parser_initialize'],
   )
   test('codec', test_codec, env : test_env)
 
@@ -222,12 +220,10 @@ if check_dep.found()
     'test_pcap_roundtrip',
     'integration/test_pcap_roundtrip.c',
     files(
-      '../src/lib/pcap/pcap.c',
       '../src/lib/log.c',
     ),
     include_directories : [lib],
     dependencies : [check_dep, glib_dep],
-    link_args : ['-Wl,--wrap=fopen', '-Wl,--wrap=fopen64', '-Wl,--wrap=fwrite', '-Wl,--wrap=fflush', '-Wl,--wrap=fseek'],
   )
   test('pcap_roundtrip', test_pcap_roundtrip)
 

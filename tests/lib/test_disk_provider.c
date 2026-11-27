@@ -13,44 +13,47 @@
 
 #include "bytes.h"
 
-/* Wrapping flags */
+/* Mock control flags */
 static gboolean mock_fstat_fail = FALSE;
 static gboolean mock_pread_fail = FALSE;
 static gboolean mock_pwrite_zero = FALSE;
 
-int __real_fstat64(int fd, struct stat *buf);
-int __wrap_fstat64(int fd, struct stat *buf)
+static inline int mock_fstat(int fd, struct stat *buf)
 {
     if (mock_fstat_fail)
     {
         return -1;
     }
-    return __real_fstat64(fd, buf);
+    return fstat(fd, buf);
 }
+#define fstat mock_fstat
 
-ssize_t __real_pread64(int fd, void *buf, size_t count, off_t offset);
-ssize_t __wrap_pread64(int fd, void *buf, size_t count, off_t offset)
+static inline ssize_t mock_pread(int fd, void *buf, size_t count, off_t offset)
 {
     if (mock_pread_fail)
     {
         return -1;
     }
-    return __real_pread64(fd, buf, count, offset);
+    return pread(fd, buf, count, offset);
 }
+#define pread mock_pread
 
-ssize_t __real_pwrite64(int fd, const void *buf, size_t count, off_t offset);
-ssize_t __wrap_pwrite64(int fd, const void *buf, size_t count, off_t offset)
+static inline ssize_t mock_pwrite(int fd, const void *buf, size_t count, off_t offset)
 {
     if (mock_pwrite_zero)
     {
         return 0;
     }
-    return __real_pwrite64(fd, buf, count, offset);
+    return pwrite(fd, buf, count, offset);
 }
+#define pwrite mock_pwrite
 
 #define static
 #include "storage/disk_provider.c"
 #undef static
+#undef fstat
+#undef pread
+#undef pwrite
 
 static void free_queue_item(gpointer data)
 {

@@ -13,24 +13,24 @@
 #define TEST_DATA_DIR "tests/data"
 #endif
 
-/* Real libc/libyaml function for linker wrapping */
-int __real_yaml_parser_initialize(yaml_parser_t *parser);
-
+/* Mock yaml_parser_initialize for unit testing */
 static int s_mock_parser_init_fail = 0;
 
-int __wrap_yaml_parser_initialize(yaml_parser_t *parser)
+static inline int mock_yaml_parser_initialize(yaml_parser_t *parser)
 {
     if (s_mock_parser_init_fail)
     {
         return 0;
     }
-    return __real_yaml_parser_initialize(parser);
+    return yaml_parser_initialize(parser);
 }
+#define yaml_parser_initialize mock_yaml_parser_initialize
 
 /* Expose static functions for unit testing */
 #define static
 #include "../../src/lib/codec.c"
 #undef static
+#undef yaml_parser_initialize
 
 static char *write_temp_yaml(const char *content)
 {

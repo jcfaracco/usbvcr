@@ -68,6 +68,25 @@ if check_dep.found()
   )
   test('yaml_loader', test_yaml_loader, env : test_env)
 
+  test_yaml_tree = executable(
+    'test_yaml_tree',
+    'lib/test_yaml_tree.c',
+    files(
+      '../src/lib/yaml/tree.c',
+      '../src/lib/yaml/util.c',
+      '../src/lib/schema.c',
+      '../src/lib/codec.c',
+      '../src/lib/usb_node.c',
+      '../src/lib/version.c',
+      '../src/lib/utils.c',
+      '../src/lib/log.c',
+    ),
+    include_directories : [lib, core],
+    dependencies : [check_dep, glib_dep, yaml_dep],
+    c_args : ['-DTEST_DATA_DIR="' + meson.current_source_dir() + '/data"'],
+  )
+  test('yaml_tree', test_yaml_tree, env : test_env)
+
   test_flow = executable(
     'test_flow',
     'lib/test_flow.c',

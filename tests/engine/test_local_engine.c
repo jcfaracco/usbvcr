@@ -55,7 +55,10 @@ mock_ffs_setup(ffs_ctx_t *ctx, usb_device_t *dev)
         struct usb_functionfs_event ev;
         memset(&ev, 0, sizeof(ev));
         ev.type = FUNCTIONFS_ENABLE;
-        (void)write(s_mock_ep0_pipe[1], &ev, sizeof(ev));
+        if (write(s_mock_ep0_pipe[1], &ev, sizeof(ev)) == -1)
+        {
+            LOG_WARN("mock_ffs_setup: write to mock ep0 pipe failed");
+        }
     }
 
     return 0;

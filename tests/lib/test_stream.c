@@ -7,7 +7,10 @@
 #include <check.h>
 #include <glib.h>
 
-#include "stream/video_parser.h"
+#define static
+#include "stream/video_parser.c"
+#undef static
+
 #include "stream/stream_provider.h"
 
 START_TEST(test_video_parser_empty_or_null)
@@ -285,6 +288,120 @@ START_TEST(test_stream_provider_produce_edge_cases)
 }
 END_TEST
 
+START_TEST(test_video_parser_partial_and_fallback_frames)
+{
+    /* Truncated frame (SOI without EOI): exercises lines 47-50 */
+    static const uint8_t partial_jpeg[] = { 0xFF, 0xD8, 0x01, 0x02, 0x03 };
+    video_stream_t *s = video_stream_new_from_bytes(partial_jpeg, sizeof(partial_jpeg), VIDEO_FORMAT_MJPEG);
+    ck_assert_ptr_nonnull(s);
+    ck_assert_int_eq(s->frame_count, 1);
+    ck_assert_int_eq(s->frames[0].offset, 0);
+    ck_assert_int_eq(s->frames[0].length, sizeof(partial_jpeg));
+    video_stream_free(s);
+
+    /* Fallback: MJPEG requested but no SOI marker anywhere in data (lines 60-66) */
+    static const uint8_t no_soi[] = { 0x01, 0x02, 0x03, 0x04 };
+    s = video_stream_new_from_bytes(no_soi, sizeof(no_soi), VIDEO_FORMAT_MJPEG);
+    ck_assert_ptr_nonnull(s);
+    ck_assert_int_eq(s->frame_count, 1);
+    ck_assert_int_eq(s->frames[0].length, sizeof(no_soi));
+    video_stream_free(s);
+
+    /* Direct video_parse_frames with NULL or empty data: exercises line 88 */
+    video_stream_t empty_stream;
+    memset(&empty_stream, 0, sizeof(empty_stream));
+    video_parse_frames(&empty_stream);
+    ck_assert_int_eq(empty_stream.frame_count, 0);
+}
+END_TEST
+
+START_TEST(test_video_parser_auto_and_default_detection)
+{
+    video_stream_t *s;
+
+    /* Starts with SOI -> auto-detects MJPEG (lines 103, 105-106) */
+    static const uint8_t auto_mjpeg[] = { 0xFF, 0xD8, 0x05, 0xFF, 0xD9 };
+    s = video_stream_new_from_bytes(auto_mjpeg, sizeof(auto_mjpeg), VIDEO_FORMAT_AUTO);
+    ck_assert_ptr_nonnull(s);
+    ck_assert_int_eq(s->format, VIDEO_FORMAT_MJPEG);
+    ck_assert_int_eq(s->frame_count, 1);
+    video_stream_free(s);
+
+    /* Does not start with SOI -> auto-detects RAW (lines 110-111, 113) */
+    static const uint8_t auto_raw[] = { 0x10, 0x20, 0x30 };
+    s = video_stream_new_from_bytes(auto_raw, sizeof(auto_raw), VIDEO_FORMAT_AUTO);
+    ck_assert_ptr_nonnull(s);
+    ck_assert_int_eq(s->format, VIDEO_FORMAT_RAW);
+    ck_assert_int_eq(s->frame_count, 1);
+    video_stream_free(s);
+
+    /* Format with invalid enum falls into default: case (lines 100-114) */
+    s = video_stream_new_from_bytes(auto_raw, sizeof(auto_raw), (video_format_t)999);
+    ck_assert_ptr_nonnull(s);
+    ck_assert_int_eq(s->format, VIDEO_FORMAT_RAW);
+    video_stream_free(s);
+}
+END_TEST
+
+START_TEST(test_video_parser_path_detection)
+{
+    /* Direct test of detect_format_from_path covering lines 121, 125, 129, 131, 134 */
+    ck_assert_int_eq(detect_format_from_path(NULL), VIDEO_FORMAT_AUTO);
+    ck_assert_int_eq(detect_format_from_path("video.mjpeg"), VIDEO_FORMAT_MJPEG);
+    ck_assert_int_eq(detect_format_from_path("video.mjpg"), VIDEO_FORMAT_MJPEG);
+    ck_assert_int_eq(detect_format_from_path("video.jpeg"), VIDEO_FORMAT_MJPEG);
+    ck_assert_int_eq(detect_format_from_path("video.jpg"), VIDEO_FORMAT_MJPEG);
+    ck_assert_int_eq(detect_format_from_path("video.yuy2"), VIDEO_FORMAT_YUY2);
+    ck_assert_int_eq(detect_format_from_path("video.yuv"), VIDEO_FORMAT_YUY2);
+    ck_assert_int_eq(detect_format_from_path("video.unknown_ext"), VIDEO_FORMAT_AUTO);
+}
+END_TEST
+
+START_TEST(test_video_parser_mapped_file_edge_cases)
+{
+    char tmp_path[] = "/tmp/usbvcr_vpar_test_XXXXXX.jpg";
+    char tmp_path2[] = "/tmp/usbvcr_vpar_test_XXXXXX.raw";
+    int fd;
+    video_stream_t *s;
+    size_t len = 123;
+    static const uint8_t raw_payload[] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    const uint8_t *f;
+
+    fd = mkstemps(tmp_path, 4);
+    ck_assert_int_ge(fd, 0);
+    close(fd);
+
+    /* Empty mapped file */
+    s = video_stream_open(tmp_path);
+    ck_assert_ptr_nonnull(s);
+    ck_assert_int_eq(s->frame_count, 0);
+
+    /* get_frame on empty stream */
+    ck_assert_ptr_null(video_stream_get_frame(s, 0, &len));
+    ck_assert_int_eq(len, 0);
+    ck_assert_ptr_null(video_stream_get_frame(s, 0, NULL));
+
+    video_stream_free(s);
+    unlink(tmp_path);
+
+    /* Open with explicit format */
+    fd = mkstemps(tmp_path2, 4);
+    ck_assert_int_ge(fd, 0);
+    ck_assert_int_eq(write(fd, raw_payload, sizeof(raw_payload)), sizeof(raw_payload));
+    close(fd);
+
+    s = video_stream_open_with_format(tmp_path2, VIDEO_FORMAT_RAW);
+    ck_assert_ptr_nonnull(s);
+    ck_assert_int_eq(s->format, VIDEO_FORMAT_RAW);
+    ck_assert_int_eq(s->frame_count, 1);
+    f = video_stream_get_frame(s, 0, &len);
+    ck_assert_ptr_nonnull(f);
+    ck_assert_int_eq(len, sizeof(raw_payload));
+    video_stream_free(s);
+    unlink(tmp_path2);
+}
+END_TEST
+
 static Suite *stream_suite(void)
 {
     Suite *s = suite_create("stream");
@@ -298,6 +415,10 @@ static Suite *stream_suite(void)
     tcase_add_test(tc, test_stream_provider_lifecycle_and_properties);
     tcase_add_test(tc, test_stream_provider_setters_and_ops);
     tcase_add_test(tc, test_stream_provider_produce_edge_cases);
+    tcase_add_test(tc, test_video_parser_partial_and_fallback_frames);
+    tcase_add_test(tc, test_video_parser_auto_and_default_detection);
+    tcase_add_test(tc, test_video_parser_path_detection);
+    tcase_add_test(tc, test_video_parser_mapped_file_edge_cases);
 
     suite_add_tcase(s, tc);
     return s;

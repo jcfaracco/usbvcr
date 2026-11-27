@@ -35,7 +35,6 @@ if check_dep.found()
     'test_stream',
     'lib/test_stream.c',
     files(
-      '../src/lib/stream/video_parser.c',
       '../src/lib/stream/stream_provider.c',
       '../src/lib/log.c',
     ),

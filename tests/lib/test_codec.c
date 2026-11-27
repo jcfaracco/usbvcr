@@ -122,21 +122,21 @@ START_TEST(test_codec_load_yaml_structure_branches)
         "symbols: { [1, 2]: { a: 1 }, tok_unknown: { sym1: 10 } }\n"
         "flagsets: { fs1: { FlagA: 1, FlagB: 2 } }\n";
 
-    g_autofree char *path = write_temp_yaml(weird_yaml);
-    codec_t *c = codec_load(path);
+    g_autofree char *path1 = write_temp_yaml(weird_yaml);
+    codec_t *c = codec_load(path1);
     ck_assert_ptr_nonnull(c);
     ck_assert_str_eq(codec_name(c), "weird");
     codec_free(c);
-    unlink(path);
+    unlink(path1);
 
     /* Test table with missing codec: field */
     const char *no_name_yaml = "tokens: { a: { tag: 1 } }\n";
-    path = write_temp_yaml(no_name_yaml);
-    c = codec_load(path);
+    g_autofree char *path2 = write_temp_yaml(no_name_yaml);
+    c = codec_load(path2);
     ck_assert_ptr_nonnull(c);
     ck_assert_str_eq(codec_name(c), "");
     codec_free(c);
-    unlink(path);
+    unlink(path2);
 
     /* Test symbols/flagsets as non-mapping scalars */
     const char *scalar_sections_yaml =
@@ -146,11 +146,11 @@ START_TEST(test_codec_load_yaml_structure_branches)
         "symbols: \"not_a_map\"\n"
         "flagsets: \"not_a_map\"\n";
 
-    path = write_temp_yaml(scalar_sections_yaml);
-    c = codec_load(path);
+    g_autofree char *path3 = write_temp_yaml(scalar_sections_yaml);
+    c = codec_load(path3);
     ck_assert_ptr_nonnull(c);
     codec_free(c);
-    unlink(path);
+    unlink(path3);
 }
 END_TEST
 

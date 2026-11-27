@@ -82,6 +82,7 @@ typedef struct {
  * schemas/, flows/ ...). Returns NULL on error. */
 yaml_device_t *yaml_parse_from_file(const char *dir);
 
+yaml_device_t *yaml_device_create(void);
 void yaml_device_free(yaml_device_t *dev);
 
 /* Find a loaded flow by name, path, or basename in the device model's flows registry. */

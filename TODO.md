@@ -52,19 +52,6 @@ runtime.
 
 ## Medium Priority
 
-### `[architecture/engine-ops]` Standardize execution engines on an `engine_ops_t` interface
-**File:** `src/engine/qemu_engine.h`, `src/engine/local_engine.h`, `src/main.c:241-261`
-**Complexity:** Medium
-
-Backends are cleanly abstracted behind `usb_device_ops_t` (`yaml_backend`, `pcap_backend`),
-allowing `main.c` to swap them seamlessly. However, execution engines (`qemu_engine` vs
-`local_engine`) are hardcoded in `main.c` behind branching `if (use_local) ... else ...` blocks.
-Introducing a standardized `usb_engine_ops_t` interface (`init`, `run`, `stop`, `cleanup`) will:
-* Decouple `main.c` from target engine runtime specifics.
-* Allow engines to be selected and configured dynamically via CLI or manifest (`connection.engine`).
-* Provide a clean extension point for future execution targets (e.g. USBIP daemon, WebUSB, or Linux kernel vhci-hcd).
-
----
 
 ### `[style/memory]` Standardize memory management on GLib primitives and `g_auto*` macros
 **File:** `src/core/usb_core.c:194, 558, 611`, `src/lib/pcap/pcap.c`, `src/lib/`

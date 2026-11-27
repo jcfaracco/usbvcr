@@ -49,20 +49,23 @@ This document describes the architecture and design of usbvcr: data flow, execut
                          [ optional fuzz_wrap layer ]
                                        │
                      ┌─────────────────┴─────────────────┐
-                     │                                   │
-                     ▼ (usbredir)                        ▼ (FunctionFS ABI)
-         ┌───────────────────────┐           ┌───────────────────────┐
-         │      qemu_engine      │           │     local_engine      │
-         │  (src/engine/qemu_*)  │           │  (src/engine/local_*) │
-         │           │           │           │           │           │
-         │   src/core/usb_core   │           │     src/lib/ffs/      │
-         │           │           │           └───────────┬───────────┘
-         │  src/core/transport   │                       │
-         └───────────┬───────────┘                       ▼
-                     │ TCP socket               Linux Gadget / UDC
-                     ▼                       (ConfigFS FunctionFS fds)
-             QEMU Virtual Guest
-             (-device usb-redir)
+                     │   usb_engine_ops (engine seam)    │
+                     │     (src/engine/engine.{c,h})     │
+                     └────────┬─────────────────┬────────┘
+                              │                 │
+                  (usbredir)  ▼                 ▼ (FunctionFS ABI)
+                  ┌───────────────────────┐ ┌───────────────────────┐
+                  │      qemu_engine      │ │     local_engine      │
+                  │  (src/engine/qemu_*)  │ │  (src/engine/local_*) │
+                  │           │           │ │           │           │
+                  │   src/core/usb_core   │ │     src/lib/ffs/      │
+                  │           │           │ └───────────┬───────────┘
+                  │  src/core/transport   │             │
+                  └───────────┬───────────┘             ▼
+                              │ TCP socket      Linux Gadget / UDC
+                              ▼              (ConfigFS FunctionFS fds)
+                      QEMU Virtual Guest
+                      (-device usb-redir)
 ```
 
 YAML never reaches QEMU or FunctionFS directly. It is a device *description*; C serializes it to the binary descriptors and packet streams expected by the target engine.
@@ -173,7 +176,8 @@ src/backends/             # Device implementations behind usb_device_ops
   yaml_backend.{c,h}      # Ops backend driven by loaded UsbNode tree + flow FSM
   pcap_backend.{c,h}      # Replay-from-capture ops backend
 
-src/engine/               # Target execution transports
+src/engine/               # Pluggable execution engine subsystem
+  engine.{c,h}            # Generic usb_engine_ops_t interface, registry, and factory
   qemu_engine.{c,h}       # Connects via TCP usbredir socket to QEMU
   local_engine.{c,h}      # Exposes USB device locally using Linux FunctionFS/ConfigFS
 
@@ -297,5 +301,4 @@ The test harness runs suites against `usb_core` and the execution backends.
 ## 9. Development & Roadmap
 
 Active and upcoming architectural improvements are tracked in [TODO.md](../TODO.md). Key areas include:
-- Standardizing engines around an `engine_ops_t` interface.
 - Asynchronous tick-driven delayed responses and state dwell times.

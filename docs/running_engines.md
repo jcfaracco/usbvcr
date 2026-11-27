@@ -1,6 +1,8 @@
 # Execution Engines: QEMU (usbredir) and Local Linux Gadget (FunctionFS)
 
-`usbvcr` is designed around a single principle: **YAML/PCAP in, real USB traffic out**. The core emulation layer (`usb_core` + `yaml_backend` / `pcap_backend`) is decoupled from the target transport by the engine interface (`src/core/device.h`):
+`usbvcr` is designed around a single principle: **YAML/PCAP in, real USB traffic out**. The core emulation layer (`yaml_backend` / `pcap_backend`) and target execution transports are cleanly separated by two symmetrical seams:
+1. **Device Seam (`src/core/device.h`)**: `usb_device_ops_t` exposes descriptors, control requests, and endpoint queues.
+2. **Engine Seam (`src/engine/engine.h`)**: `usb_engine_ops_t` standardizes execution lifecycle (`init`, `run`, `stop`, `destroy`) across all target transports.
 
 ```
                    ┌─────────────────────────────────────────┐
@@ -9,7 +11,14 @@
                                         │
                                         ▼
                    ┌─────────────────────────────────────────┐
-                   │     usbvcr Core & Backend Translation    │
+                   │   usb_device_ops (Device Seam)          │
+                   │     (yaml_backend / pcap_backend)       │
+                   └────────────────────┬────────────────────┘
+                                        │
+                                        ▼
+                   ┌─────────────────────────────────────────┐
+                   │   usb_engine_ops (Engine Seam)          │
+                   │     (src/engine/engine.{c,h})           │
                    └──────────┬───────────────────┬──────────┘
                               │                   │
                 usbredir wire │                   │ FunctionFS ABI

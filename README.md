@@ -126,10 +126,10 @@ reference.
 | `src/lib/`        | Pure logic: YAML loader, codec tables, flow engine, pcap record/replay. No sockets. |
 | `src/core/`       | The generic USB engine: wire transport, protocol, handshake/dispatch. |
 | `src/backends/`   | `usb_device_ops` implementations — YAML-driven and pcap-replay. |
-| `src/engine/`     | Transports: usbredir-to-QEMU, and the local FunctionFS/ConfigFS gadget. |
+| `src/engine/`     | Pluggable execution engines: generic `usb_engine_ops_t` registry, QEMU usbredir, and local FunctionFS/ConfigFS. |
 | `src/fuzz/`       | A `usb_device_ops` wrapper that mutates traffic for any backend. |
 | `data/`           | Built-in asset library: base schemas, codecs, device templates, and turnkey manifests. |
-| `examples/`       | Complete ready-to-run device projects (Joystick, Mass Storage, UVC Webcam). |
+| `examples/`       | Complete ready-to-run device projects (Joystick, Mass Storage, Composite Device). |
 | `tests/`          | `check`-based unit/integration tests + example YAML projects. |
 | `docs/`           | Architecture deep-dive and the full YAML dialect reference. |
 | `scripts/`          | pcap → YAML project converter (`pcap_to_yaml.py`). |

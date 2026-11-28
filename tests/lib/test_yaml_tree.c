@@ -401,6 +401,141 @@ START_TEST(test_tree_extends_variants_and_cycles)
 }
 END_TEST
 
+START_TEST(test_tree_unified_extends)
+{
+    g_autofree char *dir = g_dir_make_tmp("usbvcr_tree_unified_XXXXXX", NULL);
+
+    /* 1. Register a schema template */
+    schema_t *schemas = schema_new();
+    usb_node_t *s_root = usb_node_create();
+    usb_node_t *s_dev = usb_node_create();
+    usb_node_set_prop(s_dev, create_prop_u8("bLength", 18));
+    usb_node_set_prop(s_dev, create_prop_u8("bDescriptorType", 1));
+    usb_node_set_prop(s_dev, create_prop_u16("bcdUSB", 0x0200));
+    usb_node_set_prop(s_dev, create_prop_u16("idVendor", 0x1111));
+    usb_node_set_prop(s_root, create_prop_node("dev_template", s_dev));
+
+    usb_node_t *s_cfg = usb_node_create();
+    usb_node_set_prop(s_cfg, create_prop_u8("bLength", 9));
+    usb_node_set_prop(s_cfg, create_prop_u8("bDescriptorType", 2));
+    usb_node_set_prop(s_cfg, create_prop_u8("bConfigurationValue", 1));
+    usb_node_set_prop(s_root, create_prop_node("cfg_template", s_cfg));
+
+    schema_register(schemas, s_root, "test_schema");
+    usb_node_free(s_root);
+
+    /* 2. Test sub-node using extends: targeting a schema template */
+    g_autofree char *sub_schema_path = g_build_filename(dir, "sub_schema.yaml", NULL);
+    const char *sub_schema_yaml = "device_descriptor:\n"
+                                  "  extends: \"test_schema.dev_template\"\n"
+                                  "  idVendor: 0x2222\n"
+                                  "  idProduct: 0x3333\n"
+                                  "configurations:\n"
+                                  "  - extends: \"test_schema.cfg_template\"\n"
+                                  "    bConfigurationValue: 5\n";
+    ck_assert(g_file_set_contents(sub_schema_path, sub_schema_yaml, -1, NULL));
+
+    usb_node_t *tree = yaml_tree_load(sub_schema_path, schemas, NULL, NULL);
+    ck_assert_ptr_nonnull(tree);
+
+    /* Verify device_descriptor has inherited bLength=18, overridden idVendor=0x2222, new idProduct=0x3333 */
+    usb_prop_t *p_desc = NULL;
+    for (GList *l = tree->props; l; l = l->next) {
+        usb_prop_t *p = l->data;
+        if (strcmp(p->name, "device_descriptor") == 0) {
+            p_desc = p;
+            break;
+        }
+    }
+    ck_assert_ptr_nonnull(p_desc);
+    ck_assert_int_eq(p_desc->type, USB_PROP_NODE);
+
+    uint16_t vid = 0, pid = 0;
+    uint8_t blen = 0;
+    for (GList *l = p_desc->val.node->props; l; l = l->next) {
+        usb_prop_t *p = l->data;
+        if (strcmp(p->name, "idVendor") == 0) vid = p->val.u16;
+        if (strcmp(p->name, "idProduct") == 0) pid = p->val.u16;
+        if (strcmp(p->name, "bLength") == 0) blen = p->val.u8;
+    }
+    ck_assert_int_eq(blen, 18);
+    ck_assert_int_eq(vid, 0x2222);
+    ck_assert_int_eq(pid, 0x3333);
+
+    /* Verify configurations has bLength=9 and overridden bConfigurationValue=5 */
+    usb_prop_t *p_cfg = NULL;
+    for (GList *l = tree->props; l; l = l->next) {
+        usb_prop_t *p = l->data;
+        if (strcmp(p->name, "configurations") == 0) {
+            p_cfg = p;
+            break;
+        }
+    }
+    ck_assert_ptr_nonnull(p_cfg);
+    uint8_t cfg_val = 0;
+    for (GList *l = p_cfg->val.node->props; l; l = l->next) {
+        usb_prop_t *p = l->data;
+        if (strcmp(p->name, "bConfigurationValue") == 0) cfg_val = p->val.u8;
+    }
+    ck_assert_int_eq(cfg_val, 5);
+    usb_node_free(tree);
+
+    /* 3. Test multi-inheritance list syntax: extends: [ "base1.yaml", "base2.yaml" ] */
+    g_autofree char *base1_path = g_build_filename(dir, "base1.yaml", NULL);
+    const char *base1_yaml = "device_descriptor:\n"
+                             "  bLength: 18\n"
+                             "  idVendor: 0x4444\n";
+    ck_assert(g_file_set_contents(base1_path, base1_yaml, -1, NULL));
+
+    g_autofree char *base2_path = g_build_filename(dir, "base2.yaml", NULL);
+    const char *base2_yaml = "device_descriptor:\n"
+                             "  bcdUSB: 0x0200\n"
+                             "  idProduct: 0x5555\n";
+    ck_assert(g_file_set_contents(base2_path, base2_yaml, -1, NULL));
+
+    g_autofree char *child_multi_path = g_build_filename(dir, "child_multi.yaml", NULL);
+    const char *child_multi_yaml = "extends:\n"
+                                   "  - \"base1.yaml\"\n"
+                                   "  - \"base2.yaml\"\n"
+                                   "device_descriptor:\n"
+                                   "  idProduct: 0x6666\n";
+    ck_assert(g_file_set_contents(child_multi_path, child_multi_yaml, -1, NULL));
+
+    tree = yaml_tree_load(child_multi_path, schemas, NULL, NULL);
+    ck_assert_ptr_nonnull(tree);
+
+    p_desc = NULL;
+    for (GList *l = tree->props; l; l = l->next) {
+        usb_prop_t *p = l->data;
+        if (strcmp(p->name, "device_descriptor") == 0) {
+            p_desc = p;
+            break;
+        }
+    }
+    ck_assert_ptr_nonnull(p_desc);
+    vid = 0; pid = 0; uint16_t bcd = 0; blen = 0;
+    for (GList *l = p_desc->val.node->props; l; l = l->next) {
+        usb_prop_t *p = l->data;
+        if (strcmp(p->name, "bLength") == 0) blen = p->val.u8;
+        if (strcmp(p->name, "idVendor") == 0) vid = p->val.u16;
+        if (strcmp(p->name, "bcdUSB") == 0) bcd = p->val.u16;
+        if (strcmp(p->name, "idProduct") == 0) pid = p->val.u16;
+    }
+    ck_assert_int_eq(blen, 18);          /* From base1 */
+    ck_assert_int_eq(vid, 0x4444);        /* From base1 */
+    ck_assert_int_eq(bcd, 0x0200);        /* From base2 */
+    ck_assert_int_eq(pid, 0x6666);        /* Overridden by child */
+    usb_node_free(tree);
+
+    schema_free(schemas);
+    g_remove(sub_schema_path);
+    g_remove(base1_path);
+    g_remove(base2_path);
+    g_remove(child_multi_path);
+    g_rmdir(dir);
+}
+END_TEST
+
 static Suite *
 yaml_tree_suite(void)
 {
@@ -415,6 +550,7 @@ yaml_tree_suite(void)
     tcase_add_test(tc, test_tree_max_depth_and_non_scalar_keys);
     tcase_add_test(tc, test_tree_oversized_file);
     tcase_add_test(tc, test_tree_extends_variants_and_cycles);
+    tcase_add_test(tc, test_tree_unified_extends);
 
     suite_add_tcase(s, tc);
     return s;

@@ -172,175 +172,9 @@ static gboolean build_raw_block(yaml_document_t *doc, yaml_node_t *map,
 }
 
 /* ── Recursive tree builder (libyaml document API) ────────────────────── */
-static void build_map(yaml_document_t *doc, yaml_node_t *map,
-                      schema_t *schemas, GHashTable *codecs,
-                      usb_node_t *out, char **ns, int depth);
-static void build_value(yaml_document_t *doc, const char *key,
-                        yaml_node_t *v, schema_t *schemas,
-                        GHashTable *codecs, usb_node_t *out, char **ns,
-                        int depth);
-
-/* Attach a scalar `key: val` onto `out`, choosing the property kind from the
- * value (namespace / template-ref / null / integer / ignored string). */
-static void build_scalar(schema_t *schemas, usb_node_t *out,
-                         const char *key, const char *val, char **ns)
-{
-    uint32_t n;
-
-    if (strcmp(key, "namespace") == 0) {
-        g_free(*ns);
-        *ns = g_strdup(val);
-        return;
-    }
-
-    /* A device node's base: fold the named schema template in first, so the
-     * device's own later fields override it. */
-    if (strcmp(key, "schema") == 0 || strcmp(key, "template") == 0) {
-        usb_node_t *base = schema_lookup(schemas, val);
-        if (base)
-            usb_node_merge(out, base);
-        else
-            LOG_WARN("yaml_tree: unknown schema/template '%s'", val);
-        return;
-    }
-
-    if (scalar_is_null(val)) {
-        usb_node_set_prop(out, create_prop_null(key));
-        return;
-    }
-
-    if (parse_uint(val, &n)) {
-        if (width_for_key(key) == 2)
-            usb_node_set_prop(out, create_prop_u16(key, (uint16_t) n));
-        else
-            usb_node_set_prop(out, create_prop_u8(key, (uint8_t) n));
-        return;
-    }
-
-    /* Non-numeric scalar (HID report item, raw_file, enum name): not a
-     * descriptor field. Left for a later encoding pass. */
-    LOG_DEBUG("[Builder] skip non-numeric %s: %s", key, val);
-}
-
-/* Fold the value node of `key` into `out`. `depth` guards against a
- * maliciously deep document exhausting the C stack. */
-/* A `hex:` block is raw bytes; a `codec:`-tagged block encodes to a single
- * byte array. Either becomes one leaf, not a subtree. Otherwise, reuse an
- * existing same-named node (e.g. one folded in from a schema template) so
- * nested fields override into it rather than discarding the template's
- * other fields. */
-static void build_mapping_value(yaml_document_t *doc, const char *key,
-                                yaml_node_t *v, schema_t *schemas,
-                                GHashTable *codecs, usb_node_t *out,
-                                char **ns, int depth)
-{
-    if (build_raw_block(doc, v, out, key))
-        return;
-    if (build_codec_block(doc, v, codecs, out, key))
-        return;
-
-    usb_prop_t *ex = find_prop(out, key);
-    usb_node_t *child;
-    if (ex && ex->type == USB_PROP_NODE) {
-        child = ex->val.node;
-    } else {
-        child = usb_node_create();
-        usb_node_set_prop(out, create_prop_node(key, child));
-    }
-
-    if (strcmp(key, "strings") == 0 && v->type == YAML_MAPPING_NODE) {
-        for (yaml_node_pair_t *p = v->data.mapping.pairs.start;
-             p < v->data.mapping.pairs.top; p++) {
-            yaml_node_t *k = yaml_document_get_node(doc, p->key);
-            yaml_node_t *val = yaml_document_get_node(doc, p->value);
-            if (!k || !val || k->type != YAML_SCALAR_NODE)
-                continue;
-            const char *kstr = (const char *)k->data.scalar.value;
-            const char *vstr = (val->type == YAML_SCALAR_NODE) ?
-                               (const char *)val->data.scalar.value : NULL;
-            if (kstr && vstr) {
-                usb_node_set_prop(child, create_prop_array(kstr,
-                                  (const uint8_t *)vstr, strlen(vstr) + 1));
-            }
-        }
-        return;
-    }
-
-    build_map(doc, v, schemas, codecs, child, ns, depth + 1);
-    usb_node_canonicalize_order(child, key);
-}
-
-/* Each item becomes a distinct sibling under the same key. */
-static void build_sequence_value(yaml_document_t *doc, const char *key,
-                                 yaml_node_t *v, schema_t *schemas,
-                                 GHashTable *codecs, usb_node_t *out,
-                                 char **ns, int depth)
-{
-    for (yaml_node_item_t *i = v->data.sequence.items.start;
-         i < v->data.sequence.items.top; i++) {
-        yaml_node_t *item = yaml_document_get_node(doc, *i);
-        if (!item)
-            continue;
-        if (item->type == YAML_MAPPING_NODE) {
-            usb_node_t *child = usb_node_create();
-            out->props = g_list_append(out->props,
-                                       create_prop_node(key, child));
-            build_map(doc, item, schemas, codecs, child, ns, depth + 1);
-            usb_node_canonicalize_order(child, key);
-        } else {
-            build_value(doc, key, item, schemas, codecs, out, ns,
-                        depth + 1);
-        }
-    }
-}
-
-static void build_value(yaml_document_t *doc, const char *key,
-                        yaml_node_t *v, schema_t *schemas,
-                        GHashTable *codecs, usb_node_t *out, char **ns,
-                        int depth)
-{
-    if (depth > YAML_MAX_DEPTH) {
-        LOG_WARN("yaml_tree: nesting past %d levels, truncating '%s'",
-                 YAML_MAX_DEPTH, key);
-        return;
-    }
-
-    switch (v->type) {
-    case YAML_SCALAR_NODE:
-        build_scalar(schemas, out, key,
-                     (const char *) v->data.scalar.value, ns);
-        break;
-    case YAML_MAPPING_NODE:
-        build_mapping_value(doc, key, v, schemas, codecs, out, ns, depth);
-        break;
-    case YAML_SEQUENCE_NODE:
-        build_sequence_value(doc, key, v, schemas, codecs, out, ns, depth);
-        break;
-    default:
-        break;
-    }
-}
-
-static void build_map(yaml_document_t *doc, yaml_node_t *map,
-                      schema_t *schemas, GHashTable *codecs,
-                      usb_node_t *out, char **ns, int depth)
-{
-    if (map->type != YAML_MAPPING_NODE)
-        return;   /* depth is gated in build_value before recursing here */
-
-    for (yaml_node_pair_t *p = map->data.mapping.pairs.start;
-         p < map->data.mapping.pairs.top; p++) {
-        yaml_node_t *k = yaml_document_get_node(doc, p->key);
-        yaml_node_t *v = yaml_document_get_node(doc, p->value);
-        if (!k || !v || k->type != YAML_SCALAR_NODE)
-            continue;
-        const char *key_str = (const char *) k->data.scalar.value;
-        if (depth == 0 && strcmp(key_str, "extends") == 0)
-            continue;
-        build_value(doc, key_str, v,
-                    schemas, codecs, out, ns, depth);
-    }
-}
+static usb_node_t *yaml_tree_load_recursive(const char *path, schema_t *schemas,
+                                            GHashTable *codecs, char **ns_out,
+                                            GHashTable *visited_paths);
 
 static gboolean is_same_file(const char *path1, const char *path2)
 {
@@ -364,7 +198,7 @@ static char *resolve_extends_path(const char *current_path, const char *ref)
     char *path;
     char *filename;
 
-    if (!ref)
+    if (!ref || !current_path)
     {
         return NULL;
     }
@@ -446,6 +280,250 @@ static char *resolve_extends_path(const char *current_path, const char *ref)
         return NULL;
     }
     return path;
+}
+
+static void apply_extends_ref(const char *current_path, const char *ref,
+                              schema_t *schemas, GHashTable *codecs,
+                              usb_node_t *out, GHashTable *visited_paths)
+{
+    if (!ref || !out)
+        return;
+
+    /* 1. Try schema/template registry (e.g. "namespace.name") */
+    usb_node_t *base = schema_lookup(schemas, ref);
+    if (base) {
+        usb_node_merge(out, base);
+        return;
+    }
+
+    /* 2. Try file path resolution (relative, bare-id, or datadir) */
+    char *base_path = resolve_extends_path(current_path, ref);
+    if (base_path != NULL) {
+        char *bns = NULL;
+        usb_node_t *base_tree = yaml_tree_load_recursive(base_path, schemas, codecs, &bns, visited_paths);
+        g_free(bns);
+        if (base_tree != NULL) {
+            usb_node_merge(out, base_tree);
+            usb_node_free(base_tree);
+        } else {
+            LOG_WARN("yaml_tree: could not load base device '%s'", base_path);
+        }
+        g_free(base_path);
+        return;
+    }
+
+    LOG_WARN("yaml_tree: cannot resolve extends '%s'", ref);
+}
+
+static void apply_extends_node(yaml_document_t *doc, yaml_node_t *node,
+                               const char *current_path, schema_t *schemas,
+                               GHashTable *codecs, usb_node_t *out,
+                               GHashTable *visited_paths)
+{
+    if (!node)
+        return;
+
+    if (node->type == YAML_SCALAR_NODE) {
+        const char *ref = yaml_scalar(node);
+        apply_extends_ref(current_path, ref, schemas, codecs, out, visited_paths);
+    } else if (node->type == YAML_SEQUENCE_NODE) {
+        for (yaml_node_item_t *it = node->data.sequence.items.start;
+             it < node->data.sequence.items.top; it++) {
+            yaml_node_t *item = yaml_document_get_node(doc, *it);
+            if (item && item->type == YAML_SCALAR_NODE) {
+                const char *ref = yaml_scalar(item);
+                apply_extends_ref(current_path, ref, schemas, codecs, out, visited_paths);
+            }
+        }
+    }
+}
+
+static void build_map(yaml_document_t *doc, yaml_node_t *map,
+                      schema_t *schemas, GHashTable *codecs,
+                      usb_node_t *out, char **ns, int depth,
+                      const char *current_path, GHashTable *visited_paths);
+static void build_value(yaml_document_t *doc, const char *key,
+                        yaml_node_t *v, schema_t *schemas,
+                        GHashTable *codecs, usb_node_t *out, char **ns,
+                        int depth, const char *current_path,
+                        GHashTable *visited_paths);
+
+/* Attach a scalar `key: val` onto `out`, choosing the property kind from the
+ * value (namespace / null / integer / ignored string). */
+static void build_scalar(usb_node_t *out,
+                         const char *key, const char *val, char **ns)
+{
+    uint32_t n;
+
+    if (strcmp(key, "namespace") == 0) {
+        g_free(*ns);
+        *ns = g_strdup(val);
+        return;
+    }
+
+    if (scalar_is_null(val)) {
+        usb_node_set_prop(out, create_prop_null(key));
+        return;
+    }
+
+    if (parse_uint(val, &n)) {
+        if (width_for_key(key) == 2)
+            usb_node_set_prop(out, create_prop_u16(key, (uint16_t) n));
+        else
+            usb_node_set_prop(out, create_prop_u8(key, (uint8_t) n));
+        return;
+    }
+
+    /* Non-numeric scalar (HID report item, raw_file, enum name): not a
+     * descriptor field. Left for a later encoding pass. */
+    LOG_DEBUG("[Builder] skip non-numeric %s: %s", key, val);
+}
+
+/* Fold the value node of `key` into `out`. `depth` guards against a
+ * maliciously deep document exhausting the C stack. */
+/* A `hex:` block is raw bytes; a `codec:`-tagged block encodes to a single
+ * byte array. Either becomes one leaf, not a subtree. Otherwise, reuse an
+ * existing same-named node (e.g. one folded in from a schema template) so
+ * nested fields override into it rather than discarding the template's
+ * other fields. */
+static void build_mapping_value(yaml_document_t *doc, const char *key,
+                                yaml_node_t *v, schema_t *schemas,
+                                GHashTable *codecs, usb_node_t *out,
+                                char **ns, int depth, const char *current_path,
+                                GHashTable *visited_paths)
+{
+    if (build_raw_block(doc, v, out, key))
+        return;
+    if (build_codec_block(doc, v, codecs, out, key))
+        return;
+
+    usb_prop_t *ex = find_prop(out, key);
+    usb_node_t *child;
+    if (ex && ex->type == USB_PROP_NODE) {
+        child = ex->val.node;
+    } else {
+        child = usb_node_create();
+        usb_node_set_prop(out, create_prop_node(key, child));
+    }
+
+    if (strcmp(key, "strings") == 0 && v->type == YAML_MAPPING_NODE) {
+        for (yaml_node_pair_t *p = v->data.mapping.pairs.start;
+             p < v->data.mapping.pairs.top; p++) {
+            yaml_node_t *k = yaml_document_get_node(doc, p->key);
+            yaml_node_t *val = yaml_document_get_node(doc, p->value);
+            if (!k || !val || k->type != YAML_SCALAR_NODE)
+                continue;
+            const char *kstr = (const char *)k->data.scalar.value;
+            const char *vstr = (val->type == YAML_SCALAR_NODE) ?
+                               (const char *)val->data.scalar.value : NULL;
+            if (kstr && vstr) {
+                usb_node_set_prop(child, create_prop_array(kstr,
+                                  (const uint8_t *)vstr, strlen(vstr) + 1));
+            }
+        }
+        return;
+    }
+
+    build_map(doc, v, schemas, codecs, child, ns, depth + 1,
+              current_path, visited_paths);
+    usb_node_canonicalize_order(child, key);
+}
+
+/* Each item becomes a distinct sibling under the same key. */
+static void build_sequence_value(yaml_document_t *doc, const char *key,
+                                 yaml_node_t *v, schema_t *schemas,
+                                 GHashTable *codecs, usb_node_t *out,
+                                 char **ns, int depth, const char *current_path,
+                                 GHashTable *visited_paths)
+{
+    for (yaml_node_item_t *i = v->data.sequence.items.start;
+         i < v->data.sequence.items.top; i++) {
+        yaml_node_t *item = yaml_document_get_node(doc, *i);
+        if (!item)
+            continue;
+        if (item->type == YAML_MAPPING_NODE) {
+            usb_node_t *child = usb_node_create();
+            out->props = g_list_append(out->props,
+                                       create_prop_node(key, child));
+            build_map(doc, item, schemas, codecs, child, ns, depth + 1,
+                      current_path, visited_paths);
+            usb_node_canonicalize_order(child, key);
+        } else {
+            build_value(doc, key, item, schemas, codecs, out, ns,
+                        depth + 1, current_path, visited_paths);
+        }
+    }
+}
+
+static void build_value(yaml_document_t *doc, const char *key,
+                        yaml_node_t *v, schema_t *schemas,
+                        GHashTable *codecs, usb_node_t *out, char **ns,
+                        int depth, const char *current_path,
+                        GHashTable *visited_paths)
+{
+    if (depth > YAML_MAX_DEPTH) {
+        LOG_WARN("yaml_tree: nesting past %d levels, truncating '%s'",
+                 YAML_MAX_DEPTH, key);
+        return;
+    }
+
+    switch (v->type) {
+    case YAML_SCALAR_NODE:
+        build_scalar(out, key,
+                     (const char *) v->data.scalar.value, ns);
+        break;
+    case YAML_MAPPING_NODE:
+        build_mapping_value(doc, key, v, schemas, codecs, out, ns, depth,
+                            current_path, visited_paths);
+        break;
+    case YAML_SEQUENCE_NODE:
+        build_sequence_value(doc, key, v, schemas, codecs, out, ns, depth,
+                             current_path, visited_paths);
+        break;
+    default:
+        break;
+    }
+}
+
+static void build_map(yaml_document_t *doc, yaml_node_t *map,
+                      schema_t *schemas, GHashTable *codecs,
+                      usb_node_t *out, char **ns, int depth,
+                      const char *current_path, GHashTable *visited_paths)
+{
+    if (map->type != YAML_MAPPING_NODE)
+        return;   /* depth is gated in build_value before recursing here */
+
+    /* First pass: resolve and merge any extends / template / schema references */
+    for (yaml_node_pair_t *p = map->data.mapping.pairs.start;
+         p < map->data.mapping.pairs.top; p++) {
+        yaml_node_t *k = yaml_document_get_node(doc, p->key);
+        yaml_node_t *v = yaml_document_get_node(doc, p->value);
+        if (!k || !v || k->type != YAML_SCALAR_NODE)
+            continue;
+        const char *key_str = (const char *) k->data.scalar.value;
+        if (strcmp(key_str, "extends") == 0 ||
+            strcmp(key_str, "template") == 0 ||
+            strcmp(key_str, "schema") == 0) {
+            apply_extends_node(doc, v, current_path, schemas, codecs, out, visited_paths);
+        }
+    }
+
+    /* Second pass: process property definitions and sub-mappings */
+    for (yaml_node_pair_t *p = map->data.mapping.pairs.start;
+         p < map->data.mapping.pairs.top; p++) {
+        yaml_node_t *k = yaml_document_get_node(doc, p->key);
+        yaml_node_t *v = yaml_document_get_node(doc, p->value);
+        if (!k || !v || k->type != YAML_SCALAR_NODE)
+            continue;
+        const char *key_str = (const char *) k->data.scalar.value;
+        if (strcmp(key_str, "extends") == 0 ||
+            strcmp(key_str, "template") == 0 ||
+            strcmp(key_str, "schema") == 0)
+            continue;
+        build_value(doc, key_str, v,
+                    schemas, codecs, out, ns, depth,
+                    current_path, visited_paths);
+    }
 }
 
 /* Reject oversized input before handing it to libyaml (bounds memory even
@@ -531,28 +609,7 @@ static usb_node_t *yaml_tree_load_recursive(const char *path, schema_t *schemas,
     root = usb_node_create();
     top = yaml_document_get_root_node(&doc);
     if (top) {
-        if (top->type == YAML_MAPPING_NODE) {
-            yaml_node_t *ext_node = yaml_map_get(&doc, top, "extends");
-            if (ext_node && ext_node->type == YAML_SCALAR_NODE) {
-                const char *base_ref = yaml_scalar(ext_node);
-                char *base_path = resolve_extends_path(path, base_ref);
-                if (base_path != NULL) {
-                    char *bns = NULL;
-                    usb_node_t *base_tree = yaml_tree_load_recursive(base_path, schemas, codecs, &bns, visited_paths);
-                    g_free(bns);
-                    if (base_tree != NULL) {
-                        usb_node_merge(root, base_tree);
-                        usb_node_free(base_tree);
-                    } else {
-                        LOG_WARN("yaml_tree: could not load base device '%s'", base_path);
-                    }
-                    g_free(base_path);
-                } else {
-                    LOG_WARN("yaml_tree: cannot resolve extends '%s'", base_ref);
-                }
-            }
-        }
-        build_map(&doc, top, schemas, codecs, root, ns_out, 0);
+        build_map(&doc, top, schemas, codecs, root, ns_out, 0, path, visited_paths);
     }
 
     yaml_document_delete(&doc);

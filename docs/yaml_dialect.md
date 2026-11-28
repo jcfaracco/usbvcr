@@ -114,9 +114,9 @@ sequencing is a structural choice, not a fixed layout.
 |-----|-------|---------|
 | `version` | string | dialect version |
 | `name` | string | human label |
-| `extends` | string | device template/instance to inherit from (e.g. `uvc_camera`) |
+| `extends` | string **or** list | device template/instance(s) to inherit from (e.g. `uvc_camera` or `["base1.yaml", "base2.yaml"]`) |
 | `imports` | list of paths | schema files to pull templates from |
-| `device_descriptor` | map | uses `template:` + field overrides |
+| `device_descriptor` | map | uses `extends:` (or alias `template:`) + field overrides |
 | `strings` | map `index: text` | USB string descriptors |
 | `configurations` | list | one entry per configuration |
 | `flows` | list of `include:` | behavior files driving this device |
@@ -125,7 +125,7 @@ Inside a configuration:
 
 | Key | Value | Meaning |
 |-----|-------|---------|
-| `template` | string | schema template to base on |
+| `extends` | string **or** list | schema template or base file to base configuration on (alias: `template`) |
 | `bConfigurationValue`, `bmAttributes`, `bMaxPower` | int | standard config fields |
 | `interfaces` | list | interface descriptors |
 
@@ -133,19 +133,46 @@ Inside an interface:
 
 | Key | Value | Meaning |
 |-----|-------|---------|
+| `extends` | string **or** list | schema template or base file to base interface on (alias: `template`) |
 | `bInterfaceNumber`, `bInterfaceClass`, `bInterfaceSubClass`, `bInterfaceProtocol` | int | standard interface fields |
 | `hid_descriptor` | map | e.g. `wDescriptorLength` |
 | `endpoints` | list | `address`, `attributes`, `max_packet_size`, `interval` |
 | `report_descriptor` | list **or** `raw_file` **or** `hex` | symbolic item list (see `codecs/`), an opaque blob path (`raw_file:`), or raw hex bytes (`hex:`) |
 
-Field override example:
+### Unified `extends:` Syntax
 
+`extends:` is the universal inheritance and composition keyword in the dialect. It can be used at any level:
+
+1. **Whole-device specialization (root level):**
+```yaml
+extends: "msc_base.yaml"
+device_descriptor:
+  idVendor: 0x0951
+```
+
+2. **Multiple inheritance / mixins (root level list):**
+```yaml
+extends:
+  - "devices/base_camera.yaml"
+  - "traits/low_power.yaml"
+```
+
+3. **Sub-node composition (node level):**
 ```yaml
 device_descriptor:
-  template: "usb_base.device_descriptor"
+  extends: "usb_base.device_descriptor"
   idVendor: 0x04d9          # override the schema's null
   idProduct: 0x1702
 ```
+
+4. **Array item composition (interfaces / configurations):**
+```yaml
+configurations:
+  - extends: "msc.configuration_descriptor"
+    bMaxPower: 50
+```
+
+> **Compatibility Note**: `template:` and `schema:` are preserved as backward-compatible aliases for `extends:`.
 
 Three authoring modes coexist:
 - **Schema mode** — named fields, serialized to bytes.

@@ -1,8 +1,8 @@
 /*
  * yaml/loader.h – Canonical-dialect YAML -> usb_node_t descriptor tree.
  *
- * Parses the canonical `schemas/ devices/ flows/` dialect (README §3):
- * resolves `import`, applies `template`, overrides fields, and fills the
+ * Parses the canonical `templates/ devices/ flows/` dialect (README §3):
+ * resolves `import`, applies `extends`, overrides fields, and fills the
  * null-valued auto-computed length/count fields (README §3.1).
  *
  * Pure lib module: no socket/engine deps (README §5 layering rule).
@@ -12,19 +12,21 @@
 #define YAML_LOADER_H
 
 #include "usb_node.h"
-#include "schema.h"
+#include "template.h"
 
 /* Canonical file scopes. The containing directory is authoritative:
- * devices/ schemas/ flows/ codecs/ tests/ -> the scope. The scope is never
+ * devices/ templates/ flows/ codecs/ tests/ -> the scope. The scope is never
  * stated in-file. */
 typedef enum {
     YAML_SCOPE_UNKNOWN = -1,
-    YAML_SCOPE_SCHEMAS,  /* schemas/ */
-    YAML_SCOPE_CODECS,   /* codecs/  */
-    YAML_SCOPE_DEVICES,  /* devices/ */
-    YAML_SCOPE_FLOWS,    /* flows/   */
-    YAML_SCOPE_TESTS,    /* tests/   */
+    YAML_SCOPE_TEMPLATES, /* templates/ (formerly schemas/) */
+    YAML_SCOPE_CODECS,    /* codecs/  */
+    YAML_SCOPE_DEVICES,   /* devices/ */
+    YAML_SCOPE_FLOWS,     /* flows/   */
+    YAML_SCOPE_TESTS,     /* tests/   */
 } yaml_scope_t;
+
+#define YAML_SCOPE_SCHEMAS YAML_SCOPE_TEMPLATES
 
 /* Scope from a file path's containing directory (authoritative source).
  * YAML_SCOPE_UNKNOWN if the parent dir is not a recognized scope dir. */
@@ -45,10 +47,11 @@ typedef struct {
 /* Loaded project: the `devices:` manifest (device+flow pairs) plus the shared
  * schema templates and codec tables they resolve against. */
 typedef struct {
-    char       *name;       /* project `name:` field, or NULL if unset */
-    GList      *devices;    /* yaml_dev_entry_t* — all manifest entries */
-    schema_t   *schemas;    /* schema base templates (schemas/ registry) */
-    GHashTable *codecs;     /* "codec name" -> codec_t* (codecs/ tables) */
+    char                *name;       /* project `name:` field, or NULL if unset */
+    GList               *devices;    /* yaml_dev_entry_t* — all manifest entries */
+    template_registry_t *templates;  /* template base prototypes (templates/ registry) */
+    schema_t            *schemas;    /* backward-compat alias pointing to templates */
+    GHashTable          *codecs;     /* "codec name" -> codec_t* (codecs/ tables) */
     GHashTable *flows;      /* "flow name" -> flow_t* (flows/ definitions) */
 
     /* Optional `connection:` manifest block (README §3, run config): lets a

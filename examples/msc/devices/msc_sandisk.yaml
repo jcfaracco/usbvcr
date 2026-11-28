@@ -1,7 +1,10 @@
+imports:
+  - "templates/msc_disk.yaml"
+
 device_descriptor:
-  template: "msc.device_descriptor"
+  extends: "msc.device_descriptor"
   idVendor: 0x0781          # SanDisk Corp.
   idProduct: 0x5567         # Cruzer Blade
 
 configurations:
-  - template: "msc.configuration_descriptor"
+  - extends: "msc.configuration_descriptor"

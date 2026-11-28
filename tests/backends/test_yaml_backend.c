@@ -8,7 +8,7 @@
  * engine in isolation), this drives the full usb_device_ops seam yaml_backend
  * bridges them into - the same seam pcap_backend is tested against in
  * test_pcap_backend.c (integration/ and backends/). example1 is plain
- * literal fields; example2 adds schema imports/overrides; example3 (UVC) adds
+ * literal fields; example2 adds template imports/overrides; example3 (UVC) adds
  * the raw hex escape hatch and isochronous streaming.
  */
 
@@ -284,7 +284,7 @@ START_TEST(test_yaml_backend_e1_ep_in_hello_world)
 }
 END_TEST
 
-/* ── example2: schema imports/overrides (usb_base, hid_base) ───────────── */
+/* ── example2: template imports/overrides (usb_base, hid_base) ───────────── */
 
 #define PROJECT_PATH_E2 TEST_DATA_DIR "/example2/example2.yaml"
 
@@ -295,8 +295,8 @@ static const uint8_t EXPECTED_DEVICE_DESC_E2[18] = {
     0x06, 0x04, 0x01, 0x02, 0x00, 0x01,
 };
 
-/* Two HID interfaces (schema hid_base.interface_descriptor, field order
- * governed by the schema's own order since override fields replace in
+/* Two HID interfaces (template hid_base.interface_descriptor, field order
+ * governed by the template's own order since override fields replace in
  * place - see usb_node_set_prop). */
 static const uint8_t EXPECTED_CONFIG_DESC_E2[59] = {
     0x09, 0x02, 0x3b, 0x00, 0x02, 0x01, 0x00, 0xa0, 0x32, 0x09, 0x04, 0x00,
@@ -308,7 +308,7 @@ static const uint8_t EXPECTED_CONFIG_DESC_E2[59] = {
 
 /* report_descriptor is shorter than example1's: no 6-key rollover array,
  * so its 29 bytes don't actually match either interface's declared
- * wDescriptorLength (63/101) - example2 is the schema/CVE fixture
+ * wDescriptorLength (63/101) - example2 is the template/CVE fixture
  * (tests/cve_hid_validation.yaml), not a byte-perfect enumeration like
  * example1. */
 static const uint8_t EXPECTED_REPORT_DESC_E2[29] = {

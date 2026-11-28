@@ -3,7 +3,7 @@
  *
  * The whole file is loaded into a yaml_document_t, then walked recursively:
  * mapping -> usb_node, sequence -> repeated props under the key, scalar ->
- * leaf property. Schema/template scalars fold a named base in first; a
+ * leaf property. Template scalars fold a named base in first; a
  * `codec:`-tagged block encodes to a single byte array (README §6).
  */
 
@@ -245,6 +245,28 @@ static char *resolve_extends_path(const char *current_path, const char *ref)
             g_free(path);
         }
 
+        /* Try under datadir/templates if ref starts with templates/ or schemas/ */
+        if (g_str_has_prefix(ref, "templates/") && ref[9] != '\0')
+        {
+            path = usbvcr_find_data_file("templates", ref + 10);
+            if (path != NULL && !is_same_file(path, current_path))
+            {
+                g_free(dir);
+                return path;
+            }
+            g_free(path);
+        }
+        if (g_str_has_prefix(ref, "schemas/") && ref[7] != '\0')
+        {
+            path = usbvcr_find_data_file("templates", ref + 8);
+            if (path != NULL && !is_same_file(path, current_path))
+            {
+                g_free(dir);
+                return path;
+            }
+            g_free(path);
+        }
+
         g_free(dir);
         return NULL;
     }
@@ -333,6 +355,108 @@ static void apply_extends_node(yaml_document_t *doc, yaml_node_t *node,
             if (item && item->type == YAML_SCALAR_NODE) {
                 const char *ref = yaml_scalar(item);
                 apply_extends_ref(current_path, ref, schemas, codecs, out, visited_paths);
+            }
+        }
+    }
+}
+
+static usb_node_t *yaml_tree_load_recursive(const char *path, schema_t *schemas,
+                                            GHashTable *codecs, char **ns_out,
+                                            GHashTable *visited_paths);
+
+static char *resolve_import_path(const char *current_path, const char *ref)
+{
+    if (!ref)
+        return NULL;
+
+    char *dir = current_path ? g_path_get_dirname(current_path) : NULL;
+    char *path = NULL;
+
+    if (dir && (g_path_is_absolute(ref) || strchr(ref, '/'))) {
+        if (g_path_is_absolute(ref)) {
+            path = g_strdup(ref);
+        } else {
+            path = g_build_filename(dir, ref, NULL);
+        }
+        if (g_file_test(path, G_FILE_TEST_EXISTS)) {
+            g_free(dir);
+            return path;
+        }
+        g_free(path);
+
+        /* Also check relative to parent directory (e.g. project root when inside devices/) */
+        char *parent = g_path_get_dirname(dir);
+        path = g_build_filename(parent, ref, NULL);
+        g_free(parent);
+        if (g_file_test(path, G_FILE_TEST_EXISTS)) {
+            g_free(dir);
+            return path;
+        }
+        g_free(path);
+    }
+
+    /* Check datadir templates: e.g. ref = "templates/usb_base.yaml", "schemas/usb_base.yaml", or "usb_base" */
+    const char *sub = ref;
+    if (g_str_has_prefix(sub, "templates/"))
+        sub += strlen("templates/");
+    else if (g_str_has_prefix(sub, "schemas/"))
+        sub += strlen("schemas/");
+
+    char *stem = g_strdup(sub);
+    if (g_str_has_suffix(stem, ".yaml"))
+        stem[strlen(stem) - 5] = '\0';
+
+    path = usbvcr_find_data_file("templates", stem);
+    if (!path)
+        path = usbvcr_find_data_file("schemas", stem);
+    g_free(stem);
+
+    g_free(dir);
+    return path;
+}
+
+static void apply_import_ref(const char *current_path, const char *ref,
+                             schema_t *schemas, GHashTable *codecs,
+                             GHashTable *visited_paths)
+{
+    if (!ref || !schemas)
+        return;
+
+    char *path = resolve_import_path(current_path, ref);
+    if (!path) {
+        LOG_WARN("yaml_tree: cannot resolve import '%s'", ref);
+        return;
+    }
+
+    char *ns = NULL;
+    usb_node_t *imported = yaml_tree_load_recursive(path, schemas, codecs, &ns, visited_paths);
+    if (imported) {
+        template_register(schemas, imported, ns);
+        usb_node_free(imported);
+    } else {
+        LOG_WARN("yaml_tree: could not load imported template '%s'", path);
+    }
+    g_free(ns);
+    g_free(path);
+}
+
+static void apply_imports_node(yaml_document_t *doc, yaml_node_t *node,
+                               const char *current_path, schema_t *schemas,
+                               GHashTable *codecs, GHashTable *visited_paths)
+{
+    if (!node || !schemas)
+        return;
+
+    if (node->type == YAML_SCALAR_NODE) {
+        const char *ref = yaml_scalar(node);
+        apply_import_ref(current_path, ref, schemas, codecs, visited_paths);
+    } else if (node->type == YAML_SEQUENCE_NODE) {
+        for (yaml_node_item_t *it = node->data.sequence.items.start;
+             it < node->data.sequence.items.top; it++) {
+            yaml_node_t *item = yaml_document_get_node(doc, *it);
+            if (item && item->type == YAML_SCALAR_NODE) {
+                const char *ref = yaml_scalar(item);
+                apply_import_ref(current_path, ref, schemas, codecs, visited_paths);
             }
         }
     }
@@ -493,6 +617,21 @@ static void build_map(yaml_document_t *doc, yaml_node_t *map,
     if (map->type != YAML_MAPPING_NODE)
         return;   /* depth is gated in build_value before recursing here */
 
+    /* Root-level pass: resolve and register any imports before extends/overrides */
+    if (depth == 0 && schemas != NULL) {
+        for (yaml_node_pair_t *p = map->data.mapping.pairs.start;
+             p < map->data.mapping.pairs.top; p++) {
+            yaml_node_t *k = yaml_document_get_node(doc, p->key);
+            yaml_node_t *v = yaml_document_get_node(doc, p->value);
+            if (!k || !v || k->type != YAML_SCALAR_NODE)
+                continue;
+            const char *key_str = (const char *) k->data.scalar.value;
+            if (strcmp(key_str, "imports") == 0) {
+                apply_imports_node(doc, v, current_path, schemas, codecs, visited_paths);
+            }
+        }
+    }
+
     /* First pass: resolve and merge any extends / template / schema references */
     for (yaml_node_pair_t *p = map->data.mapping.pairs.start;
          p < map->data.mapping.pairs.top; p++) {
@@ -518,7 +657,8 @@ static void build_map(yaml_document_t *doc, yaml_node_t *map,
         const char *key_str = (const char *) k->data.scalar.value;
         if (strcmp(key_str, "extends") == 0 ||
             strcmp(key_str, "template") == 0 ||
-            strcmp(key_str, "schema") == 0)
+            strcmp(key_str, "schema") == 0 ||
+            strcmp(key_str, "imports") == 0)
             continue;
         build_value(doc, key_str, v,
                     schemas, codecs, out, ns, depth,

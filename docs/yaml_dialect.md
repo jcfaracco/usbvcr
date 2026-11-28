@@ -7,7 +7,7 @@ parent directory to a `yaml_scope_t`.
 
 ```
 <project>/
-├── schemas/     reusable descriptor templates
+├── templates/   reusable descriptor templates
 ├── devices/     concrete device instances
 ├── flows/       behavior state machines
 ├── codecs/      symbolic item-stream encoding tables
@@ -34,7 +34,7 @@ name: "Hello World Injector Keyboard"   # optional; used as the gadget name
 
 pcap: "capture.pcapng"                 # optional; alternate to devices: below —
                                         # replay this capture instead of emulating
-                                        # from schemas/devices/flows. Resolved
+                                        # from templates/devices/flows. Resolved
                                         # relative to this file. Mutually exclusive
                                         # with devices: (ignored if --pcap is also
                                         # passed on the CLI).
@@ -62,7 +62,7 @@ equivalents.
 
 ---
 
-## `schemas/` — descriptor templates
+## `templates/` — descriptor templates
 
 Reusable, namespaced descriptor fragments. Fields left `null` are
 **auto-computed** by the loader after the tree is built (lengths/counts), or
@@ -96,7 +96,7 @@ Auto-computed (`null`-eligible) fields: `bLength`, `wTotalLength`,
 
 ## `devices/` — concrete device instances
 
-Import schemas, apply a template, override named fields, and lay out the full
+Import templates, extend a base template, override named fields, and lay out the full
 descriptor tree (configurations → interfaces → endpoints).
 
 **Field order inside a descriptor mapping does not matter.** USB descriptors
@@ -115,7 +115,7 @@ sequencing is a structural choice, not a fixed layout.
 | `version` | string | dialect version |
 | `name` | string | human label |
 | `extends` | string **or** list | device template/instance(s) to inherit from (e.g. `uvc_camera` or `["base1.yaml", "base2.yaml"]`) |
-| `imports` | list of paths | schema files to pull templates from |
+| `imports` | list of paths | template files to pull prototypes from |
 | `device_descriptor` | map | uses `extends:` (or alias `template:`) + field overrides |
 | `strings` | map `index: text` | USB string descriptors |
 | `configurations` | list | one entry per configuration |
@@ -125,7 +125,7 @@ Inside a configuration:
 
 | Key | Value | Meaning |
 |-----|-------|---------|
-| `extends` | string **or** list | schema template or base file to base configuration on (alias: `template`) |
+| `extends` | string **or** list | descriptor template or base file to base configuration on (alias: `template`) |
 | `bConfigurationValue`, `bmAttributes`, `bMaxPower` | int | standard config fields |
 | `interfaces` | list | interface descriptors |
 
@@ -133,7 +133,7 @@ Inside an interface:
 
 | Key | Value | Meaning |
 |-----|-------|---------|
-| `extends` | string **or** list | schema template or base file to base interface on (alias: `template`) |
+| `extends` | string **or** list | descriptor template or base file to base interface on (alias: `template`) |
 | `bInterfaceNumber`, `bInterfaceClass`, `bInterfaceSubClass`, `bInterfaceProtocol` | int | standard interface fields |
 | `hid_descriptor` | map | e.g. `wDescriptorLength` |
 | `endpoints` | list | `address`, `attributes`, `max_packet_size`, `interval` |
@@ -161,7 +161,7 @@ extends:
 ```yaml
 device_descriptor:
   extends: "usb_base.device_descriptor"
-  idVendor: 0x04d9          # override the schema's null
+  idVendor: 0x04d9          # override the template's null
   idProduct: 0x1702
 ```
 
@@ -175,8 +175,8 @@ configurations:
 > **Compatibility Note**: `template:` and `schema:` are preserved as backward-compatible aliases for `extends:`.
 
 Three authoring modes coexist:
-- **Schema mode** — named fields, serialized to bytes.
-- **Raw mode** — `raw_file: "payloads/…"` when no schema fits.
+- **Structured mode** — named fields, serialized to bytes.
+- **Raw mode** — `raw_file: "payloads/…"` when no structured template fits.
 - **Inline hex mode** — `hex: "05010904..."` for raw descriptor bytes inline.
 
 ---

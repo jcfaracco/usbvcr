@@ -1,6 +1,6 @@
 # USB VCR Built-in Data Assets (`data/`)
 
-This directory contains `usbvcr`'s built-in standard library of descriptor schemas, table-driven codecs, reference device models, reusable state machine flows, and turnkey manifests.
+This directory contains `usbvcr`'s built-in standard library of descriptor templates, table-driven codecs, reference device models, reusable state machine flows, and turnkey manifests.
 
 These assets serve as the foundational templates that user projects (such as those in [`examples/`](../examples/README.md)) import and extend.
 
@@ -10,7 +10,7 @@ These assets serve as the foundational templates that user projects (such as tho
 
 ```
 data/
-├── schemas/      # Reusable descriptor templates with autofill placeholders
+├── templates/    # Reusable descriptor templates with autofill placeholders
 │   ├── usb_base.yaml  # Base USB device and configuration descriptor templates
 │   └── hid_base.yaml  # Base HID interface and class descriptor templates
 ├── codecs/       # Generic table-driven item-stream encoding definitions
@@ -32,11 +32,11 @@ data/
 
 ## Role & Usage
 
-### 1. Schema Templates (`schemas/`)
-Define standard descriptor shapes with `null` length/count placeholders that the loader automatically calculates (e.g. `bLength`, `wTotalLength`, `bNumInterfaces`, `bNumEndpoints`). Custom devices import these to avoid redefining boilerplate standard USB fields:
+### 1. Descriptor Templates (`templates/`)
+Define standard descriptor shapes with `null` length/count placeholders that the loader automatically calculates (e.g. `bLength`, `wTotalLength`, `bNumInterfaces`, `bNumEndpoints`). Custom devices import and extend these to avoid redefining boilerplate standard USB fields:
 
 ```yaml
-imports: ["schemas/usb_base.yaml"]
+imports: ["templates/usb_base.yaml"]
 device_descriptor:
   extends: "usb_base.device_descriptor"
   idVendor: 0x1234

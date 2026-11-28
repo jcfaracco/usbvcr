@@ -536,6 +536,65 @@ START_TEST(test_tree_unified_extends)
 }
 END_TEST
 
+START_TEST(test_tree_imports_and_templates)
+{
+    g_autofree char *dir = g_dir_make_tmp("usbvcr_test_imports_XXXXXX", NULL);
+    ck_assert_ptr_nonnull(dir);
+
+    g_autofree char *tmpl_dir = g_build_filename(dir, "templates", NULL);
+    g_mkdir(tmpl_dir, 0700);
+
+    g_autofree char *tmpl_file = g_build_filename(tmpl_dir, "base_dev.yaml", NULL);
+    const char *tmpl_yaml = "namespace: \"custom_ns\"\n"
+                            "device_descriptor:\n"
+                            "  bLength: 18\n"
+                            "  idVendor: 0x5555\n";
+    ck_assert(g_file_set_contents(tmpl_file, tmpl_yaml, -1, NULL));
+
+    g_autofree char *dev_file = g_build_filename(dir, "device.yaml", NULL);
+    const char *dev_yaml = "imports:\n"
+                           "  - \"templates/base_dev.yaml\"\n"
+                           "device_descriptor:\n"
+                           "  extends: \"custom_ns.device_descriptor\"\n"
+                           "  idProduct: 0x6666\n";
+    ck_assert(g_file_set_contents(dev_file, dev_yaml, -1, NULL));
+
+    template_registry_t *reg = template_registry_new();
+    usb_node_t *tree = yaml_tree_load(dev_file, reg, NULL, NULL);
+    ck_assert_ptr_nonnull(tree);
+
+    usb_prop_t *p_desc = NULL;
+    for (GList *l = tree->props; l; l = l->next) {
+        usb_prop_t *p = l->data;
+        if (strcmp(p->name, "device_descriptor") == 0) {
+            p_desc = p;
+            break;
+        }
+    }
+    ck_assert_ptr_nonnull(p_desc);
+    ck_assert_int_eq(p_desc->type, USB_PROP_NODE);
+
+    uint16_t vid = 0, pid = 0;
+    uint8_t blen = 0;
+    for (GList *l = p_desc->val.node->props; l; l = l->next) {
+        usb_prop_t *p = l->data;
+        if (strcmp(p->name, "idVendor") == 0) vid = p->val.u16;
+        if (strcmp(p->name, "idProduct") == 0) pid = p->val.u16;
+        if (strcmp(p->name, "bLength") == 0) blen = p->val.u8;
+    }
+    ck_assert_int_eq(blen, 18);
+    ck_assert_int_eq(vid, 0x5555);
+    ck_assert_int_eq(pid, 0x6666);
+
+    usb_node_free(tree);
+    template_registry_free(reg);
+    g_remove(dev_file);
+    g_remove(tmpl_file);
+    g_rmdir(tmpl_dir);
+    g_rmdir(dir);
+}
+END_TEST
+
 static Suite *
 yaml_tree_suite(void)
 {
@@ -551,6 +610,7 @@ yaml_tree_suite(void)
     tcase_add_test(tc, test_tree_oversized_file);
     tcase_add_test(tc, test_tree_extends_variants_and_cycles);
     tcase_add_test(tc, test_tree_unified_extends);
+    tcase_add_test(tc, test_tree_imports_and_templates);
 
     suite_add_tcase(s, tc);
     return s;

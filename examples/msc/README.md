@@ -2,19 +2,19 @@
 
 This example demonstrates how to emulate a USB Mass Storage Class (MSC) flash drive
 (pendrive) using the Bulk-Only Transport (BOT) protocol and SCSI transparent command set,
-leveraging **schema templates (`schemas/`)** to cleanly derive multiple devices without
+leveraging **descriptor templates (`templates/`)** to cleanly derive multiple devices without
 descriptor duplication.
 
 ## Directory Structure
 
 ```
 examples/msc/
-├── schemas/
-│   └── msc_disk.yaml          # Base schema template (namespace: "msc")
+├── templates/
+│   └── msc_disk.yaml          # Base descriptor template (namespace: "msc")
 ├── devices/
-│   ├── msc_sandisk.yaml       # SanDisk Cruzer Blade (uses msc.* templates)
-│   ├── msc_kingston.yaml      # Kingston DataTraveler (uses msc.* templates)
-│   └── msc_corsair.yaml       # Corsair Flash Voyager (uses msc.* templates)
+│   ├── msc_sandisk.yaml       # SanDisk Cruzer Blade (extends msc.* templates)
+│   ├── msc_kingston.yaml      # Kingston DataTraveler (extends msc.* templates)
+│   └── msc_corsair.yaml       # Corsair Flash Voyager (extends msc.* templates)
 ├── flows/
 │   └── msc_flow.yaml          # Bulk-Only Transport state machine & SCSI disk handler
 ├── payloads/
@@ -26,9 +26,9 @@ examples/msc/
 
 ---
 
-## Schema Templating Architecture
+## Descriptor Templating Architecture
 
-### 1. Base Schema Template (`schemas/msc_disk.yaml`)
+### 1. Base Descriptor Template (`templates/msc_disk.yaml`)
 
 Defines reusable USB Mass Storage descriptor templates under the `msc` namespace:
 - `msc.device_descriptor`: Standard USB 2.0 device descriptor with `idVendor: null` and `idProduct: null`.
@@ -51,39 +51,48 @@ device_descriptor:
 
 ### 2. Concrete Devices (`devices/`)
 
-Each device references the templates and overrides only its own specific identifiers:
+Each device imports the template definition and extends it with its own specific identifiers:
 
 ```yaml
 # devices/msc_sandisk.yaml
+imports:
+  - "templates/msc_disk.yaml"
+
 device_descriptor:
-  template: "msc.device_descriptor"
+  extends: "msc.device_descriptor"
   idVendor: 0x0781          # SanDisk Corp.
   idProduct: 0x5567         # Cruzer Blade
 
 configurations:
-  - template: "msc.configuration_descriptor"
+  - extends: "msc.configuration_descriptor"
 ```
 
 ```yaml
 # devices/msc_kingston.yaml
+imports:
+  - "templates/msc_disk.yaml"
+
 device_descriptor:
-  template: "msc.device_descriptor"
+  extends: "msc.device_descriptor"
   idVendor: 0x0951          # Kingston Technology
   idProduct: 0x1666         # DataTraveler 100 G3
 
 configurations:
-  - template: "msc.configuration_descriptor"
+  - extends: "msc.configuration_descriptor"
 ```
 
 ```yaml
 # devices/msc_corsair.yaml
+imports:
+  - "templates/msc_disk.yaml"
+
 device_descriptor:
-  template: "msc.device_descriptor"
+  extends: "msc.device_descriptor"
   idVendor: 0x1b1c          # Corsair
   idProduct: 0x1a03         # Flash Voyager
 
 configurations:
-  - template: "msc.configuration_descriptor"
+  - extends: "msc.configuration_descriptor"
 ```
 
 ---

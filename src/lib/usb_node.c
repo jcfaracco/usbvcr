@@ -205,7 +205,7 @@ static const char *const INTERFACE_ASSOCIATION_FIELDS[] = {
 
 /* Keyed by the YAML prop name a descriptor of that kind is nested under.
  * Singular aliases (configuration_descriptor, interface_descriptor) cover
- * the name schema template files (schemas/) use for the same kind. */
+ * the name template files (templates/) use for the same kind. */
 static const canonical_kind_t CANONICAL_KINDS[] = {
     CANON("device_descriptor",        DEVICE_DESCRIPTOR_FIELDS),
     CANON("configurations",           CONFIG_DESCRIPTOR_FIELDS),

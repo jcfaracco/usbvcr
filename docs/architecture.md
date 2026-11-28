@@ -11,8 +11,8 @@ This document describes the architecture and design of usbvcr: data flow, execut
 
 1. Describe any USB device in YAML only — no recompilation per device.
 2. Two authoring modes, both first-class:
-   - **Schema mode** — named descriptor fields, serialized to raw packets.
-   - **Raw mode** — opaque `hex` / `raw_file` payloads when no schema exists.
+   - **Structured mode** — named descriptor fields, serialized to raw packets.
+   - **Raw mode** — opaque `hex` / `raw_file` payloads when no template exists.
 3. Behavior as a declarative **flow / state machine** (Ansible-like:
    `match`, `actions`, `transition_state`, bounded `when:` conditionals).
 4. Fuzz-friendly: every field overridable, malformed values injectable.
@@ -79,8 +79,8 @@ concerns:
 
 | Directory   | Role                                                        |
 |-------------|-------------------------------------------------------------|
-| `schemas/`  | Reusable descriptor **templates** (namespaced), with `null` placeholders for auto-computed fields. |
-| `devices/`  | Concrete device instances: `import` schemas, apply `template`, override fields. |
+| `templates/`| Reusable descriptor **templates** (namespaced), with `null` placeholders for auto-computed fields. |
+| `devices/`  | Concrete device instances: `import` templates, apply `extends`, override fields. |
 | `flows/`    | Behavior: states, `match`/`actions` rules, transitions, endpoint queues. |
 | `payloads/` | Opaque binary blobs (`raw_file`), for raw mode.             |
 | `codecs/`   | Symbolic item-stream tables (e.g. HID report). See §6.      |
@@ -96,7 +96,7 @@ tree is built:
 how fuzz/CVE cases inject bad values (e.g. `wTotalLength: 0xFFFF`).
 
 ### 3.2 Raw escape hatch
-When no schema fits, bytes go through directly:
+When no template fits, bytes go through directly:
 ```yaml
 report_descriptor:
   raw_file: "payloads/hid_consumer_report.bin"
@@ -125,7 +125,7 @@ deterministic fuzzing):
 
 ## 4. One YAML dialect (canonical)
 
-There is a single dialect: **canonical** — `device / schema / flow`
+There is a single dialect: **canonical** — `device / template / flow`
 (see [docs/yaml_dialect.md](yaml_dialect.md)). The old pcap-replay grammar
 (`packet / USBpcap / USBpcapSetup / Raw`) has been dropped; do not reintroduce a
 second grammar into the loader.
@@ -148,7 +148,7 @@ src/lib/                  # Pure utility & protocol logic (no socket/engine deps
     loader.{c,h}          # Canonical dialect parser, manifest loading, import/template resolution
     tree.{c,h}            # UsbNode tree builder and null-field autofill (bLength, wTotalLength)
     util.{c,h}            # Path and file utilities for YAML loading
-  schema.{c,h}            # YAML schema definitions & structural validation
+  template.{c,h}          # Prototype descriptor template registry
   codec.{c,h}             # Generic table-driven item-stream encoder (see §6)
   flow.{c,h}              # Declarative state machine: states, rules, match, actions, queues
   stream/                 # Isochronous streaming infrastructure
@@ -213,14 +213,14 @@ needs no YAML awareness — the only seam is which backend is plugged in.
 ## 6. Generic codec tables (replaces HID special-casing)
 
 Symbolic descriptors (HID report items, etc.) are **not** hardcoded in C. They
-are resolved through a data table imported like a schema. C keeps one generic
+are resolved through a data table imported like a template. C keeps one generic
 encoder; new device classes = new table, zero new code.
 
 ```
 report_descriptor (symbolic)  +  codecs/hid_report.yaml  ──▶  codec encoder  ──▶  bytes
 ```
 
-### 6.1 Table schema (HID example)
+### 6.1 Table format (HID example)
 ```yaml
 version: "1.0"
 codec: "hid_report"

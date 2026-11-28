@@ -329,7 +329,7 @@ test_case:
         direction: "device_to_host"
         type: "control_response"
         override_payload:
-          template: "usb_base.configuration_descriptor"
+          extends: "usb_base.configuration_descriptor"
           wTotalLength: 0xFFFF        # oversized on purpose
           bNumInterfaces: 2
     - assert_behavior:

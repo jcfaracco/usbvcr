@@ -98,7 +98,7 @@ expects. One translation layer, one engine, any device.
 name: "Example Keyboard"
 imports: ["schemas/usb_base.yaml"]
 device_descriptor:
-  template: "usb_base.device_descriptor"
+  extends: "usb_base.device_descriptor"
   idVendor: 0x04d9
   idProduct: 0x1702
 ```

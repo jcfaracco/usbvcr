@@ -38,7 +38,7 @@ Define standard descriptor shapes with `null` length/count placeholders that the
 ```yaml
 imports: ["schemas/usb_base.yaml"]
 device_descriptor:
-  template: "usb_base.device_descriptor"
+  extends: "usb_base.device_descriptor"
   idVendor: 0x1234
   idProduct: 0x5678
 ```

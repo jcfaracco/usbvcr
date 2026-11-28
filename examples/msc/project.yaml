@@ -1,5 +1,5 @@
 version: "1.0"
-name: "Virtual USB Flash Drive"
+name: "Virtual USB Flash Drive (SanDisk)"
 
 connection:
   engine: "qemu"
@@ -7,5 +7,5 @@ connection:
   port: "4000"
 
 devices:
-  - device: "devices/msc_disk.yaml"
+  - device: "devices/msc_sandisk.yaml"
     flow: "flows/msc_flow.yaml"

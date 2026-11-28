@@ -9,7 +9,7 @@ lib_sources = files(
   'yaml/loader.c',
   'yaml/tree.c',
   'yaml/util.c',
-  'schema.c',
+  'template.c',
   'codec.c',
   'flow.c',
   'version.c',

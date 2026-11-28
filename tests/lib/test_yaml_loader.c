@@ -24,7 +24,8 @@
 
 START_TEST(test_scope_each_dir)
 {
-    ck_assert_int_eq(yaml_scope_from_path("schemas/kbd_base.yaml"), YAML_SCOPE_SCHEMAS);
+    ck_assert_int_eq(yaml_scope_from_path("templates/kbd_base.yaml"), YAML_SCOPE_TEMPLATES);
+    ck_assert_int_eq(yaml_scope_from_path("schemas/kbd_base.yaml"), YAML_SCOPE_TEMPLATES);
     ck_assert_int_eq(yaml_scope_from_path("devices/kbd.yaml"), YAML_SCOPE_DEVICES);
     ck_assert_int_eq(yaml_scope_from_path("flows/enum.yaml"), YAML_SCOPE_FLOWS);
     ck_assert_int_eq(yaml_scope_from_path("tests/cve.yaml"), YAML_SCOPE_TESTS);
@@ -521,25 +522,31 @@ END_TEST
 START_TEST(test_loader_schema_and_flow_parse_errors)
 {
     g_autofree char *dir = g_dir_make_tmp("usbvcr_loader_fails_XXXXXX", NULL);
+    g_autofree char *templates_dir = g_build_filename(dir, "templates", NULL);
     g_autofree char *schemas_dir = g_build_filename(dir, "schemas", NULL);
     g_autofree char *flows_dir = g_build_filename(dir, "flows", NULL);
     g_autofree char *codecs_dir = g_build_filename(dir, "codecs", NULL);
     g_autofree char *tests_dir = g_build_filename(dir, "tests", NULL);
     g_autofree char *devs_dir = g_build_filename(dir, "devices", NULL);
+    g_mkdir(templates_dir, 0700);
     g_mkdir(schemas_dir, 0700);
     g_mkdir(flows_dir, 0700);
     g_mkdir(codecs_dir, 0700);
     g_mkdir(tests_dir, 0700);
     g_mkdir(devs_dir, 0700);
 
-    /* 1. Broken schema in schemas/ */
-    g_autofree char *bad_schema = g_build_filename(schemas_dir, "broken.yaml", NULL);
-    ck_assert(g_file_set_contents(bad_schema, "bad: [unclosed\n", -1, NULL));
-
     g_autofree char *proj_path = g_build_filename(dir, "project.yaml", NULL);
     ck_assert(g_file_set_contents(proj_path, "version: \"1.0\"\nname: \"t\"\n", -1, NULL));
 
-    /* Schema error causes yaml_parse_from_file to fail */
+    /* 1. Broken template in templates/ */
+    g_autofree char *bad_template = g_build_filename(templates_dir, "broken.yaml", NULL);
+    ck_assert(g_file_set_contents(bad_template, "bad: [unclosed\n", -1, NULL));
+    ck_assert_ptr_null(yaml_parse_from_file(proj_path));
+    g_remove(bad_template);
+
+    /* 1b. Broken schema in schemas/ (legacy scope) */
+    g_autofree char *bad_schema = g_build_filename(schemas_dir, "broken.yaml", NULL);
+    ck_assert(g_file_set_contents(bad_schema, "bad: [unclosed\n", -1, NULL));
     ck_assert_ptr_null(yaml_parse_from_file(proj_path));
     g_remove(bad_schema);
 
@@ -575,6 +582,7 @@ START_TEST(test_loader_schema_and_flow_parse_errors)
 
     g_remove(bad_dev);
     g_remove(proj_path);
+    g_rmdir(templates_dir);
     g_rmdir(schemas_dir);
     g_rmdir(flows_dir);
     g_rmdir(codecs_dir);

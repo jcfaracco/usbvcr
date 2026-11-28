@@ -1,0 +1,11 @@
+version: "1.0"
+name: "Virtual Corsair Flash Voyager"
+
+connection:
+  engine: "qemu"
+  host: "127.0.0.1"
+  port: "4002"
+
+devices:
+  - device: "devices/msc_corsair.yaml"
+    flow: "flows/msc_flow.yaml"

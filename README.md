@@ -15,7 +15,7 @@ and drives the state machine.
 ## Why usbvcr?
 
 - 🎛️ **Device-as-data** — a device is a directory of YAML, not a C file.
-  Schemas, instances, and behavior are cleanly separated.
+  Templates, instances, and behavior are cleanly separated.
 - 🧩 **Two authoring modes** — named descriptor fields for structured
   devices, raw `hex` / file payloads for everything else.
 - 🔁 **Record *and* replay** — capture a real device's USB traffic to
@@ -76,7 +76,7 @@ For detailed guides, QEMU command lines, and `dummy_hcd` / hardware OTG setup, s
 ## How it works
 
 ```
-YAML project                         canonical dialect: schemas/ devices/ flows/ payloads/ codecs/
+YAML project                         canonical dialect: templates/ devices/ flows/ payloads/ codecs/
      │
      ▼  src/lib/yaml_loader + codec + flow
 UsbNode descriptor tree  +  flow state machine
@@ -96,9 +96,9 @@ expects. One translation layer, one engine, any device.
 ```yaml
 # devices/keyboard.yaml
 name: "Example Keyboard"
-imports: ["schemas/usb_base.yaml"]
+imports: ["templates/usb_base.yaml"]
 device_descriptor:
-  template: "usb_base.device_descriptor"
+  extends: "usb_base.device_descriptor"
   idVendor: 0x04d9
   idProduct: 0x1702
 ```
@@ -114,7 +114,7 @@ states:
 ```
 
 Raw payloads (firmware blobs, opaque reports) drop straight into either file
-with `hex: "..."` or `raw_file: "payloads/blob.bin"` — no schema required.
+with `hex: "..."` or `raw_file: "payloads/blob.bin"` — no template required.
 See [`tests/data/example1`](tests/data/example1) for a complete minimal
 project and [`docs/yaml_dialect.md`](docs/yaml_dialect.md) for the full key
 reference.
@@ -128,7 +128,7 @@ reference.
 | `src/backends/`   | `usb_device_ops` implementations — YAML-driven and pcap-replay. |
 | `src/engine/`     | Pluggable execution engines: generic `usb_engine_ops_t` registry, QEMU usbredir, and local FunctionFS/ConfigFS. |
 | `src/fuzz/`       | A `usb_device_ops` wrapper that mutates traffic for any backend. |
-| `data/`           | Built-in asset library: base schemas, codecs, device templates, and turnkey manifests. |
+| `data/`           | Built-in asset library: base templates, codecs, reference devices, and turnkey manifests. |
 | `examples/`       | Complete ready-to-run device projects (Joystick, Mass Storage, Composite Device). |
 | `tests/`          | `check`-based unit/integration tests + example YAML projects. |
 | `docs/`           | Architecture deep-dive and the full YAML dialect reference. |
@@ -171,7 +171,7 @@ See [`examples/README.md`](examples/README.md) for detailed descriptions, runnin
   QEMU (`usbredir`) and local Linux gadget (`FunctionFS` / `ConfigFS`) execution.
 - [`docs/yaml_dialect.md`](docs/yaml_dialect.md) — canonical YAML directory
   and key reference.
-- [`data/README.md`](data/README.md) — built-in base schemas, codecs, reference devices, and manifests.
+- [`data/README.md`](data/README.md) — built-in base templates, codecs, reference devices, and manifests.
 - [`examples/README.md`](examples/README.md) — guide to the included device examples.
 
 ## License

@@ -1,5 +1,9 @@
+imports:
+  - "templates/usb_base.yaml"
+  - "templates/hid_base.yaml"
+
 device_descriptor:
-  schema: "usb_base.device_descriptor"
+  extends: "usb_base.device_descriptor"
   idVendor: 0x04d9
   idProduct: 0x1702
   bcdDevice: 0x0406
@@ -7,12 +11,12 @@ device_descriptor:
   iProduct: 2
 
 configurations:
-  - schema: "usb_base.configuration_descriptor"
+  - extends: "usb_base.configuration_descriptor"
     wTotalLength: 59          # 9 (config) + 2 x [9 iface + 9 HID + 7 ep]
     bNumInterfaces: 2
     bmAttributes: 0xa0
     interfaces:
-      - schema: "hid_base.interface_descriptor"
+      - extends: "hid_base.interface_descriptor"
         bInterfaceNumber: 0
         bNumEndpoints: 1
         bInterfaceSubClass: 0x01
@@ -27,7 +31,7 @@ configurations:
             wMaxPacketSize: 8
             bInterval: 10
 
-      - schema: "hid_base.interface_descriptor"
+      - extends: "hid_base.interface_descriptor"
         bInterfaceNumber: 1
         bNumEndpoints: 1
         bInterfaceSubClass: 0x00

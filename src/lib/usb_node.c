@@ -142,8 +142,22 @@ void usb_node_set_prop(usb_node_t *node, usb_prop_t *prop)
 void usb_node_merge(usb_node_t *dst, const usb_node_t *src)
 {
     if (!dst || !src) return;
-    for (GList *l = src->props; l; l = l->next)
-        usb_node_set_prop(dst, usb_prop_clone(l->data));
+    for (GList *l = src->props; l; l = l->next) {
+        usb_prop_t *sp = l->data;
+        usb_prop_t *dp = NULL;
+        for (GList *dl = dst->props; dl; dl = dl->next) {
+            usb_prop_t *p = dl->data;
+            if (strcmp(p->name, sp->name) == 0) {
+                dp = p;
+                break;
+            }
+        }
+        if (dp && dp->type == USB_PROP_NODE && sp->type == USB_PROP_NODE) {
+            usb_node_merge(dp->val.node, sp->val.node);
+        } else {
+            usb_node_set_prop(dst, usb_prop_clone(sp));
+        }
+    }
 }
 
 /* ── Canonical field ordering ── */
@@ -191,7 +205,7 @@ static const char *const INTERFACE_ASSOCIATION_FIELDS[] = {
 
 /* Keyed by the YAML prop name a descriptor of that kind is nested under.
  * Singular aliases (configuration_descriptor, interface_descriptor) cover
- * the name schema template files (schemas/) use for the same kind. */
+ * the name template files (templates/) use for the same kind. */
 static const canonical_kind_t CANONICAL_KINDS[] = {
     CANON("device_descriptor",        DEVICE_DESCRIPTOR_FIELDS),
     CANON("configurations",           CONFIG_DESCRIPTOR_FIELDS),

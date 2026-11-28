@@ -1,48 +1,10 @@
+imports:
+  - "templates/msc_disk.yaml"
+
 device_descriptor:
-  - bLength: 18
-    bDescriptorType: 0x01
-    bcdUSB: 0x0200
-    bDeviceClass: 0x00         # Defined at interface level
-    bDeviceSubClass: 0x00
-    bDeviceProtocol: 0x00
-    bMaxPacketSize0: 64
-    idVendor: 0x0781          # SanDisk Corp.
-    idProduct: 0x5567         # Cruzer Blade
-    bcdDevice: 0x0100
-    iManufacturer: 1
-    iProduct: 2
-    iSerialNumber: 3
-    bNumConfigurations: 1
+  extends: "msc.device_descriptor"
+  idVendor: 0x0781          # SanDisk Corp.
+  idProduct: 0x5567         # Cruzer Blade
 
 configurations:
-  - bLength: 9
-    bDescriptorType: 0x02
-    wTotalLength: 32          # 9 (config) + 9 (iface) + 7 (ep in) + 7 (ep out)
-    bNumInterfaces: 1
-    bConfigurationValue: 1
-    iConfiguration: 0
-    bmAttributes: 0x80        # Bus powered
-    bMaxPower: 112            # 224 mA
-    interfaces:
-      - bLength: 9
-        bDescriptorType: 0x04
-        bInterfaceNumber: 0
-        bAlternateSetting: 0
-        bNumEndpoints: 2
-        bInterfaceClass: 0x08      # Mass Storage Class (MSC)
-        bInterfaceSubClass: 0x06   # SCSI transparent command set
-        bInterfaceProtocol: 0x50   # Bulk-Only Transport (BOT)
-        iInterface: 0
-        endpoints:
-          - bLength: 7
-            bDescriptorType: 0x05
-            bEndpointAddress: 0x81  # Bulk IN
-            bmAttributes: 0x02       # Bulk transfer
-            wMaxPacketSize: 512
-            bInterval: 0
-          - bLength: 7
-            bDescriptorType: 0x05
-            bEndpointAddress: 0x02  # Bulk OUT
-            bmAttributes: 0x02       # Bulk transfer
-            wMaxPacketSize: 512
-            bInterval: 0
+  - extends: "msc.configuration_descriptor"

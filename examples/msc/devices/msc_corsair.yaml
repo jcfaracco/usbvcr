@@ -1,0 +1,10 @@
+imports:
+  - "templates/msc_disk.yaml"
+
+device_descriptor:
+  extends: "msc.device_descriptor"
+  idVendor: 0x1b1c          # Corsair
+  idProduct: 0x1a03         # Flash Voyager
+
+configurations:
+  - extends: "msc.configuration_descriptor"

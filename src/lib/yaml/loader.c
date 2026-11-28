@@ -1,7 +1,7 @@
 /*
  * yaml/loader.c – Canonical-dialect project loader.
  *
- * Orchestration only: resolve a project's scopes (schemas/ codecs/ tests/)
+ * Orchestration only: resolve a project's scopes (templates/ codecs/ tests/)
  * and its `devices:` manifest, delegating the YAML->usb_node build to
  * yaml/tree.{c,h} and codec tables to codec.{c,h}.
  *
@@ -33,11 +33,12 @@ typedef struct {
 /* Directory name -> scope. The directory is authoritative; the scope is
  * never stated in-file. */
 static const yaml_scope_entry_t scope_by_dir[] = {
-    { "schemas", YAML_SCOPE_SCHEMAS },
-    { "codecs",  YAML_SCOPE_CODECS  },
-    { "devices", YAML_SCOPE_DEVICES },
-    { "flows",   YAML_SCOPE_FLOWS   },
-    { "tests",   YAML_SCOPE_TESTS   },
+    { "templates", YAML_SCOPE_TEMPLATES },
+    { "schemas",   YAML_SCOPE_TEMPLATES },
+    { "codecs",    YAML_SCOPE_CODECS    },
+    { "devices",   YAML_SCOPE_DEVICES   },
+    { "flows",     YAML_SCOPE_FLOWS     },
+    { "tests",     YAML_SCOPE_TESTS     },
 };
 
 yaml_scope_t yaml_scope_from_path(const char *path)
@@ -64,18 +65,18 @@ yaml_scope_t yaml_scope_from_path(const char *path)
  * Each consumes one file and folds it into `dev`. Return 0 on success, -1 on
  * parse error. */
 
-/* Schemas: build the tree, then register each top-level descriptor node as a
- * template under "<namespace>.<name>" for devices to import. */
-static int parse_schemas(const char *path, yaml_device_t *dev)
+/* Templates: build the tree, then register each top-level descriptor node as a
+ * template under "<namespace>.<name>" for devices to extend. */
+static int parse_templates(const char *path, yaml_device_t *dev)
 {
     char *ns = NULL;
-    usb_node_t *root = yaml_tree_load(path, dev->schemas, dev->codecs, &ns);
+    usb_node_t *root = yaml_tree_load(path, dev->templates, dev->codecs, &ns);
     if (!root) {
         g_free(ns);
         return -1;
     }
 
-    schema_register(dev->schemas, root, ns);
+    template_register(dev->templates, root, ns);
 
     /* Registry owns clones; drop the working tree. */
     usb_node_free(root);
@@ -527,8 +528,8 @@ static int load_scope_dir(const char *root, const char *sub,
                 /* Only shared, dir-scanned scopes reach here; devices and flows
                  * come from the project `devices:` manifest (see parse_main). */
                 switch (want) {
-                    case YAML_SCOPE_SCHEMAS:
-                        rc = parse_schemas(path, dev);
+                    case YAML_SCOPE_TEMPLATES:
+                        rc = parse_templates(path, dev);
                         break;
                     case YAML_SCOPE_CODECS:
                         rc = parse_codecs(path, dev);
@@ -559,7 +560,8 @@ yaml_device_t *yaml_device_create(void)
 
     /* tree/flow start NULL: they alias the first manifest entry once loaded. */
     dev->speed     = -1;
-    dev->schemas   = schema_new();
+    dev->templates = template_registry_new();
+    dev->schemas   = dev->templates;
     dev->codecs    = g_hash_table_new_full(g_str_hash, g_str_equal,
                                            g_free,
                                            (GDestroyNotify) codec_free);
@@ -579,23 +581,25 @@ yaml_device_t *yaml_parse_from_file(const char *path)
     char *datadir = usbvcr_get_data_dir();
     yaml_device_t *dev = yaml_device_create();
 
-    /* Pre-load global shared resources (schemas, codecs, and flows) from data dir first */
+    /* Pre-load global shared resources (templates, codecs, and flows) from data dir first */
     if (datadir != NULL) {
         if (g_strcmp0(datadir, dir) != 0) {
-            load_scope_dir(datadir, "schemas", YAML_SCOPE_SCHEMAS, dev);
-            load_scope_dir(datadir, "codecs",  YAML_SCOPE_CODECS,  dev);
-            load_scope_dir(datadir, "flows",   YAML_SCOPE_FLOWS,   dev);
+            load_scope_dir(datadir, "templates", YAML_SCOPE_TEMPLATES, dev);
+            load_scope_dir(datadir, "schemas",   YAML_SCOPE_TEMPLATES, dev);
+            load_scope_dir(datadir, "codecs",    YAML_SCOPE_CODECS,    dev);
+            load_scope_dir(datadir, "flows",     YAML_SCOPE_FLOWS,     dev);
         }
         g_free(datadir);
     }
 
-    /* Shared resources first (dir-scanned): schema templates + codec tables + flows.
+    /* Shared resources first (dir-scanned): templates + codec tables + flows.
      * Then the project `devices:` manifest, which loads each device tree using
      * them. tests/ is still dir-scanned (stub). */
-    if (load_scope_dir(dir, "schemas", YAML_SCOPE_SCHEMAS, dev) < 0 ||
-        load_scope_dir(dir, "codecs",  YAML_SCOPE_CODECS,  dev) < 0 ||
-        load_scope_dir(dir, "flows",   YAML_SCOPE_FLOWS,   dev) < 0 ||
-        load_scope_dir(dir, "tests",   YAML_SCOPE_TESTS,   dev) < 0 ||
+    if (load_scope_dir(dir, "templates", YAML_SCOPE_TEMPLATES, dev) < 0 ||
+        load_scope_dir(dir, "schemas",   YAML_SCOPE_TEMPLATES, dev) < 0 ||
+        load_scope_dir(dir, "codecs",    YAML_SCOPE_CODECS,    dev) < 0 ||
+        load_scope_dir(dir, "flows",     YAML_SCOPE_FLOWS,     dev) < 0 ||
+        load_scope_dir(dir, "tests",     YAML_SCOPE_TESTS,     dev) < 0 ||
         parse_main(path, dev) < 0) {
 
 
@@ -623,7 +627,7 @@ void yaml_device_free(yaml_device_t *dev)
         g_free(dev->file);
     /* Entries own their trees; dev->tree/flow/file are just aliases. */
     g_list_free_full(dev->devices, dev_entry_free);
-    schema_free(dev->schemas);
+    template_registry_free(dev->templates);
     if (dev->codecs)
         g_hash_table_destroy(dev->codecs);
     if (dev->flows)

@@ -1,54 +1,144 @@
 # Virtual USB Flash Drive (MSC Pendrive) Example
 
 This example demonstrates how to emulate a USB Mass Storage Class (MSC) flash drive
-(pendrive) using the Bulk-Only Transport (BOT) protocol and SCSI transparent command set.
+(pendrive) using the Bulk-Only Transport (BOT) protocol and SCSI transparent command set,
+leveraging **descriptor templates (`templates/`)** to cleanly derive multiple devices without
+descriptor duplication.
 
-## Structure
+## Directory Structure
 
-- `project.yaml`: Project manifest specifying connection and devices.
-- `devices/msc_disk.yaml`: Device descriptor, MSC interface descriptor (Class `0x08`, Subclass `0x06`, Protocol `0x50`), Bulk IN endpoint `0x81`, and Bulk OUT endpoint `0x02`.
-- `flows/msc_flow.yaml`: State machine handling enumeration and Bulk-Only Transport class requests (`GET_MAX_LUN`, `BOT Reset`), with `disk_from_file` attaching `payloads/disk.img`.
-- `payloads/disk.img`: 10 MiB disk image formatted with an MBR partition table and FAT16 filesystem containing `HELLO.TXT`.
-
-## Features
-
-- **Class**: USB Mass Storage Class (`0x08`).
-- **Subclass**: SCSI Transparent Command Set (`0x06`).
-- **Protocol**: Bulk-Only Transport (BBB / BOT) (`0x50`).
-- **Endpoints**:
-  - `0x81` Bulk IN (512 bytes packet size).
-  - `0x02` Bulk OUT (512 bytes packet size).
-- **Controls**:
-  - Responds to standard USB enumeration requests.
-  - Implements BOT `GET_MAX_LUN` (`bRequest=0xfe`, `bmRequestType=0xa1`) reporting 1 LUN (LUN 0).
-  - Implements BOT Mass Storage Reset (`bRequest=0xff`, `bmRequestType=0x21`).
-
-## Running the Example
-
-### Start usbvcr
-
-```bash
-usbvcr --yaml examples/msc/project.yaml
+```
+examples/msc/
+├── templates/
+│   └── msc_disk.yaml          # Base descriptor template (namespace: "msc")
+├── devices/
+│   ├── msc_sandisk.yaml       # SanDisk Cruzer Blade (extends msc.* templates)
+│   ├── msc_kingston.yaml      # Kingston DataTraveler (extends msc.* templates)
+│   └── msc_corsair.yaml       # Corsair Flash Voyager (extends msc.* templates)
+├── flows/
+│   └── msc_flow.yaml          # Bulk-Only Transport state machine & SCSI disk handler
+├── payloads/
+│   └── disk.img               # 10 MiB disk image formatted with MBR + FAT16 (HELLO.TXT)
+├── project.yaml               # Port 4000 manifest (SanDisk)
+├── project_kingston.yaml      # Port 4001 manifest (Kingston)
+└── project_corsair.yaml       # Port 4002 manifest (Corsair)
 ```
 
-### Connect to QEMU
+---
 
-Launch QEMU with a redirected USB device:
+## Descriptor Templating Architecture
+
+### 1. Base Descriptor Template (`templates/msc_disk.yaml`)
+
+Defines reusable USB Mass Storage descriptor templates under the `msc` namespace:
+- `msc.device_descriptor`: Standard USB 2.0 device descriptor with `idVendor: null` and `idProduct: null`.
+- `msc.configuration_descriptor`: Standard 1-interface, 2-endpoint Bulk-Only Transport layout (`0x08:0x06:0x50`, EPs `0x81` and `0x02`, 512-byte max packet size).
+
+```yaml
+namespace: "msc"
+
+device_descriptor:
+  bLength: 18
+  bDescriptorType: 0x01
+  bcdUSB: 0x0200
+  bDeviceClass: 0x00
+  bMaxPacketSize0: 64
+  idVendor: null
+  idProduct: null
+  bcdDevice: 0x0100
+  ...
+```
+
+### 2. Concrete Devices (`devices/`)
+
+Each device imports the template definition and extends it with its own specific identifiers:
+
+```yaml
+# devices/msc_sandisk.yaml
+imports:
+  - "templates/msc_disk.yaml"
+
+device_descriptor:
+  extends: "msc.device_descriptor"
+  idVendor: 0x0781          # SanDisk Corp.
+  idProduct: 0x5567         # Cruzer Blade
+
+configurations:
+  - extends: "msc.configuration_descriptor"
+```
+
+```yaml
+# devices/msc_kingston.yaml
+imports:
+  - "templates/msc_disk.yaml"
+
+device_descriptor:
+  extends: "msc.device_descriptor"
+  idVendor: 0x0951          # Kingston Technology
+  idProduct: 0x1666         # DataTraveler 100 G3
+
+configurations:
+  - extends: "msc.configuration_descriptor"
+```
+
+```yaml
+# devices/msc_corsair.yaml
+imports:
+  - "templates/msc_disk.yaml"
+
+device_descriptor:
+  extends: "msc.device_descriptor"
+  idVendor: 0x1b1c          # Corsair
+  idProduct: 0x1a03         # Flash Voyager
+
+configurations:
+  - extends: "msc.configuration_descriptor"
+```
+
+---
+
+## Running Three Devices Simultaneously (Ports 4000, 4001, 4002)
+
+### 1. Launch QEMU with 3 Redirection Ports
+
 ```bash
 qemu-system-x86_64 \
     -enable-kvm -m 2048 \
-    -chardev socket,id=usbredir,host=127.0.0.1,port=4000 \
-    -device qemu-xhci \
-    -device usb-redir,chardev=usbredir \
+    -device qemu-xhci,id=xhci \
+    -chardev socket,id=usbredir0,host=127.0.0.1,port=4000,server=on,wait=off \
+    -device usb-redir,bus=xhci.0,chardev=usbredir0 \
+    -chardev socket,id=usbredir1,host=127.0.0.1,port=4001,server=on,wait=off \
+    -device usb-redir,bus=xhci.0,chardev=usbredir1 \
+    -chardev socket,id=usbredir2,host=127.0.0.1,port=4002,server=on,wait=off \
+    -device usb-redir,bus=xhci.0,chardev=usbredir2 \
     -cdrom linux.iso
 ```
 
-### Verification inside Guest
+### 2. Start the Three USB VCR Instances
+
+In three separate terminals:
 
 ```bash
-lsusb -v -d 0781:5567
+# Terminal 1: Port 4000 (SanDisk)
+usbvcr --yaml examples/msc/project.yaml
+
+# Terminal 2: Port 4001 (Kingston)
+usbvcr --yaml examples/msc/project_kingston.yaml
+
+# Terminal 3: Port 4002 (Corsair)
+usbvcr --yaml examples/msc/project_corsair.yaml
+```
+
+### 3. Verification inside the Guest VM
+
+```bash
+# All three devices will be listed with their respective vendor and product IDs:
+lsusb
+# ID 0781:5567 SanDisk Corp. Cruzer Blade
+# ID 0951:1666 Kingston Technology DataTraveler 100 G3
+# ID 1b1c:1a03 Corsair Flash Voyager
+
+# Check SCSI block device attachments
 dmesg | grep -i "usb-storage"
-sudo fdisk -l /dev/sdb
-sudo mkdir -p /mnt/usb && sudo mount /dev/sdb1 /mnt/usb
-cat /mnt/usb/HELLO.TXT
+lsblk
 ```

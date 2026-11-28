@@ -8,26 +8,31 @@ and describes what is missing and why it matters.
 
 ## High Priority
 
-### `[yaml/diagnostics]` Rich error diagnostics and source-location reporting for malformed device trees
-**File:** `src/lib/usb_node.c:282-321`, `src/lib/yaml/tree.c`, `src/backends/yaml_backend.c:308-312`
+### `[yaml/diagnostics]` Rich error diagnostics, dry-run validation, and semantic descriptor checks
+**File:** `src/lib/usb_node.c:337-375`, `src/lib/yaml/tree.c`, `src/backends/yaml_backend.c:345`, `src/main.c`
 **Complexity:** Medium
 
 When a device YAML has missing required properties, type mismatches, or malformed
 scalars, `usb_node_validate()` immediately returns `-1` on the first encountered
 `USB_PROP_UNKNOWN` with only a debug-level log. The backend simply outputs:
 `"There are some NULL props in devices for <path> (`--debug` shows them)."`.
-This makes debugging malformed manifests difficult because it provides:
-1. No source location (file path, line, or column number).
-2. No descriptor hierarchy path (e.g. `device -> configurations[0] -> interfaces[0] -> endpoints[1] -> wMaxPacketSize`).
-3. Immediate abort on first failure rather than collecting and displaying all validation errors at once.
-4. No schema-level checks for missing mandatory USB descriptor fields (e.g., missing `bLength`, `bDescriptorType`, or `bNumInterfaces`).
+Furthermore, there is no standalone `--check` or `--dry-run` CLI mode to inspect
+descriptors without immediately attempting a network connection.
+
+**Why it matters:**
+1. **Unfilled `null` placeholders break binary wire layout:** Templates use `null` as abstract parameters (e.g. `idVendor: null`). If left unfilled, `usb_node_serialize()` skips the field completely, shrinking the descriptor byte length and corrupting all subsequent field offsets.
+2. **No `--check` / `--dry-run` flag:** Callers cannot validate manifests in CI or scripts without launching a real QEMU connection.
+3. **No string descriptor validation:** String index references (`iManufacturer`, `iProduct`, `iSerialNumber`) are not verified against declared entries in the `strings:` map.
+4. **No spec-level validation:** Descriptor lengths (`bLength != 18` for device descriptor, `9` for config/interface, `7` for endpoints) and standard descriptor types are not verified before serialization.
+5. **No source location:** No file path, line, or column numbers reported when validation fails.
 
 **Target Improvements:**
-* Preserve libyaml `start_mark.line` and `start_mark.column` during `yaml_tree_load()`.
+* Add `--check` / `--dry-run` CLI flag to parse, validate, and exit with code 0/1 without starting the execution engine.
 * Implement a diagnostic collector (`GList` of formatted errors) that walks the entire tree and accumulates all invalid/null properties.
+* Validate string descriptor index references and string table integrity.
 * Print standard GCC-style diagnostic messages:
   `<file>:<line>:<col>: error: field '<name>' in <descriptor_path> is undefined or malformed (expected uint8_t, got null)`
-* Add schema cross-validation to warn about omitted fields that are required by the USB 2.0 / 3.x specifications before attempting serialization.
+* Add template cross-validation for mandatory USB descriptor fields before attempting serialization.
 
 ---
 
@@ -68,13 +73,13 @@ eliminates boilerplate cleanup in error handling code paths.
 ---
 
 ### `[api/error-handling]` Standardize error propagation across parsing APIs using `GError`
-**File:** `src/lib/yaml/loader.c`, `src/lib/yaml/tree.c`, `src/lib/flow.c`, `src/lib/schema.c`
+**File:** `src/lib/yaml/loader.c`, `src/lib/yaml/tree.c`, `src/lib/flow.c`, `src/lib/template.c`
 **Complexity:** Medium
 
-Public parsing and loading functions (`yaml_tree_load()`, `flow_load()`, `schema_register()`,
+Public parsing and loading functions (`yaml_tree_load()`, `flow_load()`, `template_register()`,
 `usb_node_validate()`) currently return a bare `-1` or `NULL` upon failure, losing the specific
 cause of error. Callers are unable to distinguish between I/O errors, YAML syntax errors,
-schema validation failures, or missing files. Standardizing these APIs to follow the GLib
+template validation failures, or missing files. Standardizing these APIs to follow the GLib
 `GError **error` convention (`USBVCR_ERROR` quark) enables rich, context-aware error propagation
 directly up to CLI diagnostic outputs and test suites.
 
@@ -92,16 +97,20 @@ or silently truncate data.
 
 ---
 
-### `[storage/msc]` Automated unit tests for disk_provider and SCSI commands
-**File:** `src/lib/storage/disk_provider.c`, `tests/`
-**Complexity:** Low
+### `[engine/multi-device]` Concurrent multi-device emulation across multiple ports/connections
+**File:** `src/lib/yaml/loader.c:480-495`, `src/backends/yaml_backend.c`, `src/main.c`, `src/engine/`
+**Complexity:** Medium
 
-The `disk_provider` component implements SCSI transparent command set (SPC/SBC)
-over Bulk-Only Transport (BOT), verified end-to-end against real Linux guest VMs.
-A dedicated unit test suite (`tests/lib/test_disk_provider.c`) should be added to
-exercise and validate individual SCSI CDB parsing (INQUIRY, READ CAPACITY 10/16,
-MODE SENSE, READ 10, WRITE 10, SYNCHRONIZE CACHE, REQUEST SENSE) and CSW tag/residue
-pairing against synthetic test images.
+A project manifest's `devices:` block is parsed as a list of `{device, flow}` pairs,
+but `yaml_loader.c` currently aliases only the first entry (`dev->tree = first->tree`)
+and `main.c` launches a single engine on a single TCP port. Connecting multiple
+devices (e.g., three MSC drives on ports 4000, 4001, and 4002) currently requires
+spawning separate `usbvcr` processes.
+
+**Target Improvements:**
+* Allow per-device `connection:` blocks in `devices:` (e.g. `{ device: "...", connection: { port: "4001" } }`).
+* Support spawning and multiplexing multiple engine/usbredir instances in an event-driven loop within a single `usbvcr` process.
+* Enable multi-device testing from a single unified project manifest.
 
 ---
 
@@ -190,4 +199,4 @@ enumerate correctly.
 
 ---
 
-*Last updated: 2026-11-26*
+*Last updated: 2026-11-27*

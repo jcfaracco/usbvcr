@@ -32,7 +32,7 @@ descriptors without immediately attempting a network connection.
 * Validate string descriptor index references and string table integrity.
 * Print standard GCC-style diagnostic messages:
   `<file>:<line>:<col>: error: field '<name>' in <descriptor_path> is undefined or malformed (expected uint8_t, got null)`
-* Add schema cross-validation for mandatory USB descriptor fields before attempting serialization.
+* Add template cross-validation for mandatory USB descriptor fields before attempting serialization.
 
 ---
 
@@ -73,13 +73,13 @@ eliminates boilerplate cleanup in error handling code paths.
 ---
 
 ### `[api/error-handling]` Standardize error propagation across parsing APIs using `GError`
-**File:** `src/lib/yaml/loader.c`, `src/lib/yaml/tree.c`, `src/lib/flow.c`, `src/lib/schema.c`
+**File:** `src/lib/yaml/loader.c`, `src/lib/yaml/tree.c`, `src/lib/flow.c`, `src/lib/template.c`
 **Complexity:** Medium
 
-Public parsing and loading functions (`yaml_tree_load()`, `flow_load()`, `schema_register()`,
+Public parsing and loading functions (`yaml_tree_load()`, `flow_load()`, `template_register()`,
 `usb_node_validate()`) currently return a bare `-1` or `NULL` upon failure, losing the specific
 cause of error. Callers are unable to distinguish between I/O errors, YAML syntax errors,
-schema validation failures, or missing files. Standardizing these APIs to follow the GLib
+template validation failures, or missing files. Standardizing these APIs to follow the GLib
 `GError **error` convention (`USBVCR_ERROR` quark) enables rich, context-aware error propagation
 directly up to CLI diagnostic outputs and test suites.
 
